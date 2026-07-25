@@ -1,3 +1,28 @@
+podup (3.0.2) unstable; urgency=medium
+
+  Fixes
+
+  * cp into a container, and watch sync with it, work on Podman 6 again.
+    The container-archive PUT applies the tar and then closes the
+    connection without an HTTP response there, which read as a failure
+    even though the file had landed. Both now confirm the upload by the
+    destination's mtime moving, and report a clear error when it cannot
+    be confirmed rather than a raw transport one. Podman 5 is unchanged.
+  * stats exits non-zero when its stream is truncated while a container it
+    was sampling is still running, so a monitor scraping it no longer
+    reads a cut-off sample as a complete one. A stream that ends because
+    every sampled container stopped still exits zero.
+
+  Docs
+
+  * The benchmark is re-measured on 3.0.1 (it tracks the prior release
+    within noise); the exec reference and the -T help text describe the
+    both-ends-are-terminals rule and no longer read as Unix-only; the
+    apt install one-liner points at glyndor.net; the man page covers
+    autostart, version and the interactive run/exec path.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Fri, 24 Jul 2026 21:20:00 -0500
+
 podup (3.0.1) unstable; urgency=medium
 
   Docs
