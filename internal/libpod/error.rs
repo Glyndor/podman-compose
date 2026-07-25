@@ -121,6 +121,15 @@ impl PodmanError {
 		matches!(self, Self::Api { status, .. } if *status == code)
 	}
 
+	/// True when the server closed the connection before completing the HTTP
+	/// response (hyper's `IncompleteMessage`). The container-archive PUT on
+	/// Podman 6 applies the archive and then closes without a response, so `cp`
+	/// uses this to tell that specific case apart and re-verify the copy landed
+	/// rather than failing an upload that actually succeeded (#1097).
+	pub(crate) fn is_incomplete_message(&self) -> bool {
+		matches!(self, Self::Hyper(e) if e.is_incomplete_message())
+	}
+
 	/// How a streaming read ended, for the one question podup cannot currently
 	/// answer: was the stream *finished* or *broken*?
 	///

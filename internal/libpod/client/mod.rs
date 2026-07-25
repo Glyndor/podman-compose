@@ -60,6 +60,18 @@ pub struct Client {
 	socket_path: String,
 }
 
+/// The decoded `X-Docker-Container-Path-Stat` header — a container path's Go
+/// file `mode` and `mtime`. `mtime` is an RFC3339 string compared only for
+/// equality (did a `cp` change the entry?), never parsed into a time. The
+/// runtime's JSON uses lowercase keys (`{"name":…,"size":…,"mode":…,"mtime":…}`).
+#[derive(serde::Deserialize, Default)]
+struct PathStat {
+	#[serde(default)]
+	mode: u64,
+	#[serde(default)]
+	mtime: String,
+}
+
 /// Attach the socket path and a way forward to a connection failure.
 ///
 /// The operator saw `podman socket connection error: No such file or directory
@@ -513,24 +525,26 @@ impl Client {
 
 	/// `PUT` with raw bytes body → expect 2xx.
 	///
-	/// The failure mode here is #1097: `cp` into a container, and `watch` sync
-	/// with it, have never worked on Podman 6 — the connection closes before the
-	/// response completes. Copying *out* (`GET`) is fine on both majors, so it is
-	/// specific to this direction.
-	///
-	/// Diagnostic rather than fix: podup cannot reproduce it on Podman 5, so this
-	/// names what happened for the nested-virt lane to report. The leading
-	/// hypothesis was a `Content-Length` versus chunked mismatch, and that is now
-	/// ruled out — see `a_buffered_put_body_reports_an_exact_size` — so what
-	/// libpod 6 objects to is still open.
+	/// #1097 lives on top of this call: the container-archive PUT on Podman 6
+	/// applies the tar and then closes the connection before completing the
+	/// response, which surfaces here as an `IncompleteMessage`. The recovery — the
+	/// endpoint applies the upload, so re-verify the destination changed rather
+	/// than fail a copy that landed — belongs to the caller, which knows the
+	/// destination (`Engine::put_archive_verified`). This method just reports the
+	/// outcome; the caller keys the recovery off
+	/// `PodmanError::is_incomplete_message`.
 	pub async fn put_bytes_ok(&self, path: &str, bytes: Bytes, content_type: &str) -> Result<()> {
 		let len = bytes.len();
 		let req = Self::build_request(Method::PUT, path, full(bytes), Some(content_type))?;
 		let resp = match self.send(req, Some(READ_TIMEOUT)).await {
 			Ok(r) => r,
 			Err(e) => {
-				tracing::warn!(
-					"PUT {path} ({content_type}, {len} bytes) failed [{}]: {e}",
+				// Debug, not warn: `cp` handles the Podman-6 IncompleteMessage on
+				// this endpoint by re-verifying the copy landed (#1097), so a
+				// warning here would cry "failed" on a copy that succeeded. A
+				// genuinely failed PUT surfaces through the returned error.
+				tracing::debug!(
+					"PUT {path} ({content_type}, {len} bytes) ended [{}]: {e}",
 					e.stream_end_kind()
 				);
 				return Err(e);
@@ -540,12 +554,12 @@ impl Client {
 		Self::check_status(status, &body)
 	}
 
-	/// `HEAD` a container-archive path, returning `Some(is_dir)` when it exists or
-	/// `None` on 404. Reads the `X-Docker-Container-Path-Stat` header (base64 JSON
-	/// carrying a Go file `mode`); the directory bit is `os.ModeDir` (`1 << 31`).
-	/// Lets `cp` tell an existing destination directory (copy into it) from a
-	/// target name (rename on copy), matching `docker cp`.
-	pub async fn head_path_is_dir(&self, path: &str) -> Result<Option<bool>> {
+	/// `HEAD` a container-archive path and decode its `X-Docker-Container-Path-Stat`
+	/// header, returning `Some(stat)` when the path exists or `None` on 404. The
+	/// header is base64 JSON carrying the Go file `mode`, `size` and `mtime`.
+	/// Shared by [`head_path_is_dir`](Self::head_path_is_dir) and
+	/// [`head_path_mtime`](Self::head_path_mtime).
+	async fn head_container_path_stat(&self, path: &str) -> Result<Option<PathStat>> {
 		use base64::Engine as _;
 
 		let req = Self::build_request(Method::HEAD, path, full(Bytes::new()), None)?;
@@ -564,8 +578,11 @@ impl Client {
 			return Ok(None);
 		}
 		Self::check_status(status, &body)?;
+		// The path exists but the runtime sent no stat header: report existence
+		// with a zeroed stat rather than failing (matches the prior behaviour,
+		// which treated a missing header as "exists, not a directory").
 		let Some(stat) = stat else {
-			return Ok(Some(false));
+			return Ok(Some(PathStat::default()));
 		};
 		let json = base64::engine::general_purpose::STANDARD
 			.decode(stat.as_bytes())
@@ -573,13 +590,29 @@ impl Client {
 				status: 0,
 				message: format!("malformed container path stat: {e}"),
 			})?;
-		#[derive(serde::Deserialize)]
-		struct Stat {
-			mode: u64,
-		}
-		let parsed: Stat = serde_json::from_slice(&json).map_err(PodmanError::Json)?;
+		Ok(Some(
+			serde_json::from_slice(&json).map_err(PodmanError::Json)?,
+		))
+	}
+
+	/// `HEAD` a container-archive path, returning `Some(is_dir)` when it exists or
+	/// `None` on 404. Lets `cp` tell an existing destination directory (copy into
+	/// it) from a target name (rename on copy), matching `docker cp`.
+	pub async fn head_path_is_dir(&self, path: &str) -> Result<Option<bool>> {
 		// Go's os.ModeDir is the high bit of the 32-bit FileMode.
-		Ok(Some(parsed.mode & (1 << 31) != 0))
+		Ok(self
+			.head_container_path_stat(path)
+			.await?
+			.map(|s| s.mode & (1 << 31) != 0))
+	}
+
+	/// `HEAD` a container-archive path, returning its `mtime` string when it
+	/// exists or `None` on 404. `cp` uses this to tell a copy actually *landed*
+	/// (the entry's mtime changed to the source's) from a stale entry that was
+	/// already there, when the Podman-6 archive PUT closes without a response
+	/// (#1097). The value is compared as an opaque string, not parsed.
+	pub(crate) async fn head_path_mtime(&self, path: &str) -> Result<Option<String>> {
+		Ok(self.head_container_path_stat(path).await?.map(|s| s.mtime))
 	}
 
 	/// `DELETE` → `Ok(true)` if the resource existed and was removed, `Ok(false)`
