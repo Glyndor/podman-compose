@@ -15,6 +15,14 @@
 # all pass now. The claim "cannot pass under nested virt" was made honestly, with
 # a run, and was still wrong: the physical host that proved 155/155 also had a
 # working journald, so the comparison could not see the difference.
+#
+# 2026-07-25: the same mistake again, and the same shape. run_flags::engine_run_
+# applies_volume_publish_and_interactive was never about nested virt either — it
+# bind-mounted a host directory with no SELinux relabel, so on an enforcing host
+# the container read it as `Permission denied`. Measured on Fedora 44 + Podman
+# 5.8.1 with plain `podman run`, no podup involved: without `z` the read is
+# denied, with `z` it succeeds. The test now asks for the relabel a user on such
+# a host writes too, and passes there. My physical host runs no SELinux, which is
+# once more why the 155/155 comparison could not see the difference.
 
 niche::engine_events_stream_connects
-run_flags::engine_run_applies_volume_publish_and_interactive
