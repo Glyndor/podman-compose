@@ -65,6 +65,22 @@ fn containers_query(wanted: &HashSet<String>) -> String {
 		.collect::<String>()
 }
 
+/// Whether a `stats --stream` stream that ended with an error broke while a
+/// sampled container was still running.
+///
+/// The stream lives as long as any sampled container runs and ends once none
+/// remain, so the error is a real failure only when the re-checked running set
+/// still holds one of the containers the stream was sampling. When every
+/// sampled container has stopped, the end was expected and the missing terminal
+/// frame is the finished-vs-broken ambiguity (#1104), not a fault. Pure so the
+/// decision is unit-tested without a live socket.
+fn stats_stream_broke_mid_sample(
+	sampled: &HashSet<String>,
+	still_running: &HashSet<String>,
+) -> bool {
+	sampled.iter().any(|c| still_running.contains(c))
+}
+
 /// Deserialize a map field, treating an explicit JSON `null` as the default
 /// (empty) map. libpod sends `"Network": null` for a container with no
 /// interfaces, which plain `#[serde(default)]` does not tolerate.
@@ -333,20 +349,58 @@ impl Engine {
 			.await
 			.map_err(ComposeError::Podman)?;
 		let mut frames = parse_json_lines::<StatsReport>(resp.into_body());
-		// Raised from `debug!` to `warn!` so a stream that dies mid-sample is at
-		// least visible at the default level — it used to vanish entirely, and a
-		// monitor scraping `stats` read a truncated sample as a complete one.
-		//
-		// Not fatal, though. The sibling streaming commands showed on the live
-		// lane that a finished libpod stream can end in a way hyper reports as an
-		// error on some Podman versions, so failing the command here would fail
-		// runs that worked. Making the exit code trustworthy needs that
-		// distinction first.
 		while let Some(frame) = frames.next().await {
 			match frame {
 				Ok(report) => print_frame(&report, &running, &stopped, &opts),
 				Err(e) => {
-					tracing::warn!("stats: stream ended early [{}]: {e}", e.stream_end_kind());
+					// A `stats --stream` stream lives as long as any sampled
+					// container is running, and ends once none remain. libpod
+					// signals that end with a chunked terminator, but a lost
+					// terminator (a dropped connection, or a version that omits it)
+					// reaches here as an `Err` that is *indistinguishable* from a
+					// real mid-sample break at the transport layer (#1104). Resolve
+					// it out of band: re-check what is still running. If nothing the
+					// stream was sampling is alive, the end was expected and the
+					// command succeeded; if something is still running, the stream
+					// truncated a live sample and the command failed — which is the
+					// exit code a monitor scraping `stats` needs (#1080).
+					//
+					// The re-check is point-in-time: it samples state a moment after
+					// the break, so a genuine break that happens to coincide with
+					// every sampled container stopping is knowingly tolerated as a
+					// clean end — the transport layer cannot tell the two apart, and
+					// the sampled containers are gone either way.
+					let still_running = match self.target_containers(file, target_services).await {
+						Ok(targets) => targets
+							.into_iter()
+							.filter(|c| c.running)
+							.map(|c| c.name)
+							.collect::<HashSet<String>>(),
+						// Fail closed: an unreadable running set is not confirmation
+						// the end was expected, so the original error stands rather
+						// than masking a possible failure. Decided here, at the point
+						// of the inconclusive re-check, so the guarantee does not
+						// depend on the sampled set being non-empty.
+						Err(_) => {
+							tracing::warn!(
+								"stats: stream ended and the running set could not be \
+								 re-checked [{}]: {e}",
+								e.stream_end_kind()
+							);
+							return Err(ComposeError::Podman(e));
+						}
+					};
+					if stats_stream_broke_mid_sample(&running, &still_running) {
+						tracing::warn!(
+							"stats: stream broke while a container was still running [{}]: {e}",
+							e.stream_end_kind()
+						);
+						return Err(ComposeError::Podman(e));
+					}
+					tracing::debug!(
+						"stats: stream ended as its containers stopped [{}]",
+						e.stream_end_kind()
+					);
 					break;
 				}
 			}

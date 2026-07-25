@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use crate::libpod::types::exec::{ExecCreateConfig, ExecCreateResponse, ExecStartConfig};
 use crate::libpod::{urlencoded, LogOutput, API_PREFIX};
-use bytes::Bytes;
 use futures_util::StreamExt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
@@ -318,18 +317,13 @@ impl Engine {
 			let _ = self.watch_exec(container, mkdir_p_argv(&dest_dir)).await;
 		}
 
-		let path = format!(
-			"{API_PREFIX}/containers/{}/archive?path={}",
-			urlencoded(container),
-			urlencoded(&dest_dir),
-		);
-		self.client
-			// Gzipped, like `cp`'s: `watch` has its own copy of this upload rather
-			// than reusing `Engine::cp`, which is how the two drifted to different
-			// content types for the same body.
-			.put_bytes_ok(&path, Bytes::from(tar_bytes), "application/gzip")
-			.await
-			.map_err(ComposeError::Podman)?;
+		// Shared with `cp`: the same archive upload, and the same #1097 Podman-6
+		// apply-then-close handling (the endpoint applies the tar then closes
+		// without a response; the upload is confirmed by the entry's mtime moving).
+		// `watch` used to have its own copy of this PUT, which is how the two
+		// drifted apart and left sync unfixed on Podman 6.
+		self.put_archive_verified(container, &dest_dir, &entry_name, tar_bytes)
+			.await?;
 
 		info!("synced {} -> {target}", changed.display());
 		Ok(())
