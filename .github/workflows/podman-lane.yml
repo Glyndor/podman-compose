@@ -93,8 +93,18 @@ jobs:
                 # as Hyper(IncompleteMessage) and kin). A real failure reproduces on
                 # the second run, so this stabilises the lane for required-check gating
                 # without masking genuine bugs.
+                #
+                # `--test-threads=2` caps how many streaming tests hit the libpod
+                # socket at once. The nested-virt (VM-in-runner) transport is what
+                # drops connections mid-stream — measured: on a single-level VM
+                # (Podman 5.8.1 and 6.0.1) the same suite never drops a byte, so the
+                # flake is the double-virt socket under concurrent load, not a podup
+                # or libpod bug. Fewer concurrent streams means less peak pressure,
+                # which is the lever to shrink Podman 6's variable flaky tail toward
+                # a small, stable set that an identity list can gate (#1039). Kept at
+                # 2 rather than 1 so the suite still fits the VM's time budget.
                 for attempt in 1 2; do
-                  RUST_LOG=podup=warn cargo test --features test-helpers --test engine_integration > /tmp/cargo.log 2>&1
+                  RUST_LOG=podup=warn cargo test --features test-helpers --test engine_integration -- --test-threads=2 > /tmp/cargo.log 2>&1
                   RC=$?
                   [ "$RC" -eq 0 ] && break
                   grep -qE 'IncompleteMessage|connection closed before message completed|channel closed|Connection reset' /tmp/cargo.log || break
