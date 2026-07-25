@@ -202,22 +202,121 @@ impl Engine {
 		.await
 		.map_err(|e| ComposeError::Build(e.to_string()))??;
 
+		let entry = rename.clone().unwrap_or_else(|| {
+			src.file_name()
+				.map(|n| n.to_string_lossy().into_owned())
+				.unwrap_or_default()
+		});
+		self.put_archive_verified(&container_name, &extract_dir, &entry, tar_bytes)
+			.await
+	}
+
+	/// PUT a gzipped tar to a container's archive endpoint at `dir`, extracting
+	/// it there, and confirm it landed — the upload path shared by `cp` and
+	/// `watch` sync.
+	///
+	/// #1097: on Podman 6 the archive endpoint applies the tar and then closes
+	/// the connection *without* an HTTP response, which hyper reports as
+	/// `IncompleteMessage` even though the copy landed (the content does appear —
+	/// measured on 6.0.1; every raw request to the same endpoint gets a clean
+	/// 200, so the trigger is client-side and could not be stripped out). To tell
+	/// that apply-then-close apart from a *genuine* upload failure (a dropped
+	/// socket, a truncated body), capture `dir/entry`'s mtime before the PUT and,
+	/// on an `IncompleteMessage`, treat the copy as landed only if that mtime
+	/// moved — the extracted file takes the source's mtime, so an unchanged one
+	/// means a failed upload left the old entry in place. Fails, rather than
+	/// guessing, when the entry has no name (`cp . svc:/`), when the pre- or
+	/// post-PUT stat cannot be read, or when the mtime did not move.
+	///
+	/// Known limit: the mtime of a *directory* entry moves only when its own
+	/// children are added or removed, so re-syncing a tree whose only change is
+	/// deeper than the top level is reported as unverifiable (fail-closed, never a
+	/// false success). Inert on Podman 5, which returns a normal response.
+	pub(super) async fn put_archive_verified(
+		&self,
+		container: &str,
+		dir: &str,
+		entry: &str,
+		tar_bytes: Vec<u8>,
+	) -> Result<()> {
 		let path = format!(
 			"{API_PREFIX}/containers/{}/archive?path={}",
-			urlencoded(&container_name),
-			urlencoded(&extract_dir),
+			urlencoded(container),
+			urlencoded(dir),
 		);
-		self.client
-			// `pack_path` gzips, so the body is a gzipped tar and saying
-			// `application/x-tar` was simply false. Podman 5 sniffs the magic bytes
-			// and forgives either label. This does NOT fix #1097 — the lane proved
-			// Podman 6 rejects the upload identically both ways — it just stops
-			// podup lying about what it sends.
+		let verify_path = (!entry.is_empty()).then(|| {
+			format!(
+				"{API_PREFIX}/containers/{}/archive?path={}",
+				urlencoded(container),
+				urlencoded(&join_archive_path(dir, entry)),
+			)
+		});
+		// The pre-PUT mtime, only when it can be read cleanly. `None` means
+		// "unknown" (no verifiable entry, or the stat failed) and forces a later
+		// IncompleteMessage to fail rather than guess.
+		let pre_mtime = match &verify_path {
+			Some(p) => self.client.head_path_mtime(p).await.ok(),
+			None => None,
+		};
+
+		// `application/gzip` is the honest label for the gzipped tar; Podman
+		// sniffs the magic bytes and forgives either.
+		let Err(e) = self
+			.client
 			.put_bytes_ok(&path, Bytes::from(tar_bytes), "application/gzip")
 			.await
-			.map_err(ComposeError::Podman)?;
+		else {
+			return Ok(());
+		};
+		// Only the Podman-6 apply-then-close is recoverable; any other error is a
+		// genuine failure and propagates unchanged.
+		if !e.is_incomplete_message() {
+			return Err(ComposeError::Podman(e));
+		}
+		let landed = match (&verify_path, pre_mtime) {
+			(Some(p), Some(pre)) => match self.client.head_path_mtime(p).await {
+				Ok(post) => copy_landed(pre.as_deref(), post.as_deref()),
+				Err(stat_err) => {
+					tracing::debug!(
+						"cp: could not re-verify {p} after an incomplete PUT: {stat_err}"
+					);
+					false
+				}
+			},
+			_ => false,
+		};
+		if landed {
+			return Ok(());
+		}
+		// The upload finished but its result could not be confirmed. Say so, with
+		// an actionable hint, instead of surfacing the raw transport error.
+		Err(ComposeError::Copy(format!(
+			"the upload to {dir} could not be confirmed — the container runtime closed the \
+			 connection without a response and the destination did not change. The copy may \
+			 or may not have landed; check {dir} in the container."
+		)))
+	}
+}
 
-		Ok(())
+/// Whether a `cp`/sync whose archive PUT ended in an `IncompleteMessage`
+/// actually landed, from the destination entry's mtime before and after the
+/// PUT. The entry must exist now (`post` is `Some`) and its mtime must differ
+/// from before — the extracted file takes the source's mtime, so an unchanged
+/// mtime means a failed upload left the old entry in place. A vanished entry, or
+/// one whose mtime did not move, is "did not land". Pure so the decision is
+/// unit-tested without a container.
+fn copy_landed(pre: Option<&str>, post: Option<&str>) -> bool {
+	post.is_some() && post != pre
+}
+
+/// Join a container directory and an entry name into one path, without doubling
+/// the separator when the directory already ends in `/` (so root `/` yields
+/// `/name`, not `//name`). Pure so the join is unit-tested without a container.
+fn join_archive_path(dir: &str, entry: &str) -> String {
+	if dir.ends_with('/') {
+		format!("{dir}{entry}")
+	} else {
+		format!("{dir}/{entry}")
 	}
 }
 
@@ -281,7 +380,37 @@ fn parse_endpoint(s: &str) -> Option<(&str, &str)> {
 
 #[cfg(test)]
 mod tests {
-	use super::parse_endpoint;
+	use super::{copy_landed, join_archive_path, parse_endpoint};
+
+	#[test]
+	fn join_archive_path_does_not_double_the_separator() {
+		// The #1097 re-verify stats `<dir>/<entry>`; a dir already ending in `/`
+		// (notably root) must not produce `//entry`, which libpod reads as a
+		// different path and 404s, turning a landed copy into a false failure.
+		assert_eq!(join_archive_path("/tmp", "f.txt"), "/tmp/f.txt");
+		assert_eq!(join_archive_path("/tmp/", "f.txt"), "/tmp/f.txt");
+		assert_eq!(join_archive_path("/", "f.txt"), "/f.txt");
+	}
+
+	#[test]
+	fn copy_landed_requires_the_entry_to_exist_and_its_mtime_to_move() {
+		// A brand-new destination: absent before, present after -> landed.
+		assert!(copy_landed(None, Some("2026-01-01T00:00:00Z")));
+		// An overwrite that applied: the entry's mtime changed to the source's.
+		assert!(copy_landed(
+			Some("2026-01-01T00:00:00Z"),
+			Some("2026-06-01T00:00:00Z")
+		));
+		// An overwrite whose PUT actually failed: the old entry is still there,
+		// unchanged. This is the silent-success the mtime check exists to prevent.
+		assert!(!copy_landed(
+			Some("2026-01-01T00:00:00Z"),
+			Some("2026-01-01T00:00:00Z")
+		));
+		// The entry vanished (or never appeared): not landed.
+		assert!(!copy_landed(Some("2026-01-01T00:00:00Z"), None));
+		assert!(!copy_landed(None, None));
+	}
 
 	#[test]
 	fn parse_service_colon_path() {
