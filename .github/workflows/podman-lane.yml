@@ -80,6 +80,27 @@ jobs:
                 export XDG_RUNTIME_DIR=/run/user/$(id -u)
                 systemctl --user start podman.socket
                 export PODMAN_SOCKET=$XDG_RUNTIME_DIR/podman/podman.sock
+                # Podman builds the rootless netns by bind-mounting the host's
+                # resolv.conf, and here /etc/resolv.conf is a symlink to a stub
+                # that systemd-resolved has not necessarily written by the time
+                # cloud-init reaches this script. Losing that race makes every
+                # container fail to start with `rootless netns: mount resolv.conf
+                # ... no such file or directory` — ten of Podman 6's thirteen
+                # failures in run 30141959995 were that error or its wake, and the
+                # nightly before it did not show the signature once, which is what
+                # a race looks like.
+                #
+                # So wait for the link to resolve, and report how long it took. The
+                # number is the point: if it is 0s on every run then the race is
+                # not the explanation and this says so out loud rather than fixing
+                # something that was never broken (#1039).
+                WAITED=0
+                until [ -e /etc/resolv.conf ] || [ "$WAITED" -ge 60 ]; do
+                  WAITED=$((WAITED + 1))
+                  sleep 1
+                done
+                echo "=== resolv.conf resolved after ${WAITED}s ==="
+                [ -e /etc/resolv.conf ] || echo "::warning::/etc/resolv.conf is still a dangling symlink after ${WAITED}s"
                 # In here Podman is guaranteed, so a test that cannot reach it
                 # must fail rather than skip: a skipped test reports `ok`, and a
                 # VM whose socket never came up would otherwise look like a
