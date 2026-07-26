@@ -23,7 +23,26 @@ async fn file_config_bound() {
 	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	// Read the config from inside the container. Asserting only that `up` and
+	// `down` succeed passes just as happily when the config is missing, empty or
+	// unreadable — the mount is not the effect, the content is.
+	let read = engine
+		.exec_with_options(
+			&file,
+			"web",
+			vec![
+				"sh".to_string(),
+				"-c".to_string(),
+				"test \"$(cat /filecfg)\" = key=from-file".to_string(),
+			],
+			podup::ExecOptions::default(),
+		)
+		.await;
 	engine.down(&file).await.unwrap();
+	assert!(
+		read.is_ok(),
+		"config /filecfg did not carry the file's contents: {read:?}"
+	);
 }
 
 #[test]
@@ -43,7 +62,23 @@ fn env_config_materialized() {
 			.unwrap();
 
 			engine.up(&file).await.unwrap();
+			let read = engine
+				.exec_with_options(
+					&file,
+					"web",
+					vec![
+						"sh".to_string(),
+						"-c".to_string(),
+						"test \"$(cat /envcfg)\" = cfg-from-env".to_string(),
+					],
+					podup::ExecOptions::default(),
+				)
+				.await;
 			engine.down(&file).await.unwrap();
+			assert!(
+				read.is_ok(),
+				"config /envcfg did not carry the environment variable's value: {read:?}"
+			);
 		});
 	});
 }
@@ -265,16 +300,28 @@ async fn secret_long_form_ref() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
-	engine
+	// `cat` alone only proves the path exists — it exits 0 on an empty or wrong
+	// file, and says nothing about the `mode:`/`uid:` the compose file asks for.
+	// Check the content and the permissions the long form actually requested.
+	let read = engine
 		.exec_with_options(
 			&file,
 			"web",
-			vec!["cat".to_string(), "/run/secrets/custom_name".to_string()],
+			vec![
+				"sh".to_string(),
+				"-c".to_string(),
+				"test \"$(cat /run/secrets/custom_name)\" = topsecret \
+				 && test \"$(stat -c '%a %u' /run/secrets/custom_name)\" = '400 0'"
+					.to_string(),
+			],
 			podup::ExecOptions::default(),
 		)
-		.await
-		.unwrap();
+		.await;
 	engine.down(&file).await.unwrap();
+	assert!(
+		read.is_ok(),
+		"the long-form secret did not land at the requested target with mode 0400 and uid 0: {read:?}"
+	);
 }
 
 #[tokio::test]
@@ -291,16 +338,23 @@ async fn config_long_form_ref() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
-	engine
+	let read = engine
 		.exec_with_options(
 			&file,
 			"web",
-			vec!["cat".to_string(), "/etc/app.conf".to_string()],
+			vec![
+				"sh".to_string(),
+				"-c".to_string(),
+				"test \"$(cat /etc/app.conf)\" = key=value".to_string(),
+			],
 			podup::ExecOptions::default(),
 		)
-		.await
-		.unwrap();
+		.await;
 	engine.down(&file).await.unwrap();
+	assert!(
+		read.is_ok(),
+		"the long-form config did not land at /etc/app.conf with its content: {read:?}"
+	);
 }
 
 // ---------------------------------------------------------------------------
