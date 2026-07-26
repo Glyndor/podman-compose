@@ -175,6 +175,118 @@ async fn watch_sync_creates_missing_target_directory() {
 	);
 }
 
+/// `rebuild` was the one watch action with no coverage at all, and it is the
+/// only one that goes all the way back through `build` and container recreation
+/// rather than touching a running container. It reads its trigger file into the
+/// image, so a rebuild that silently did nothing — or that rebuilt the image and
+/// left the old container running — is visible as stale content.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn watch_rebuild_recreates_the_container_from_the_new_image() {
+	let client = match podman().await {
+		Some(d) => d,
+		None => return,
+	};
+	let dir = tempfile::tempdir().unwrap();
+	fs::write(dir.path().join("app.txt"), b"v1").unwrap();
+	fs::write(
+		dir.path().join("Dockerfile"),
+		b"FROM alpine:latest\nCOPY app.txt /app.txt\nCMD [\"sleep\", \"infinity\"]\n",
+	)
+	.unwrap();
+
+	let proj = proj("wrb");
+	let engine = Engine::with_base_dir(client, proj.clone(), dir.path().to_path_buf());
+	let file = parse_str(
+		"services:\n  web:\n    build: .\n    develop:\n      watch:\n        - path: app.txt\n          action: rebuild\n",
+	)
+	.unwrap();
+
+	engine.up(&file).await.unwrap();
+	let cname = format!("{proj}-web-1");
+	// The image really did carry v1 before the change, so a stale read later means
+	// the rebuild did not happen rather than the fixture never being right.
+	let before = poll_synced(&engine, &cname, "/app.txt", "v1", 30).await;
+
+	let client2 = podup::podman::connect_from_env()
+		.or_else(|_| podup::podman::connect(None))
+		.unwrap();
+	let engine2 = Engine::with_base_dir(client2, proj.clone(), dir.path().to_path_buf());
+	let file2 = file.clone();
+	let handle = tokio::spawn(async move { engine2.watch(&file2).await });
+
+	// Give the watcher a moment to register before changing the file, then poll
+	// for the effect rather than assuming a fixed rebuild duration.
+	tokio::time::sleep(Duration::from_secs(2)).await;
+	fs::write(dir.path().join("app.txt"), b"v2").unwrap();
+	let rebuilt = poll_synced(&engine, &cname, "/app.txt", "v2", 120).await;
+
+	handle.abort();
+	let containers = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	engine.down(&file).await.unwrap();
+
+	assert!(before, "the image did not carry v1 before the change");
+	assert!(
+		rebuilt,
+		"the container still serves the old image, so rebuild did not recreate it"
+	);
+	assert_eq!(
+		containers.len(),
+		1,
+		"rebuild left the previous container behind: {containers:?}"
+	);
+}
+
+/// `sync+restart` is two effects in one action, and a test that only checks the
+/// file arrived would pass with the restart half missing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn watch_sync_and_restart_does_both() {
+	let client = match podman().await {
+		Some(d) => d,
+		None => return,
+	};
+	let dir = tempfile::tempdir().unwrap();
+	fs::write(dir.path().join("app.txt"), b"synced-value").unwrap();
+
+	let proj = proj("wsr");
+	let engine = Engine::with_base_dir(client, proj.clone(), dir.path().to_path_buf());
+	// The command appends one line per start. A restart re-runs it against the
+	// same (persisting) filesystem, so the line count is a container-scoped
+	// counter of how many times the process was started — unlike /proc/uptime,
+	// which is not namespaced and would report the host's.
+	let file = parse_str(
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"echo start >> /starts; sleep infinity\"]\n    develop:\n      watch:\n        - path: app.txt\n          action: sync+restart\n          target: /tmp/app.txt\n",
+	)
+	.unwrap();
+
+	engine.up(&file).await.unwrap();
+	let cname = format!("{proj}-web-1");
+
+	let client2 = podup::podman::connect_from_env()
+		.or_else(|_| podup::podman::connect(None))
+		.unwrap();
+	let engine2 = Engine::with_base_dir(client2, proj.clone(), dir.path().to_path_buf());
+	let file2 = file.clone();
+	let handle = tokio::spawn(async move { engine2.watch(&file2).await });
+
+	tokio::time::sleep(Duration::from_secs(2)).await;
+	fs::write(dir.path().join("app.txt"), b"changed-value").unwrap();
+	let synced = poll_synced(&engine, &cname, "/tmp/app.txt", "changed-value", 60).await;
+
+	// Poll for the second start line rather than sleeping and hoping.
+	let restarted = poll_synced(&engine, &cname, "/starts", "start\nstart", 60).await;
+
+	handle.abort();
+	engine.down(&file).await.unwrap();
+	assert!(synced, "sync+restart did not copy the file");
+	assert!(
+		restarted,
+		"sync+restart copied the file but never restarted the container"
+	);
+}
+
 /// Poll until `cat`-ing `path` in the container yields `expect`, or `secs`
 /// elapse. Read-only: used when the trigger already happened (initial_sync).
 async fn poll_synced(engine: &Engine, cname: &str, path: &str, expect: &str, secs: u64) -> bool {
