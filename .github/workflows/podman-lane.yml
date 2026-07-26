@@ -27,7 +27,7 @@ jobs:
       matrix:
         podman: ["5", "6"]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install qemu + cloud tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-x86 qemu-utils cloud-image-utils
       - name: Fetch Fedora cloud image (Podman 6 = rawhide, 5 = Fedora 44)
