@@ -74,14 +74,21 @@ only tighten, never widen, what the launching user already has.
 
 ## Secret and config handling
 
-- `secrets:`/`configs:` sourced from inline `content:` or `environment:` are
-  created as Podman-native secrets over the libpod API (under a project-scoped
-  name) and injected into the container — podup writes no secret material to a
-  host directory. They are removed again on `podup down`.
+- `secrets:`/`configs:` sourced from inline `content:` or `environment:`, and
+  from a `file:` path, are created as Podman-native secrets over the libpod API
+  (under a project-scoped name) and injected into the container — podup writes no
+  secret material to a host directory. They are removed again on `podup down`.
 - `external: true` secrets/configs are injected as Podman-native secrets
   (pre-flighted for existence), pointing at a pre-existing `podman secret`.
-- `file:` secrets/configs are bind-mounted read-only from the host path you
-  provide; the file already lives on the host, so no copy is made.
+- A `file:` source is read at `up` time and its bytes become the secret. Nothing
+  on the host is mounted, relabelled or otherwise modified. With no `mode:` given
+  the secret is mounted with the host file's own permission bits, so a `0600`
+  secret stays unreadable to a non-root container user.
+- Because the payload is a copy taken at `up`, editing the host file afterwards
+  does not reach an already-running container; recreate it to pick up a new
+  value. (A rotation that replaces the file atomically — write-new-then-rename,
+  which is what careful tools do — was never visible to a running container
+  either, because a file bind mount pins the inode.)
 - Dangerous secret file modes (setuid/setgid/sticky/executable) are rejected.
 - The `config` subcommand redacts inline `content:` secrets before printing.
 

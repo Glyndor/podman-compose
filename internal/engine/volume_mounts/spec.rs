@@ -133,31 +133,6 @@ pub(super) fn parse_tmpfs_string(s: &str) -> Mount {
 	}
 }
 
-/// Parse a pre-built bind string (secret/config) — always produces a bind Mount.
-pub(super) fn parse_bind_string(s: &str) -> Option<Mount> {
-	let parts: Vec<&str> = s.splitn(3, ':').collect();
-	let (src, dst, opts_str) = match parts.len() {
-		1 => (parts[0], parts[0], ""),
-		2 => (parts[0], parts[1], ""),
-		_ => (parts[0], parts[1], parts[2]),
-	};
-	let opts: Vec<String> = opts_str
-		.split(',')
-		.map(|o| o.trim().to_string())
-		.filter(|o| !o.is_empty())
-		.collect();
-	Some(Mount {
-		mount_type: "bind".into(),
-		source: if src.is_empty() {
-			None
-		} else {
-			Some(src.to_string())
-		},
-		destination: dst.to_string(),
-		options: opts,
-	})
-}
-
 pub(super) fn access_opts(read_only: Option<bool>) -> Vec<String> {
 	if read_only.unwrap_or(false) {
 		vec!["ro".into()]

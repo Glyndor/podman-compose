@@ -170,7 +170,7 @@ impl Engine {
 		// Inline secrets/configs are created up front (no longer in the
 		// per-container build path), so materialise them here too before the run
 		// container is created.
-		self.create_inline_secrets(file).await?;
+		self.create_project_secrets(file).await?;
 
 		// Refuse to clobber a pre-existing container of the same name (data-loss
 		// footgun): `create_and_start` would force-remove it. Only the verbatim

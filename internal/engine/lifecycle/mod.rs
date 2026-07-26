@@ -224,7 +224,7 @@ impl Engine {
 			// Pre-create the union of inline secrets/configs once, before the
 			// concurrent per-level start loop, so two services in the same level
 			// can't race the non-atomic delete-then-create of a shared name.
-			self.create_inline_secrets(file).await?;
+			self.create_project_secrets(file).await?;
 
 			// Best-effort: warm the image cache for every service this pass will
 			// pull, concurrently, before the per-level walk below serializes a
