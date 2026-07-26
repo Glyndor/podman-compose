@@ -423,6 +423,9 @@ mod tests {
 		assert!(p.is_empty());
 	}
 
+	// Unix-only: `PermissionsExt` does not exist on Windows, where a host file has
+	// no mode to mirror and `host_file_secret_mode` returns the 0444 default.
+	#[cfg(unix)]
 	#[test]
 	fn host_file_mode_masks_execute_and_special_bits() {
 		// A secret holds data, never code. Mirroring a 0755 host file verbatim would
