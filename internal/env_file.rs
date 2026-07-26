@@ -96,6 +96,52 @@ pub fn merge_env(
 		.collect()
 }
 
+/// Fold every service's `env_file:` into its `environment:` and drop the key.
+///
+/// `config` is meant to render the canonical, fully-resolved model, and docker
+/// compose materialises `env_file` there. Leaving it unresolved meant a service
+/// that takes its whole environment from a file rendered with no `environment:`
+/// at all — so the one command you reach for to ask "what will this actually run"
+/// pointed away from the answer rather than merely omitting it (#1184).
+///
+/// Precedence is the same as at run time: `environment:` wins over `env_file:`,
+/// and a later file wins over an earlier one. Keys are emitted sorted so the
+/// output is stable across runs rather than following a hash map's order.
+///
+/// A bare `KEY` (inherit from the host) stays valueless, rendering as `KEY: null`
+/// the way the parser accepts it back.
+pub fn materialize_env_files(
+	file: &mut crate::compose::types::ComposeFile,
+	base_dir: &Path,
+) -> Result<()> {
+	for service in file.services.values_mut() {
+		let entries = service.env_file.to_entries();
+		if entries.is_empty() {
+			continue;
+		}
+		let from_files = load_env_file_entries(&entries, base_dir)?;
+		let mut merged = service.environment.to_map();
+		for (k, v) in from_files {
+			merged.entry(k).or_insert(Some(v));
+		}
+		let mut keys: Vec<String> = merged.keys().cloned().collect();
+		keys.sort();
+		let map = keys
+			.into_iter()
+			.map(|k| {
+				let value = merged
+					.get(&k)
+					.and_then(|v| v.clone())
+					.map(serde_yaml::Value::String);
+				(k, value)
+			})
+			.collect();
+		service.environment = crate::compose::types::EnvVars::Map(map);
+		service.env_file = crate::compose::types::EnvFile::Empty;
+	}
+	Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
@@ -260,5 +306,112 @@ mod tests {
 			[("PASSTHROUGH".to_string(), None)].into();
 		let result = merge_env(service_env, HashMap::new());
 		assert!(result.iter().any(|s| s == "PASSTHROUGH"));
+	}
+
+	// materialize_env_files (#1184)
+
+	/// Parse `yaml`, materialise its env files against `dir`, and return the
+	/// service's rendered `environment` map.
+	fn materialised(
+		dir: &std::path::Path,
+		yaml: &str,
+	) -> indexmap::IndexMap<String, Option<serde_yaml::Value>> {
+		let mut file = crate::compose::parse_str_raw(yaml).unwrap();
+		materialize_env_files(&mut file, dir).unwrap();
+		let service = &file.services["web"];
+		assert!(
+			matches!(service.env_file, crate::compose::types::EnvFile::Empty),
+			"env_file must be dropped once it has been folded in"
+		);
+		match &service.environment {
+			crate::compose::types::EnvVars::Map(m) => m.clone(),
+			other => panic!("expected a map, got {other:?}"),
+		}
+	}
+
+	#[test]
+	fn env_file_is_folded_into_environment() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join("a.env"), b"FROM_FILE=yes\n").unwrap();
+		let vars = materialised(
+			dir.path(),
+			"services:\n  web:\n    image: x\n    env_file:\n      - a.env\n",
+		);
+		assert_eq!(
+			vars.get("FROM_FILE"),
+			Some(&Some(serde_yaml::Value::String("yes".into())))
+		);
+	}
+
+	#[test]
+	fn environment_wins_over_env_file() {
+		// The run-time precedence, kept in the rendered model: a key set in both
+		// places must render with the value the container would actually see.
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join("a.env"), b"SHARED=from-file\n").unwrap();
+		let vars = materialised(
+			dir.path(),
+			"services:\n  web:\n    image: x\n    environment:\n      SHARED: from-service\n    env_file:\n      - a.env\n",
+		);
+		assert_eq!(
+			vars.get("SHARED"),
+			Some(&Some(serde_yaml::Value::String("from-service".into())))
+		);
+	}
+
+	#[test]
+	fn a_later_env_file_wins_over_an_earlier_one() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join("a.env"), b"K=first\n").unwrap();
+		std::fs::write(dir.path().join("b.env"), b"K=second\n").unwrap();
+		let vars = materialised(
+			dir.path(),
+			"services:\n  web:\n    image: x\n    env_file:\n      - a.env\n      - b.env\n",
+		);
+		assert_eq!(
+			vars.get("K"),
+			Some(&Some(serde_yaml::Value::String("second".into())))
+		);
+	}
+
+	#[test]
+	fn a_bare_key_stays_valueless() {
+		// `KEY` with no value inherits from the host. Rendering it as an empty
+		// string instead would change what the model means.
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join("a.env"), b"OTHER=1\n").unwrap();
+		let vars = materialised(
+			dir.path(),
+			"services:\n  web:\n    image: x\n    environment:\n      - PASSTHROUGH\n    env_file:\n      - a.env\n",
+		);
+		assert_eq!(vars.get("PASSTHROUGH"), Some(&None));
+	}
+
+	#[test]
+	fn keys_are_sorted_so_the_render_is_stable() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join("a.env"), b"ZED=1\nALPHA=2\nMID=3\n").unwrap();
+		let vars = materialised(
+			dir.path(),
+			"services:\n  web:\n    image: x\n    env_file:\n      - a.env\n",
+		);
+		let keys: Vec<&String> = vars.keys().collect();
+		assert_eq!(keys, vec!["ALPHA", "MID", "ZED"]);
+	}
+
+	#[test]
+	fn a_service_without_env_file_is_left_alone() {
+		let dir = tempfile::tempdir().unwrap();
+		let mut file = crate::compose::parse_str_raw(
+			"services:\n  web:\n    image: x\n    environment:\n      A: 1\n",
+		)
+		.unwrap();
+		let before = format!("{:?}", file.services["web"].environment);
+		materialize_env_files(&mut file, dir.path()).unwrap();
+		assert_eq!(
+			before,
+			format!("{:?}", file.services["web"].environment),
+			"a service with no env_file must not be rewritten"
+		);
 	}
 }
