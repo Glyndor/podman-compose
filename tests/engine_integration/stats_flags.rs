@@ -198,3 +198,44 @@ async fn cli_port_without_a_binding_exits_nonzero() {
 
 	run(&["down", "-v"]);
 }
+
+/// The published-port case, which only the CLI can check: `Engine::port` returns
+/// `Result<()>` and writes the binding to stdout, so the engine-level test can
+/// assert nothing about the binding its own name promises.
+#[tokio::test]
+async fn cli_port_prints_the_published_binding() {
+	if super::podman().await.is_none() {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("docker-compose.yml");
+	let proj = format!("t{}-prtb", std::process::id());
+	fs::write(
+		&compose,
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    ports:\n      - \"127.0.0.1:18081:80\"\n",
+	)
+	.unwrap();
+	let c = compose.to_str().unwrap();
+	let run = |args: &[&str]| {
+		Command::new(bin())
+			.args(["-f", c, "-p", &proj])
+			.args(args)
+			.output()
+			.expect("run podup")
+	};
+	run(&["up", "-d"]);
+
+	let out = run(&["port", "web", "80"]);
+	let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+	let status = out.status;
+	run(&["down", "-v"]);
+
+	assert!(
+		status.success(),
+		"port failed for a published port: {stdout:?}"
+	);
+	assert!(
+		stdout.contains("127.0.0.1:18081"),
+		"port did not print the host binding it was asked for: {stdout:?}"
+	);
+}

@@ -36,17 +36,25 @@ async fn inline_secret_materialized() {
 
 	engine.up(&file).await.unwrap();
 	// Inline content is created as a Podman-native secret and mounted at the
-	// usual /run/secrets/<name> path — verify by exec-ing a read.
-	engine
+	// usual /run/secrets/<name> path. `cat` alone only proves the path exists —
+	// it exits 0 on an empty file too — so compare the bytes.
+	let read = engine
 		.exec_with_options(
 			&file,
 			"web",
-			vec!["cat".to_string(), "/run/secrets/mysecret".to_string()],
+			vec![
+				"sh".to_string(),
+				"-c".to_string(),
+				"test \"$(cat /run/secrets/mysecret)\" = supersecret".to_string(),
+			],
 			podup::ExecOptions::default(),
 		)
-		.await
-		.unwrap();
+		.await;
 	engine.down(&file).await.unwrap();
+	assert!(
+		read.is_ok(),
+		"the inline secret did not reach /run/secrets/mysecret with its content: {read:?}"
+	);
 }
 
 #[tokio::test]
@@ -113,7 +121,25 @@ fn env_secret_materialized() {
 			.unwrap();
 
 			engine.up(&file).await.unwrap();
+			// The point of an `environment:` source is that the variable's value
+			// becomes the secret. Starting the container proves neither half.
+			let read = engine
+				.exec_with_options(
+					&file,
+					"web",
+					vec![
+						"sh".to_string(),
+						"-c".to_string(),
+						"test \"$(cat /run/secrets/envsecret)\" = env-secret-value".to_string(),
+					],
+					podup::ExecOptions::default(),
+				)
+				.await;
 			engine.down(&file).await.unwrap();
+			assert!(
+				read.is_ok(),
+				"the env-sourced secret did not carry the variable's value: {read:?}"
+			);
 		});
 	});
 }
@@ -126,18 +152,23 @@ async fn invalid_secret_name_rejected() {
 	};
 	let proj = proj("isec");
 	let engine = Engine::new(client, proj.clone());
-	// Secret name with path traversal
+	// A traversal name must be refused: it would otherwise become part of a
+	// project-scoped Podman secret name and a URL query parameter.
+	//
+	// This test used to declare a perfectly ordinary secret called `evils`, discard
+	// both results with `let _ =`, and say in a comment that it could not test the
+	// thing its name promises. It asserted nothing at all, in either direction.
 	let file = parse_str(
-		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    secrets:\n      - evils\nsecrets:\n  evils:\n    content: bad\n",
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    secrets:\n      - '../evil'\nsecrets:\n  '../evil':\n    content: bad\n",
+	)
+	.unwrap();
+
+	let result = engine.up(&file).await;
+	let _ = engine.down(&file).await;
+	assert!(
+		result.is_err(),
+		"a secret named '../evil' was accepted instead of being rejected"
 	);
-	// Parse succeeds; but engine should reject the traversal during up()
-	// We can't actually test a ".." name since parse_str would accept it.
-	// Instead, verify that a normal name works (already covered by inline_secret test).
-	// This test exercises the path-validation code via a valid name edge case.
-	if let Ok(f) = file {
-		let _ = engine.up(&f).await;
-		let _ = engine.down(&f).await;
-	}
 }
 
 #[tokio::test]
@@ -154,7 +185,26 @@ async fn inline_config_materialized() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	// A config defaults to an absolute container-root path, unlike a secret's
+	// /run/secrets/<name> — so this also pins the default target, not just the
+	// content.
+	let read = engine
+		.exec_with_options(
+			&file,
+			"web",
+			vec![
+				"sh".to_string(),
+				"-c".to_string(),
+				"test \"$(cat /mycfg)\" = key=value".to_string(),
+			],
+			podup::ExecOptions::default(),
+		)
+		.await;
 	engine.down(&file).await.unwrap();
+	assert!(
+		read.is_ok(),
+		"the inline config did not reach /mycfg with its content: {read:?}"
+	);
 }
 
 // ---------------------------------------------------------------------------
