@@ -88,6 +88,8 @@ mod cp_flags;
 mod exec_flags;
 #[path = "engine_integration/health_targeting.rs"]
 mod health_targeting;
+#[path = "engine_integration/include_extends.rs"]
+mod include_extends;
 #[path = "engine_integration/lifecycle.rs"]
 mod lifecycle;
 #[path = "engine_integration/niche.rs"]
@@ -111,6 +113,8 @@ mod cli_lifecycle;
 mod create_ls;
 #[path = "engine_integration/lifecycle_output.rs"]
 mod lifecycle_output;
+#[path = "engine_integration/multi_file.rs"]
+mod multi_file;
 #[path = "engine_integration/scale.rs"]
 mod scale;
 #[path = "engine_integration/stats_flags.rs"]

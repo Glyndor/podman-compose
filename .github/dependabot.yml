@@ -5,7 +5,7 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
-    labels: ["dependencies", "type:ci"]
+    labels: ["type:deps", "type:ci"]
     open-pull-requests-limit: 10
     target-branch: "develop"
 
@@ -13,6 +13,6 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
-    labels: ["dependencies"]
+    labels: ["type:deps"]
     open-pull-requests-limit: 10
     target-branch: "develop"

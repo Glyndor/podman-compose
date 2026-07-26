@@ -2,6 +2,8 @@
 //! plans. No daemon access, so the mapping is unit-testable; the create and
 //! preflight side effects live in [`super`]'s `Engine` impl.
 
+use std::path::{Path, PathBuf};
+
 use crate::compose::types::{ComposeFile, Service, ServiceConfigRef, ServiceSecretRef};
 use crate::error::{ComposeError, Result};
 
@@ -11,25 +13,49 @@ use super::super::staging;
 /// payload must be larger than 0 and strictly smaller than this many bytes.
 pub(super) const MAX_SECRET_BYTES: usize = 512_000;
 
+/// Where the bytes of a podup-created secret come from.
+///
+/// A `file:` source carries the resolved host path rather than its contents:
+/// this module maps compose to plans with no I/O at all, which is what keeps the
+/// mapping unit-testable, so the read happens in the effectful layer that creates
+/// the secret.
+pub(super) enum Payload {
+	/// Inline `content:`/`environment:` — the bytes, already resolved.
+	Inline(Vec<u8>),
+	/// `file:` — the resolved host path to read at creation time.
+	File(PathBuf),
+}
+
 /// A planned native secret for a service: the Podman secret `source` to attach,
-/// the in-container `target`, optional permissions, and — for inline
-/// `content:`/`environment:` sources — the `payload` to create under `source`.
-/// `external: true` references carry no payload (the secret must pre-exist).
+/// the in-container `target`, optional permissions, and — for every source podup
+/// creates itself — the `payload` to create under `source`. `external: true`
+/// references carry no payload (the secret must pre-exist).
 pub(super) struct NativePlan {
 	pub(super) source: String,
 	pub(super) target: String,
 	pub(super) mode: Option<u32>,
 	pub(super) uid: Option<u32>,
 	pub(super) gid: Option<u32>,
-	pub(super) payload: Option<Vec<u8>>,
+	pub(super) payload: Option<Payload>,
+}
+
+/// The fields of a `secrets:`/`configs:` definition that decide where its bytes
+/// come from. A borrowed view, so the two distinct compose types (`SecretConfig`
+/// and `ConfigConfig`) resolve through one function.
+struct SourceDef<'a> {
+	content: Option<&'a str>,
+	environment: Option<&'a str>,
+	file_source: Option<&'a str>,
+	external: bool,
+	external_name: Option<&'a str>,
 }
 
 /// Where a secret/config's bytes come from once the compose def is resolved.
 enum Source {
-	/// `file:` — handled by the bind path, never a native secret.
-	Bind,
 	/// Inline `content:`/`environment:` — `(scoped podman name, payload bytes)`.
 	Inline(String, Vec<u8>),
+	/// `file:` — `(scoped podman name, resolved host path)`.
+	File(String, PathBuf),
 	/// `external: true` — name of the pre-existing podman secret.
 	External(String),
 }
@@ -41,6 +67,7 @@ pub(super) fn collect_native_plans(
 	project: &str,
 	service: &Service,
 	file: &ComposeFile,
+	base_dir: &Path,
 ) -> Result<Vec<NativePlan>> {
 	let mut plans = Vec::new();
 
@@ -51,10 +78,14 @@ pub(super) fn collect_native_plans(
 				project,
 				"secret",
 				&name,
-				def.content.as_deref(),
-				def.environment.as_deref(),
-				def.external == Some(true),
-				def.name.as_deref(),
+				SourceDef {
+					content: def.content.as_deref(),
+					environment: def.environment.as_deref(),
+					file_source: def.file.as_deref(),
+					external: def.external == Some(true),
+					external_name: def.name.as_deref(),
+				},
+				base_dir,
 			)?;
 			// A bare target name lands under /run/secrets/<name>, matching the
 			// bind-mount default and the external-secret behaviour.
@@ -76,10 +107,14 @@ pub(super) fn collect_native_plans(
 				project,
 				"config",
 				&name,
-				def.content.as_deref(),
-				def.environment.as_deref(),
-				def.external == Some(true),
-				def.name.as_deref(),
+				SourceDef {
+					content: def.content.as_deref(),
+					environment: def.environment.as_deref(),
+					file_source: def.file.as_deref(),
+					external: def.external == Some(true),
+					external_name: def.name.as_deref(),
+				},
+				base_dir,
 			)?;
 			// Configs default to an absolute container-root path, matching the
 			// bind-mount config behaviour.
@@ -92,23 +127,30 @@ pub(super) fn collect_native_plans(
 }
 
 /// Resolve a secret/config definition to its native [`Source`]. `external`
-/// wins (it may also carry a custom `name:`); otherwise inline `content:` or
-/// `environment:` become a project-scoped native secret; anything else (a
-/// `file:` source, or an empty def) is left to the bind path.
+/// wins (it may also carry a custom `name:`); every other populated source —
+/// inline `content:`/`environment:` and `file:` alike — becomes a project-scoped
+/// native secret. An empty def yields `None` and contributes no plan.
 fn resolve_source(
 	project: &str,
 	kind: &str,
 	name: &str,
-	content: Option<&str>,
-	environment: Option<&str>,
-	external: bool,
-	external_name: Option<&str>,
-) -> Result<Source> {
+	def: SourceDef<'_>,
+	base_dir: &Path,
+) -> Result<Option<Source>> {
+	let SourceDef {
+		content,
+		environment,
+		file_source,
+		external,
+		external_name,
+	} = def;
 	if external {
-		return Ok(Source::External(external_name.unwrap_or(name).to_string()));
+		return Ok(Some(Source::External(
+			external_name.unwrap_or(name).to_string(),
+		)));
 	}
-	let is_inline = content.is_some() || environment.is_some();
-	if is_inline && !staging::is_safe_project_name(name) {
+	let podup_created = content.is_some() || environment.is_some() || file_source.is_some();
+	if podup_created && !staging::is_safe_project_name(name) {
 		// The name becomes part of the project-scoped Podman secret name and a URL
 		// query parameter, so require a bounded, well-formed identifier rather than
 		// an arbitrary (possibly huge or control-laden) YAML key.
@@ -118,10 +160,10 @@ fn resolve_source(
 		)));
 	}
 	if let Some(content) = content {
-		return Ok(Source::Inline(
+		return Ok(Some(Source::Inline(
 			scoped_name(project, kind, name),
 			content.as_bytes().to_vec(),
-		));
+		)));
 	}
 	if let Some(env_var) = environment {
 		let value = std::env::var(env_var).map_err(|_| {
@@ -129,36 +171,57 @@ fn resolve_source(
 				"{kind} '{name}' references env var '{env_var}' which is not set"
 			))
 		})?;
-		return Ok(Source::Inline(
+		return Ok(Some(Source::Inline(
 			scoped_name(project, kind, name),
 			value.into_bytes(),
-		));
+		)));
 	}
-	Ok(Source::Bind)
+	if let Some(host_path) = file_source {
+		// Resolve like a bind-mount source: a relative `file:` is anchored to the
+		// project dir (not the Podman service's cwd) and `~` is expanded — the same
+		// handling `volumes:` gets, and the same this had when it was a bind.
+		return Ok(Some(Source::File(
+			scoped_name(project, kind, name),
+			PathBuf::from(super::super::container::resolve_bind_source(
+				host_path, base_dir,
+			)),
+		)));
+	}
+	Ok(None)
 }
 
-/// Append a [`NativePlan`] for a resolved source, dropping `file:` sources and
+/// Append a [`NativePlan`] for a resolved source, dropping an empty def and
 /// rejecting a dangerous `mode:` before the spec is built. `uid`/`gid` are
 /// numeric in libpod, so a non-numeric value (a user/group name) is dropped to
 /// the default rather than erroring.
 fn push_plan(
 	plans: &mut Vec<NativePlan>,
-	source: Source,
+	source: Option<Source>,
 	target: String,
 	mode: Option<u32>,
 	uid: Option<String>,
 	gid: Option<String>,
 ) -> Result<()> {
-	let (source, payload) = match source {
-		Source::Bind => return Ok(()),
-		Source::Inline(s, p) => (s, Some(p)),
-		Source::External(s) => (s, None),
+	let (source, payload, from_file) = match source {
+		None => return Ok(()),
+		Some(Source::Inline(s, p)) => (s, Some(Payload::Inline(p)), false),
+		Some(Source::File(s, p)) => (s, Some(Payload::File(p)), true),
+		Some(Source::External(s)) => (s, None, false),
 	};
 	// Default to the Compose Specification's world-readable `0444` when no `mode:`
 	// is given. A Podman-native secret otherwise mounts at `0000`, which a non-root
 	// container user cannot read (only root reads it via DAC override), diverging
 	// from docker-compose where the default is readable.
-	let mode = mode.or(Some(0o444));
+	//
+	// A `file:` source is the exception: it is left unset here so the effectful
+	// layer can mirror the host file's own permission bits. That keeps what the
+	// container sees identical to the bind this used to be — a `0600` secret stays
+	// unreadable to a non-root container user instead of being widened to `0444`.
+	let mode = if from_file {
+		mode
+	} else {
+		mode.or(Some(0o444))
+	};
 	if let Some(m) = mode {
 		staging::reject_dangerous_secret_mode(m, &source)?;
 	}
@@ -191,20 +254,41 @@ pub(super) fn check_secret_size(name: &str, len: usize) -> Result<()> {
 	Ok(())
 }
 
-/// Whether a secret/config def is an inline `content:`/`environment:` source —
-/// i.e. one podup creates as a project-scoped native secret. `external:` wins
-/// (it is never created by podup) and a bare `file:` source is a bind mount.
-pub(super) fn is_inline_source(
+/// Whether a secret/config def is one podup creates as a project-scoped native
+/// secret — inline `content:`/`environment:` or a `file:` source. `external:`
+/// wins and is never created (nor removed) by podup.
+pub(super) fn is_podup_created_source(
 	external: Option<bool>,
 	content: Option<&str>,
 	environment: Option<&str>,
+	file_source: Option<&str>,
 ) -> bool {
-	external != Some(true) && (content.is_some() || environment.is_some())
+	external != Some(true) && (content.is_some() || environment.is_some() || file_source.is_some())
 }
 
-/// `(name, target_override)` for a service secret/config reference.
-pub(super) fn ref_name_target(source: &str, target: Option<&str>) -> (String, Option<String>) {
-	(source.to_string(), target.map(str::to_string))
+/// The permission bits to mount a `file:` secret with when the compose file
+/// names no `mode:` — the host file's own, so the container sees what it saw
+/// when this was a bind mount.
+///
+/// Execute and the special bits are masked off: a secret holds data, never code,
+/// and letting a `0755` host file through would trip the dangerous-mode guard and
+/// fail an `up` that used to work. Unreadable metadata falls back to the Compose
+/// Specification's `0444`; the create call fails right after with a clearer
+/// message than a permissions guess would give.
+pub(super) fn host_file_secret_mode(path: &Path) -> u32 {
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::PermissionsExt;
+		match std::fs::metadata(path) {
+			Ok(md) => md.permissions().mode() & 0o666,
+			Err(_) => 0o444,
+		}
+	}
+	#[cfg(not(unix))]
+	{
+		let _ = path;
+		0o444
+	}
 }
 
 /// Decompose a secret reference into `(name, target, mode, uid, gid)`.
@@ -269,14 +353,104 @@ mod tests {
 
 	fn plans(yaml: &str) -> Vec<NativePlan> {
 		let file = crate::compose::parse_str_raw(yaml).unwrap();
-		collect_native_plans("proj", &file.services["web"], &file).unwrap()
+		collect_native_plans("proj", &file.services["web"], &file, Path::new("/base")).unwrap()
+	}
+
+	/// The inline bytes of a plan's payload, or `None` for an external/file source.
+	fn inline_bytes(p: &NativePlan) -> Option<&[u8]> {
+		match &p.payload {
+			Some(Payload::Inline(b)) => Some(b),
+			_ => None,
+		}
 	}
 
 	#[test]
-	fn file_secret_is_not_a_native_secret() {
-		// A `file:` secret is a bind mount, never a native secret.
+	fn file_secret_is_a_scoped_native_secret_carrying_its_path() {
+		// A `file:` secret is a project-scoped native secret like any other source.
+		// The plan carries the resolved path, not the bytes: this module does no I/O,
+		// so the read belongs to the layer that creates the secret.
 		let p = plans("services:\n  web:\n    image: nginx\n    secrets: [tok]\nsecrets:\n  tok:\n    file: ./tok.txt\n");
+		assert_eq!(p.len(), 1);
+		assert_eq!(p[0].source, "proj_secret_tok");
+		assert_eq!(p[0].target, "tok");
+		assert!(
+			matches!(&p[0].payload, Some(Payload::File(path)) if path == Path::new("/base/tok.txt"))
+		);
+	}
+
+	#[test]
+	fn file_secret_leaves_mode_unset_for_the_host_bits() {
+		// With no `mode:` the plan stays unset so the effectful layer can mirror the
+		// host file's own bits, rather than widening a 0600 secret to the 0444 the
+		// other sources default to.
+		let p = plans("services:\n  web:\n    image: nginx\n    secrets: [tok]\nsecrets:\n  tok:\n    file: ./tok.txt\n");
+		assert_eq!(p[0].mode, None);
+	}
+
+	#[test]
+	fn file_secret_honours_an_explicit_mode() {
+		let p = plans("services:\n  web:\n    image: nginx\n    secrets:\n      - source: tok\n        mode: 0400\nsecrets:\n  tok:\n    file: ./tok.txt\n");
+		assert_eq!(p[0].mode, Some(0o400));
+	}
+
+	#[test]
+	fn file_config_is_native_with_absolute_default_target() {
+		let p = plans("services:\n  web:\n    image: nginx\n    configs: [cfg]\nconfigs:\n  cfg:\n    file: ./cfg.yaml\n");
+		assert_eq!(p.len(), 1);
+		assert_eq!(p[0].source, "proj_config_cfg");
+		assert_eq!(p[0].target, "/cfg");
+	}
+
+	#[test]
+	fn file_secret_with_unsafe_name_is_rejected() {
+		// The compose key becomes part of a Podman secret name for a `file:` source
+		// too, so it faces the same bound as an inline one.
+		let file = crate::compose::parse_str_raw(
+			"services:\n  web:\n    image: x\n    secrets: ['../evil']\nsecrets:\n  '../evil':\n    file: ./tok.txt\n",
+		)
+		.unwrap();
+		assert!(
+			collect_native_plans("proj", &file.services["web"], &file, Path::new("/base")).is_err()
+		);
+	}
+
+	#[test]
+	fn empty_def_contributes_no_plan() {
+		// A def with no content:, environment:, file: or external: is not a secret
+		// podup can produce anything for.
+		let p =
+			plans("services:\n  web:\n    image: nginx\n    secrets: [tok]\nsecrets:\n  tok: {}\n");
 		assert!(p.is_empty());
+	}
+
+	// Unix-only: `PermissionsExt` does not exist on Windows, where a host file has
+	// no mode to mirror and `host_file_secret_mode` returns the 0444 default.
+	#[cfg(unix)]
+	#[test]
+	fn host_file_mode_masks_execute_and_special_bits() {
+		// A secret holds data, never code. Mirroring a 0755 host file verbatim would
+		// trip the dangerous-mode guard and fail an `up` that used to work.
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("s.txt");
+		std::fs::write(&path, b"x").unwrap();
+		for (host, want) in [
+			(0o644, 0o644),
+			(0o600, 0o600),
+			(0o755, 0o644),
+			(0o4700, 0o600),
+		] {
+			use std::os::unix::fs::PermissionsExt;
+			std::fs::set_permissions(&path, std::fs::Permissions::from_mode(host)).unwrap();
+			assert_eq!(host_file_secret_mode(&path), want, "host mode {host:o}");
+		}
+	}
+
+	#[test]
+	fn host_file_mode_of_a_missing_file_falls_back_to_0444() {
+		assert_eq!(
+			host_file_secret_mode(Path::new("/nonexistent/secret")),
+			0o444
+		);
 	}
 
 	#[test]
@@ -287,7 +461,7 @@ mod tests {
 		assert_eq!(p.len(), 1);
 		assert_eq!(p[0].source, "proj_secret_tok");
 		assert_eq!(p[0].target, "tok");
-		assert_eq!(p[0].payload.as_deref(), Some(b"supersecret".as_slice()));
+		assert_eq!(inline_bytes(&p[0]), Some(b"supersecret".as_slice()));
 	}
 
 	#[test]
@@ -297,7 +471,7 @@ mod tests {
 		assert_eq!(p.len(), 1);
 		assert_eq!(p[0].source, "proj_config_cfg");
 		assert_eq!(p[0].target, "/cfg");
-		assert_eq!(p[0].payload.as_deref(), Some(b"key=value".as_slice()));
+		assert_eq!(inline_bytes(&p[0]), Some(b"key=value".as_slice()));
 	}
 
 	#[test]
@@ -306,7 +480,7 @@ mod tests {
 			let p = plans("services:\n  web:\n    image: nginx\n    secrets: [tok]\nsecrets:\n  tok:\n    environment: PODUP_TEST_SECRET\n");
 			assert_eq!(p.len(), 1);
 			assert_eq!(p[0].source, "proj_secret_tok");
-			assert_eq!(p[0].payload.as_deref(), Some(b"env-value".as_slice()));
+			assert_eq!(inline_bytes(&p[0]), Some(b"env-value".as_slice()));
 		});
 	}
 
@@ -314,7 +488,10 @@ mod tests {
 	fn env_secret_missing_var_errors() {
 		temp_env::with_var("PODUP_TEST_MISSING", None::<&str>, || {
 			let file = crate::compose::parse_str_raw("services:\n  web:\n    image: nginx\n    secrets: [tok]\nsecrets:\n  tok:\n    environment: PODUP_TEST_MISSING\n").unwrap();
-			assert!(collect_native_plans("proj", &file.services["web"], &file).is_err());
+			assert!(
+				collect_native_plans("proj", &file.services["web"], &file, Path::new("/base"))
+					.is_err()
+			);
 		});
 	}
 
@@ -365,28 +542,36 @@ mod tests {
 	fn native_secret_rejects_setuid_mode() {
 		// 0o4000 (= 2048) is setuid; refused before the spec reaches Podman.
 		let file = crate::compose::parse_str_raw("services:\n  web:\n    image: nginx\n    secrets:\n      - source: tok\n        mode: 2048\nsecrets:\n  tok:\n    external: true\n").unwrap();
-		assert!(collect_native_plans("proj", &file.services["web"], &file).is_err());
+		assert!(
+			collect_native_plans("proj", &file.services["web"], &file, Path::new("/base")).is_err()
+		);
 	}
 
 	#[test]
 	fn native_secret_rejects_execute_mode() {
 		// 0o777 (= 511) sets execute bits; a secret holds data, never code.
 		let file = crate::compose::parse_str_raw("services:\n  web:\n    image: nginx\n    secrets:\n      - source: tok\n        mode: 511\nsecrets:\n  tok:\n    external: true\n").unwrap();
-		assert!(collect_native_plans("proj", &file.services["web"], &file).is_err());
+		assert!(
+			collect_native_plans("proj", &file.services["web"], &file, Path::new("/base")).is_err()
+		);
 	}
 
 	#[test]
 	fn native_config_rejects_setgid_mode() {
 		// External configs share the mode guard. 0o2000 (= 1024) is setgid.
 		let file = crate::compose::parse_str_raw("services:\n  web:\n    image: nginx\n    configs:\n      - source: cfg\n        mode: 1024\nconfigs:\n  cfg:\n    external: true\n").unwrap();
-		assert!(collect_native_plans("proj", &file.services["web"], &file).is_err());
+		assert!(
+			collect_native_plans("proj", &file.services["web"], &file, Path::new("/base")).is_err()
+		);
 	}
 
 	#[test]
 	fn inline_secret_rejects_dangerous_mode() {
 		// The mode guard also covers project-created inline secrets.
 		let file = crate::compose::parse_str_raw("services:\n  web:\n    image: nginx\n    secrets:\n      - source: tok\n        mode: 511\nsecrets:\n  tok:\n    content: data\n").unwrap();
-		assert!(collect_native_plans("proj", &file.services["web"], &file).is_err());
+		assert!(
+			collect_native_plans("proj", &file.services["web"], &file, Path::new("/base")).is_err()
+		);
 	}
 
 	#[test]
@@ -412,7 +597,9 @@ mod tests {
 			"services:\n  web:\n    image: x\n    secrets: ['../evil']\nsecrets:\n  '../evil':\n    content: data\n",
 		)
 		.unwrap();
-		assert!(collect_native_plans("proj", &file.services["web"], &file).is_err());
+		assert!(
+			collect_native_plans("proj", &file.services["web"], &file, Path::new("/base")).is_err()
+		);
 	}
 
 	#[test]
@@ -433,10 +620,12 @@ mod tests {
 	}
 
 	#[test]
-	fn is_inline_source_classifies_sources() {
-		assert!(is_inline_source(None, Some("x"), None));
-		assert!(is_inline_source(None, None, Some("VAR")));
-		assert!(!is_inline_source(Some(true), Some("x"), None));
-		assert!(!is_inline_source(None, None, None));
+	fn is_podup_created_source_classifies_sources() {
+		assert!(is_podup_created_source(None, Some("x"), None, None));
+		assert!(is_podup_created_source(None, None, Some("VAR"), None));
+		// A `file:` source is created by podup too, so `down` must remove it.
+		assert!(is_podup_created_source(None, None, None, Some("./tok.txt")));
+		assert!(!is_podup_created_source(Some(true), Some("x"), None, None));
+		assert!(!is_podup_created_source(None, None, None, None));
 	}
 }

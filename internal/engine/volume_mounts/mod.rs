@@ -1,9 +1,10 @@
 //! Volume mount helpers.
 //!
-//! [`build_mounts_all`] converts all `volumes:` entries, secret bind-strings,
-//! and config bind-strings into OCI `Mount` entries and `NamedVolume` entries
-//! for the SpecGenerator. Named volumes go in `volumes`; everything else
-//! (bind, tmpfs, npipe, cluster) goes in `mounts`.
+//! [`build_mounts_all`] converts all `volumes:` entries into OCI `Mount` entries
+//! and `NamedVolume` entries for the SpecGenerator. Named volumes go in
+//! `volumes`; everything else (bind, tmpfs, npipe, cluster) goes in `mounts`.
+//! Secrets and configs are not here: every source is a Podman-native secret
+//! attached to the spec, never a mount.
 
 use std::path::Path;
 
@@ -11,10 +12,7 @@ use crate::compose::types::{Service, VolumeMount, VolumeType};
 use crate::libpod::types::container::{Mount, NamedVolume};
 
 mod spec;
-use spec::{
-	access_opts, extend_bind_opts_str, extend_volume_opts_str, parse_bind_string,
-	parse_volume_string,
-};
+use spec::{access_opts, extend_bind_opts_str, extend_volume_opts_str, parse_volume_string};
 
 /// Build all OCI mounts and named volume attachments for a container.
 ///
@@ -24,8 +22,6 @@ use spec::{
 pub(crate) fn build_mounts_all(
 	service: &Service,
 	base_dir: &Path,
-	secret_binds: &[String],
-	config_binds: &[String],
 ) -> (Vec<Mount>, Vec<NamedVolume>) {
 	let mut mounts = Vec::new();
 	let mut named = Vec::new();
@@ -145,13 +141,6 @@ pub(crate) fn build_mounts_all(
 		mounts.push(spec::parse_tmpfs_string(&entry));
 	}
 
-	// Materialised secrets and configs are passed as pre-built bind strings.
-	for bind in secret_binds.iter().chain(config_binds.iter()) {
-		if let Some(m) = parse_bind_string(bind) {
-			mounts.push(m);
-		}
-	}
-
 	(mounts, named)
 }
 
@@ -175,7 +164,7 @@ mod tests {
 	#[test]
 	fn short_form_bind_passthrough() {
 		let svc = svc_with_volumes(vec![VolumeMount::Short("./data:/app/data".into())]);
-		let (mounts, named) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (mounts, named) = build_mounts_all(&svc, Path::new("/base"));
 		assert_eq!(mounts.len(), 1);
 		assert!(named.is_empty());
 		assert_eq!(mounts[0].mount_type, "bind");
@@ -185,7 +174,7 @@ mod tests {
 	#[test]
 	fn short_form_named_volume() {
 		let svc = svc_with_volumes(vec![VolumeMount::Short("myvolume:/data".into())]);
-		let (mounts, named) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (mounts, named) = build_mounts_all(&svc, Path::new("/base"));
 		assert!(mounts.is_empty());
 		assert_eq!(named.len(), 1);
 		assert_eq!(named[0].name, "myvolume");
@@ -204,7 +193,7 @@ mod tests {
 			tmpfs: None,
 			consistency: None,
 		}]);
-		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"));
 		assert_eq!(mounts.len(), 1);
 		assert_eq!(mounts[0].mount_type, "bind");
 		assert!(mounts[0].options.contains(&"ro".to_string()));
@@ -227,7 +216,7 @@ mod tests {
 			tmpfs: None,
 			consistency: None,
 		}]);
-		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"));
 		assert!(mounts[0].options.contains(&"rshared".to_string()));
 	}
 
@@ -246,7 +235,7 @@ mod tests {
 			tmpfs: None,
 			consistency: None,
 		}]);
-		let (mounts, named) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (mounts, named) = build_mounts_all(&svc, Path::new("/base"));
 		assert!(mounts.is_empty());
 		assert_eq!(named.len(), 1);
 		assert_eq!(named[0].name, "myvolume");
@@ -273,7 +262,7 @@ mod tests {
 			tmpfs: None,
 			consistency: None,
 		}]);
-		let (_, named) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (_, named) = build_mounts_all(&svc, Path::new("/base"));
 		assert_eq!(named.len(), 1);
 		assert!(named[0].options.contains(&"noexec".to_string()));
 		assert!(named[0].options.contains(&"nosuid".to_string()));
@@ -298,7 +287,7 @@ mod tests {
 			tmpfs: None,
 			consistency: None,
 		}]);
-		let (_, named) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (_, named) = build_mounts_all(&svc, Path::new("/base"));
 		assert_eq!(named.len(), 1);
 		assert_eq!(named[0].sub_path.as_deref(), Some("nested/dir"));
 	}
@@ -317,7 +306,7 @@ mod tests {
 			tmpfs: None,
 			consistency: None,
 		}]);
-		let (mounts, named) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (mounts, named) = build_mounts_all(&svc, Path::new("/base"));
 		assert!(named.is_empty());
 		assert_eq!(mounts.len(), 1);
 		assert_eq!(mounts[0].mount_type, "npipe");
@@ -337,7 +326,7 @@ mod tests {
 			tmpfs: None,
 			consistency: None,
 		}]);
-		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"));
 		assert_eq!(mounts.len(), 1);
 		assert_eq!(mounts[0].mount_type, "cluster");
 		assert_eq!(mounts[0].destination, "/data");
@@ -360,21 +349,12 @@ mod tests {
 			}),
 			consistency: None,
 		}]);
-		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"));
 		assert_eq!(mounts.len(), 1);
 		assert_eq!(mounts[0].mount_type, "tmpfs");
 		assert_eq!(mounts[0].destination, "/tmp/cache");
 		assert!(mounts[0].options.iter().any(|o| o.starts_with("size=")));
 		assert!(mounts[0].options.iter().any(|o| o.starts_with("mode=")));
-	}
-
-	#[test]
-	fn secret_binds_appended() {
-		let svc = svc_with_volumes(vec![]);
-		let secret = "/run/secrets/mydb:/run/secrets/mydb:ro".to_string();
-		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"), &[secret], &[]);
-		assert_eq!(mounts.len(), 1);
-		assert_eq!(mounts[0].destination, "/run/secrets/mydb");
 	}
 
 	#[test]
@@ -395,7 +375,7 @@ mod tests {
 			tmpfs: None,
 			consistency: None,
 		}]);
-		build_mounts_all(&svc, dir.path(), &[], &[]);
+		build_mounts_all(&svc, dir.path());
 		assert!(dir.path().join(rel).exists());
 	}
 
@@ -408,7 +388,7 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let rel = "missing-dir";
 		let svc = svc_with_volumes(vec![VolumeMount::Short(format!("./{rel}:/app/data"))]);
-		let (mounts, named) = build_mounts_all(&svc, dir.path(), &[], &[]);
+		let (mounts, named) = build_mounts_all(&svc, dir.path());
 		assert!(named.is_empty());
 		assert_eq!(mounts.len(), 1);
 		assert_eq!(mounts[0].mount_type, "bind");
@@ -425,7 +405,7 @@ mod tests {
 			tmpfs: StringOrList::List(vec!["/tmp".into(), "/run".into()]),
 			..Default::default()
 		};
-		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"));
 		assert_eq!(mounts.len(), 2);
 		assert_eq!(mounts[0].mount_type, "tmpfs");
 		assert_eq!(mounts[0].destination, "/tmp");
@@ -439,7 +419,7 @@ mod tests {
 			tmpfs: StringOrList::Single("/tmp".into()),
 			..Default::default()
 		};
-		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"), &[], &[]);
+		let (mounts, _) = build_mounts_all(&svc, Path::new("/base"));
 		assert_eq!(mounts.len(), 1);
 		assert_eq!(mounts[0].mount_type, "tmpfs");
 		assert_eq!(mounts[0].destination, "/tmp");

@@ -186,14 +186,33 @@ async fn env_file_loaded() {
 
 	let proj = proj("evf");
 	let engine = Engine::with_base_dir(client, proj.clone(), dir.path().to_path_buf());
-	// env_file covers container.rs L278 (load_env_file_entries)
 	let file = parse_str(
 		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    env_file:\n      - test.env\n",
 	)
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	// The variable has to reach the container's environment. Reaching the line
+	// that loads the file is not the same thing: this test used to note which
+	// source line it covered and then assert nothing, so it would have passed just
+	// as well with `env_file` dropped on the floor.
+	let read = engine
+		.exec_with_options(
+			&file,
+			"web",
+			vec![
+				"sh".to_string(),
+				"-c".to_string(),
+				"test \"$MYVAR\" = hello".to_string(),
+			],
+			podup::ExecOptions::default(),
+		)
+		.await;
 	engine.down(&file).await.unwrap();
+	assert!(
+		read.is_ok(),
+		"MYVAR from env_file did not reach the container's environment: {read:?}"
+	);
 }
 
 // ---------------------------------------------------------------------------
