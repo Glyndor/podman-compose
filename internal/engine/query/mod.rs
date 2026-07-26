@@ -172,6 +172,25 @@ fn stop_on_write_error(container_name: &str, result: std::io::Result<()>) -> boo
 	}
 }
 
+/// Whether a log stream that ended with an error truncated live output.
+///
+/// `still_running` is the out-of-band re-check: `Some(true)` the container is
+/// still up, `Some(false)` it has stopped or is gone, `None` the state could not
+/// be read.
+///
+/// `None` counts as a break. It is tempting to read "could not tell" as a clean
+/// end, and that is wrong in the exact case this matters: the severed connection
+/// that ends the stream is usually the same one the re-check needs, so treating
+/// the unknown as success turns every transport failure back into exit 0 — which
+/// is the bug, not the fix. Measured: with the permissive version, restarting the
+/// libpod socket under an attached `logs -f` reported a still-running container
+/// as stopped.
+///
+/// Pure so the rule is pinned without a live socket.
+fn log_stream_broke_mid_output(still_running: Option<bool>) -> bool {
+	!matches!(still_running, Some(false))
+}
+
 /// Build the libpod `containers/{}/logs` query string from the options.
 fn log_query(opts: &LogsOptions) -> String {
 	let mut q = format!(
@@ -312,6 +331,12 @@ impl Engine {
 		// Same rule one level down: a container that will not stream is tolerated
 		// while another does, but every target failing is the command failing.
 		let mut streamed_err: Option<ComposeError> = None;
+		// A stream that truncated live output is NOT the same class as a container
+		// that would not open one. The latter is tolerated while another streams;
+		// the former means output was lost, so it must survive the `streamed_any`
+		// shortcut below rather than being masked by a sibling that streamed fine
+		// (#1104).
+		let mut truncated_err: Option<ComposeError> = None;
 		let mut streamed_any = false;
 		let target_count = targets.len();
 
@@ -358,16 +383,43 @@ impl Engine {
 								Ok(LogOutput::StdErr { message }) => {
 									err_pfx.write(&mut std::io::stderr().lock(), &message)
 								}
-								// Diagnostic only — nothing branches on this. Naming the
-								// classification is what lets a lane run answer whether a
-								// finished stream is distinguishable from a broken one
-								// (#1104), instead of the question being argued from the
-								// source. Real 5.4.2 never reaches this arm.
+								// A `logs -f` stream ends when its container stops, and
+								// libpod marks that with a chunked terminator. A lost
+								// terminator arrives here as an `Err` indistinguishable
+								// at the transport layer from a real mid-stream break
+								// (#1104), so resolve it out of band: if the container is
+								// still running, live output was truncated and the
+								// command failed.
+								//
+								// Measured on real 5.4.2 by restarting the libpod socket
+								// under an attached `logs -f`: the arm is reached, the
+								// container is still running, and this used to exit 0.
+								// docker compose reports `unexpected EOF` and exits 1 on
+								// the same failure, so 0 was a divergence, not parity.
+								//
+								// The re-check is point-in-time, so a genuine break that
+								// coincides with the container stopping is knowingly
+								// read as a clean end — the transport cannot separate
+								// them and the container is gone either way.
 								Err(e) => {
-									tracing::warn!(
-										"logs {container_name}: stream ended [{}]: {e}",
-										e.stream_end_kind()
-									);
+									let kind = e.stream_end_kind();
+									match log_stream_broke_mid_output(
+										self.container_still_running(&container_name).await,
+									) {
+										true => {
+											tracing::warn!(
+												"logs {container_name}: stream ended while the \
+												 container was still running [{kind}]: {e}"
+											);
+											return Some(e);
+										}
+										false => {
+											tracing::warn!(
+												"logs {container_name}: stream ended as the \
+												 container stopped [{kind}]"
+											);
+										}
+									}
 									break;
 								}
 							};
@@ -431,11 +483,28 @@ impl Engine {
 						Ok(LogOutput::StdErr { message }) => {
 							err_pfx.write(&mut std::io::stderr().lock(), &message)
 						}
+						// Same out-of-band resolution as the concurrent path above: a
+						// stream that ends while its container is still running
+						// truncated live output (#1104).
 						Err(e) => {
-							tracing::warn!(
-								"logs {container_name}: stream ended [{}]: {e}",
-								e.stream_end_kind()
-							);
+							let kind = e.stream_end_kind();
+							match log_stream_broke_mid_output(
+								self.container_still_running(&container_name).await,
+							) {
+								true => {
+									tracing::warn!(
+										"logs {container_name}: stream ended while the container \
+										 was still running [{kind}]: {e}"
+									);
+									truncated_err.get_or_insert(ComposeError::Podman(e));
+								}
+								false => {
+									tracing::warn!(
+										"logs {container_name}: stream ended as the container \
+										 stopped [{kind}]"
+									);
+								}
+							}
 							break;
 						}
 					};
@@ -449,10 +518,52 @@ impl Engine {
 			}
 		}
 
+		// Checked before the tolerance shortcut: output was lost, and another
+		// container streaming cleanly does not make that untrue.
+		if let Some(e) = truncated_err {
+			return Err(e);
+		}
 		if streamed_any {
 			return Ok(());
 		}
 		streamed_err.map_or(Ok(()), Err)
+	}
+
+	/// Whether `container_name` is still running, for resolving how a log stream
+	/// ended.
+	///
+	/// A `logs -f` stream lives as long as its container runs and ends when the
+	/// container stops. libpod signals that end with a chunked terminator, and a
+	/// lost terminator — a dropped connection, or a version that omits it —
+	/// arrives as an `Err` that the transport layer cannot tell apart from a real
+	/// mid-stream break (#1104). Re-checking the container out of band resolves
+	/// it: still running means the stream truncated live output.
+	///
+	/// `Ok(None)` is "could not tell" — an unreadable state is not confirmation
+	/// the end was expected, so the caller keeps the original error rather than
+	/// masking a possible failure. Mirrors the fail-closed rule `stats` uses.
+	async fn container_still_running(&self, container_name: &str) -> Option<bool> {
+		let filters = serde_json::json!({ "label": [format!("podup.project={}", self.project)] });
+		let path = format!(
+			"{API_PREFIX}/containers/json?all=true&filters={}",
+			urlencoded(&filters.to_string()),
+		);
+		let entries = self
+			.client
+			.get_json::<Vec<crate::libpod::types::container::ContainerListEntry>>(&path)
+			.await
+			.ok()?;
+		entries
+			.iter()
+			.find(|e| {
+				e.names
+					.iter()
+					.any(|raw| raw.trim_start_matches('/') == container_name)
+			})
+			.map(|e| e.state == "running")
+			// A container the listing no longer holds has been removed, which is a
+			// stop by any other name — the stream had every reason to end.
+			.or(Some(false))
 	}
 
 	/// Names of this project's containers (by label) that the current compose file

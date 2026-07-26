@@ -1,4 +1,7 @@
-use super::{filter_orphans, is_valid_log_time, log_query, validate_log_filters, LogsOptions};
+use super::{
+	filter_orphans, is_valid_log_time, log_query, log_stream_broke_mid_output,
+	validate_log_filters, LogsOptions,
+};
 use std::collections::HashSet;
 
 #[cfg(unix)]
@@ -330,4 +333,31 @@ async fn logs_tolerates_one_container_that_will_not_stream() {
 	)
 	.await
 	.expect("one container failing to stream must not blank the other");
+}
+
+// ---------------------------------------------------------------------------
+// #1104: telling a finished log stream from a broken one
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_stream_ending_while_the_container_runs_is_a_break() {
+	// The container outlived its own log stream, so output was truncated.
+	assert!(log_stream_broke_mid_output(Some(true)));
+}
+
+#[test]
+fn a_stream_ending_after_the_container_stopped_is_clean() {
+	// The stream is supposed to end here; libpod just did not get to say so.
+	assert!(!log_stream_broke_mid_output(Some(false)));
+}
+
+#[test]
+fn an_unreadable_state_counts_as_a_break() {
+	// The rule that is easy to get backwards, and the one that matters most: the
+	// severed connection that ends the stream is usually the same one the
+	// re-check needs, so reading "could not tell" as a clean end turns every
+	// transport failure back into exit 0. Measured — the permissive version
+	// reported a still-running container as stopped when the socket restarted
+	// under an attached `logs -f`.
+	assert!(log_stream_broke_mid_output(None));
 }
