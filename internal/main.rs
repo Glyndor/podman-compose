@@ -452,6 +452,12 @@ async fn run() -> podup::Result<()> {
 		};
 		// Honor active profiles so `config` prints the same services `up` starts.
 		podup::retain_active_profiles(&mut resolved, &cli.profile);
+		// Fold `env_file:` into `environment:` the way docker compose does, so a
+		// service whose whole environment comes from a file does not render with no
+		// environment at all (#1184). `config` is the command you reach for to ask
+		// what will actually run; leaving the key unresolved pointed away from the
+		// answer rather than merely omitting it.
+		podup::env_file::materialize_env_files(&mut resolved, &base_dir)?;
 		// Render the resolved project name (already settled above from -p /
 		// COMPOSE_PROJECT_NAME, the top-level `name:`, then the directory
 		// basename), like `docker compose config`, rather than echoing the file's

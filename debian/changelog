@@ -1,3 +1,41 @@
+podup (3.1.0) unstable; urgency=medium
+
+  Changed
+
+  * A `file:` secret or config is read at `up` and injected as a
+    Podman-native secret instead of being bind-mounted from the host path.
+    On a host with SELinux enforcing the bind was denied outright, so the
+    container could not read its own secret while `up` still reported it
+    started; Fedora, RHEL and CentOS Stream are all enforcing by default.
+    Nothing on the host is mounted, relabelled or modified now. What the
+    container sees is unchanged: with no `mode:` the secret carries the
+    host file's own permission bits, so 0644 stays 0644 and 0600 stays
+    unreadable to a non-root container user. Note the trade: the payload
+    is a copy taken at `up`, so editing the host file afterwards no longer
+    reaches an already-running container — recreate it to pick up a new
+    value. An atomic replace never did reach one, since a file bind pins
+    the inode.
+
+  Fixes
+
+  * `config` folds `env_file` into `environment:` and drops the key, the
+    way docker compose renders it. A service taking its whole environment
+    from a file used to render with no `environment:` at all, so the one
+    command you use to ask what will actually run pointed away from the
+    answer. Precedence is unchanged: `environment:` wins over `env_file:`,
+    a later file wins over an earlier one, and a bare `KEY` stays
+    valueless.
+
+  Tests
+
+  * The secrets, configs, `env_file`, `cp`, `port`, `include`/`extends`,
+    multi-`-f` and `watch` integration tests assert the observable effect
+    rather than only that nothing errored; `include`/`extends`, multi-file
+    merge and the `rebuild` and `sync+restart` watch actions are covered
+    for the first time.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sun, 26 Jul 2026 13:50:00 -0500
+
 podup (3.0.2) unstable; urgency=medium
 
   Fixes
