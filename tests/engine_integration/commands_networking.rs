@@ -127,8 +127,13 @@ async fn engine_images_lists_service_images() {
 // Port
 // ---------------------------------------------------------------------------
 
+/// `Engine::port` returns `Result<()>` and writes the binding to stdout, so this
+/// can only assert that a published port resolves without error. The binding
+/// itself is checked where it is observable, in
+/// `stats_flags::cli_port_prints_the_published_binding` — this test used to be
+/// named for a return value the API does not have.
 #[tokio::test]
-async fn engine_port_returns_binding() {
+async fn engine_port_resolves_a_published_port() {
 	let client = match podman().await {
 		Some(d) => d,
 		None => return,
@@ -196,9 +201,29 @@ async fn engine_cp_to_container_uploads_file() {
 	let src = local_file.to_str().unwrap().to_string();
 	let dst = "web:/tmp".to_string();
 	let result = engine.cp(&file, &src, &dst).await;
+	// `cp` reporting success is not the same as the file arriving — that exact
+	// false success is what #1097 was on Podman 6, where libpod accepted the
+	// archive, closed the connection without a response, and podup called it done.
+	// Read the copy back out of the container before tearing anything down.
+	let landed = engine
+		.exec_with_options(
+			&file,
+			"web",
+			vec![
+				"sh".to_string(),
+				"-c".to_string(),
+				"test \"$(cat /tmp/testfile.txt)\" = 'hello from host'".to_string(),
+			],
+			podup::ExecOptions::default(),
+		)
+		.await;
 	engine.down(&file).await.unwrap();
 
 	result.unwrap();
+	assert!(
+		landed.is_ok(),
+		"cp reported success but /tmp/testfile.txt is missing or has the wrong contents: {landed:?}"
+	);
 }
 
 // ---------------------------------------------------------------------------
