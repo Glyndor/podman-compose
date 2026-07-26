@@ -113,6 +113,8 @@ mod cli_lifecycle;
 mod create_ls;
 #[path = "engine_integration/lifecycle_output.rs"]
 mod lifecycle_output;
+#[path = "engine_integration/multi_file.rs"]
+mod multi_file;
 #[path = "engine_integration/scale.rs"]
 mod scale;
 #[path = "engine_integration/stats_flags.rs"]
