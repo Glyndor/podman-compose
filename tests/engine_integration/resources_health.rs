@@ -68,7 +68,32 @@ async fn file_secret_bound() {
 	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	// The container must READ the secret, not merely be started with it attached.
+	// Asserting only that `up` and `down` succeed is what let a `file:` secret stay
+	// unreadable on every SELinux-enforcing host for the life of the feature: the
+	// mount was there, at the right path, with the right bytes behind it, and the
+	// container was denied the open. `run` propagates the command's exit code, so
+	// the read is checked without a sleep standing in for synchronisation.
+	let read = engine
+		.run(
+			&file,
+			"web",
+			podup::RunOptions {
+				cmd: vec![
+					"sh".to_string(),
+					"-c".to_string(),
+					"test \"$(cat /run/secrets/filesecret)\" = file-secret-content".to_string(),
+				],
+				rm: true,
+				..Default::default()
+			},
+		)
+		.await;
 	engine.down(&file).await.unwrap();
+	assert!(
+		read.is_ok(),
+		"the container could not read /run/secrets/filesecret: {read:?}"
+	);
 }
 
 #[test]

@@ -53,10 +53,11 @@ GPU driver and CDI setup, not on podup alone.
 A secret or config declared `external: true` is mounted from an existing
 Podman secret rather than from a value in the project tree — the recommended
 pattern for production credentials, since the secret material never appears in
-the compose file or its history. (Inline `content:`/`environment:` sources are
-also injected as Podman-native secrets, not host bind-mounts, but their value
-still lives in the compose file.) Create the secret before running, exactly as
-you would with `docker secret`:
+the compose file or its history. (Every other source — inline
+`content:`/`environment:` and `file:` alike — is injected as a Podman-native
+secret too, never a host bind mount, but its value still lives in the compose
+file or next to it.) Create the secret before running, exactly as you would with
+`docker secret`:
 
 ```sh
 printf '%s' "$DB_PASSWORD" | podman secret create db_password -
