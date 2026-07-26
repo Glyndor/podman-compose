@@ -20,4 +20,4 @@ permissions:
 
 jobs:
   supply-chain:
-    uses: Glyndor/.github/.github/workflows/rust-supply-chain.yml@7099f8a9c8be91fa1732fe2402268b338771233f # v1.10.1-pre
+    uses: Glyndor/.github/.github/workflows/rust-supply-chain.yml@7099f8a9c8be91fa1732fe2402268b338771233f # v1.10.1
