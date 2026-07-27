@@ -87,8 +87,10 @@ pub(super) fn collect_native_plans(
 				},
 				base_dir,
 			)?;
-			// A bare target name lands under /run/secrets/<name>, matching the
-			// bind-mount default and the external-secret behaviour.
+			// A bare target name lands under /run/secrets/<name>, which is where
+			// Podman mounts a secret referenced by name and where a `file:` source
+			// landed back when it was a bind mount. Changing it would move every
+			// existing project's secrets.
 			push_plan(
 				&mut plans,
 				source,
@@ -116,8 +118,10 @@ pub(super) fn collect_native_plans(
 				},
 				base_dir,
 			)?;
-			// Configs default to an absolute container-root path, matching the
-			// bind-mount config behaviour.
+			// Configs default to an absolute container-root path — `/name`, not
+			// `/run/secrets/name`. That is what separates a config from a secret
+			// here, and it is the path a `file:` config landed on when it was a
+			// bind mount.
 			let target = target_override.unwrap_or_else(|| format!("/{name}"));
 			push_plan(&mut plans, source, target, mode, uid, gid)?;
 		}

@@ -427,8 +427,16 @@ The `action` of each rule may be:
 ## Maintenance
 
 ### `config`
-Print the resolved compose file (after substitution, extends, include).
-`convert` is an alias.
+Print the resolved compose file (after substitution, extends, include, and
+`env_file`). `convert` is an alias.
+
+`env_file` entries are read and folded into `environment:`, and the key is
+dropped — the same thing `docker compose config` does. Before 3.1.0 the key was
+printed unresolved, so a service taking its whole environment from a file
+rendered with no `environment:` at all, and `config` pointed away from the answer
+it is meant to give. `environment:` still wins over `env_file:`, a later file
+still wins over an earlier one, and a bare `KEY` stays valueless because it means
+"inherit from the host".
 
 | Flag | Description | Default |
 |---|---|---|
@@ -635,6 +643,27 @@ completed run from an abandoned one.
 splits `NetIO`/`BlockIO` into separate input/output fields. Raw numbers are
 exact and need no parsing, but it does mean a docker-compose JSON consumer needs
 adapting rather than working unchanged.
+
+**A streaming command that loses its connection fails.** `logs` and `stats` end
+when the containers they follow stop, and libpod marks that end with a chunked
+terminator. A lost terminator — a dropped connection, or a version that omits it
+— is indistinguishable from a real mid-stream break at the transport layer, so
+both commands resolve it out of band: they re-check whether the containers are
+still running. Still running means live output was truncated, and the command
+exits `1`.
+
+This matters for anything scraping them. `logs -f` used to return success after
+losing its socket, so a monitor could not tell "the container finished" from "my
+connection died" — and a script reading that `0` was already wrong, it just had
+no way to know. `docker compose logs -f` exits `1` on the same failure (measured
+against the same Podman socket), so the old `0` was a divergence rather than
+parity.
+
+A stream that ends because its containers stopped still exits `0`, as does
+`logs` without `-f` and a `logs -f` whose reader closes the pipe (`| head`).
+When the re-check itself cannot be made — usually because the same severed
+connection is needed for it — the command fails rather than assuming the end was
+clean.
 
 **`watch` is the exception.** A sync, rebuild, restart or exec that fails during
 a watch session is reported as a warning and the session keeps going; `watch`
