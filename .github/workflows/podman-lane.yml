@@ -263,6 +263,14 @@ jobs:
           # deliberately as the suite grows rather than sitting as a magic number
           # here.
           #
+          # 2026-07-27: raised 115 -> 165 against a suite that now runs 172 on both
+          # legs. At 115 the floor had 57 tests of slack, so a suite that executed
+          # two thirds of itself and reported them all green would have passed the
+          # only check that can see a half-executed run. 165 keeps a small margin
+          # for the identity gate's own territory — a handful of classified
+          # failures must not redden the floor too — without leaving room for a
+          # third of the suite to vanish unnoticed.
+          #
           # The floor is a second, cruder signal: it catches "fewer tests ran"
           # (a suite that half-executed reports few failures and few passes),
           # which the identity gate above cannot see. It stays for both majors.

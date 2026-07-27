@@ -24,5 +24,17 @@
 # denied, with `z` it succeeds. The test now asks for the relabel a user on such
 # a host writes too, and passes there. My physical host runs no SELinux, which is
 # once more why the 155/155 comparison could not see the difference.
-
-niche::engine_events_stream_connects
+#
+# 2026-07-27: and with that the last entry goes too. The lane printed its own
+# stale-entry notice for niche::engine_events_stream_connects in three
+# consecutive runs — 30237701219, 30239588499 and the 12:26 nightly on main,
+# 30265944631 — each carrying `test niche::engine_events_stream_connects ... ok`
+# in the log, 172 passed and 0 failed on both legs, and no retry fired on either.
+# The events stream was never the nested-virt casualty this line claimed it was;
+# the journald fix of 2026-07-20 is the likeliest reason it stopped failing, and
+# nobody noticed because one listed entry is invisible when the gate is happy.
+#
+# So this file is empty now, and so is its Podman 6 counterpart. That is the
+# loudest shape either can have: on both majors, any failing test is a regression
+# until a run says otherwise. If one appears here, classify it with a run and add
+# it back with the evidence — do not add it to make the red go away.
