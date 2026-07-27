@@ -34,13 +34,17 @@ A podup loss is published exactly like a podup win.
 |---|---|
 | `single` | one container — minimal lifecycle cost |
 | `multi-healthcheck` | `depends_on: service_healthy` gate on `up` |
+| `deep-chain` | a dependency chain behind a fast service: where a level-barrier scheduler loses to a per-service DAG (#1071) |
+| `wide-level` | 41 services in one level plus one dependent — the batching cost the two-service `deep-chain` cannot show |
 | `scale` | `--scale app=5` replica fan-out |
 | `network-ipam` | custom bridge network with explicit IPAM |
 | `volume-heavy` | several named volumes created/removed |
+| `secrets` | six `file:` secrets — materialised as Podman-native secrets since 3.1.0, which is an API call per secret each way |
 | `warm-restart` | a second `up` on an already-running project |
-| `many-services
-- **deep-chain** — a fast and a slow service in the same dependency level, with a chain behind the fast one. The shape where a level-barrier scheduler would lose to a per-service DAG (#1071); kept so that claim stays falsifiable rather than assumed.` | a 12-service compose file |
+| `many-services` | a 12-service compose file, the realistic upper end |
 | `running-ops` | `ps`, `logs`, `exec`, `restart` on a running stack |
+| `wide-running-ops` | the same read path across twelve containers, where the work grows with the container count |
+| `config-heavy` | `config` over a base + override pair: the one scenario with no engine in it, so no daemon variance |
 | `build` | `build --no-cache` from a Dockerfile (base pinned by digest) |
 
 The lifecycle scenarios time `up -d` and `down -v` (`warm-restart` times the warm
