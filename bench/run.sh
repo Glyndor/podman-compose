@@ -53,10 +53,10 @@ mkdir -p "$OUT_DIR"
 #   reup    : time a warm second `up -d`
 #   running : bring up untimed, then time `ps`, `logs`, `exec -T`, `restart`
 #   build   : time `build --no-cache`
-SCENARIOS=(single multi-healthcheck deep-chain wide-level scale network-ipam volume-heavy warm-restart many-services running-ops wide-running-ops config-heavy build)
+SCENARIOS=(single multi-healthcheck deep-chain wide-level scale network-ipam volume-heavy secrets warm-restart many-services running-ops wide-running-ops config-heavy build)
 declare -A OP=(
 	[single]=updown [multi-healthcheck]=updown [scale]=scale
-	[network-ipam]=updown [volume-heavy]=updown [warm-restart]=reup
+	[network-ipam]=updown [volume-heavy]=updown [secrets]=updown [warm-restart]=reup
 	[many-services]=updown [running-ops]=running [build]=build
 	[config-heavy]=parse [wide-running-ops]=running
 	[deep-chain]=updown [wide-level]=updown
