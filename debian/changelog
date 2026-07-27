@@ -1,3 +1,24 @@
+podup (3.2.0) unstable; urgency=medium
+
+  Changed
+
+  * `logs` exits non-zero when its stream truncates live output. It used to
+    report success after losing its connection to the engine, so a monitor
+    scraping it could not tell "the container finished" from "my socket
+    died". The two are indistinguishable at the transport layer, so the
+    container's state is re-checked out of band: still running means live
+    output was lost. docker compose exits 1 on the same failure, measured
+    against the same socket. A stream that ends because its container
+    stopped still exits zero, as do `logs` without `-f` and a `logs -f`
+    whose reader closes the pipe.
+
+  Dependencies
+
+  * 41 crates updated, including rustls 0.23.40 -> 0.23.42, the TLS stack
+    `podup update` uses to reach GitHub.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sun, 26 Jul 2026 21:32:00 -0500
+
 podup (3.1.0) unstable; urgency=medium
 
   Changed
