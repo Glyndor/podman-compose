@@ -19,6 +19,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RAW = os.path.join(HERE, "results", "raw.csv")
 MD = os.path.join(HERE, "results", "report.md")
 JSON = os.path.join(HERE, "results", "summary.json")
+ENGINE = os.path.join(HERE, "results", "engine")
+
+
+def read_engine():
+	"""Which engine docker-compose drove, as recorded by run.sh next to raw.csv.
+
+	Empty when the file is absent — an older results directory, or a run where
+	docker-compose was not measured at all.
+	"""
+	try:
+		with open(ENGINE) as f:
+			return f.read().strip()
+	except OSError:
+		return ""
 
 # Preferred ordering only. Anything measured but not listed here is appended
 # rather than dropped: this list silently discarded four scenarios' worth of
@@ -26,7 +40,7 @@ JSON = os.path.join(HERE, "results", "summary.json")
 # a filter, not an order — 972 rows measured, four scenarios never printed.
 SCEN_ORDER = [
 	"single", "multi-healthcheck", "deep-chain", "wide-level", "scale",
-	"network-ipam", "volume-heavy", "warm-restart", "many-services",
+	"network-ipam", "volume-heavy", "secrets", "warm-restart", "many-services",
 	"running-ops", "wide-running-ops", "config-heavy", "build",
 ]
 OP_ORDER = ["up", "reup", "down", "config", "ps", "logs", "exec", "restart", "build"]
@@ -115,15 +129,20 @@ def main():
 				}
 				summary.setdefault(tool, {}).setdefault(scen, {})[op] = cell
 
-	with open(JSON, "w") as f:
-		json.dump(summary, f, indent="\t", sort_keys=True)
+	if not self_test:
+		with open(JSON, "w") as f:
+			json.dump(summary, f, indent="\t", sort_keys=True)
 
 	# Which engine docker-compose drove decides which table it belongs in, and
 	# that is a property of the RUN, not of the tool's name. run.sh records it;
 	# assuming "docker-compose means dockerd" printed a same-engine measurement
 	# under a heading that said "different daemon", which is the report saying
 	# the opposite of what happened.
-	dc_engine = os.environ.get("BENCH_DOCKER_ENGINE", "")
+	# The env var only reaches here when the aggregator runs inside run.sh's own
+	# process; the documented flow is two separate commands, so the file run.sh
+	# leaves beside raw.csv is the path that actually works. Env wins when set, so
+	# a hand-driven run can still override it.
+	dc_engine = os.environ.get("BENCH_DOCKER_ENGINE", "") or read_engine()
 	dc_same = dc_engine == "podman"
 	same = [t for t in tools if t in ("podup", "podman-compose")]
 	if dc_same:
@@ -187,6 +206,13 @@ def main():
 		lines.append("> docker-compose was not measured against a Docker daemon "
 					 "on this host, so the cross-engine comparison is left blank "
 					 "rather than estimated.\n")
+
+	if self_test:
+		# The self-test runs on six fixture rows. Writing them out would replace a
+		# real report and summary — the output of a benchmark that takes the better
+		# part of an hour and cannot be recomputed, since raw.csv is the only copy.
+		print(f"self-test ok ({len(rows)} fixture rows); {MD} and {JSON} left untouched")
+		return 0
 
 	with open(MD, "w") as f:
 		f.write("\n".join(lines))
