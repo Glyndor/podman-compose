@@ -267,19 +267,23 @@ jobs:
           # (a suite that half-executed reports few failures and few passes),
           # which the identity gate above cannot see. It stays for both majors.
           #
-          # Why the failure COUNT is still only a warning, and why Podman 6 has
-          # no identity list yet: the count never separated a regression from
-          # noise — measured on this lane, Podman 5 fails the same ~10
-          # streaming/attach/run tests every run with ZERO connection-drop
-          # signatures, so "FAIL <= drop count" would redden every run. The
-          # identity gate replaces it for any major with a classified list.
-          # Podman 5 has one: every entry was proved environmental by running
-          # the same suite on a real host (155/155 passed) while the lane
-          # reported 10 failures. Podman 6 does not, because its set carries a
-          # variable tail (identities seen in 1-of-5 runs) that would redden
-          # innocent pull requests — the exact failure that forced this floor
-          # down from 120 to 115. Classifying it is #1039; until then Podman 6
-          # keeps the floor alone, and that gap is deliberate.
+          # Why the failure COUNT is still only a warning: it never separated a
+          # regression from noise — measured on this lane, Podman 5 fails the
+          # same ~10 streaming/attach/run tests every run with ZERO
+          # connection-drop signatures, so "FAIL <= drop count" would redden
+          # every run. The identity gate replaces it for any major with a
+          # classified list, and BOTH majors now have one.
+          #
+          # Podman 5's entries were each proved environmental by running the same
+          # suite on a real host (155/155) while the lane reported failures.
+          #
+          # Podman 6 went without a list because its failing set carried a
+          # variable tail that observation would have turned into false reds —
+          # and the floor it gated on instead reported the leg green through 31
+          # failures (141 passed, floor 115). That tail was one cause:
+          # serialising the leg removed it, and its list is now empty, so any
+          # failure there is a regression. See the file's own header for the
+          # evidence and for how thin it is.
           BASELINE="$(cat "$GITHUB_WORKSPACE/.github/podman-baseline-tests")"
           [ "$PASS" -ge "$BASELINE" ] || { echo "::error::core suite degraded on Podman $VER ($PASS passed, baseline >= $BASELINE) — real regression or fewer tests ran"; exit 1; }
           if [ "$FAIL" -gt "$FLAKY" ]; then
