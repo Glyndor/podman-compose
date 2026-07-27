@@ -21,13 +21,15 @@ permissions:
 jobs:
   podman-vm:
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    # Raised for the one-thread experiment: serialising the suite costs wall
+    # clock, and a run that dies on the timeout answers nothing (#1039).
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
         podman: ["5", "6"]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install qemu + cloud tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-x86 qemu-utils cloud-image-utils
       - name: Fetch Fedora cloud image (Podman 6 = rawhide, 5 = Fedora 44)
@@ -94,7 +96,21 @@ jobs:
                 # the second run, so this stabilises the lane for required-check gating
                 # without masking genuine bugs.
                 #
-                # `--test-threads=2` caps how many streaming tests hit the libpod
+                # EXPERIMENT (#1039): the thread cap is per major, substituted into
+                # this script when the seed is built — Podman 6 runs at 1, Podman 5
+                # stays at 2 as the control.
+                #
+                # Every hypothesis for Podman 6's failing tail has been falsified in
+                # turn: journald, SELinux, and a boot race on systemd-resolved, the
+                # last one killed by its own instrumentation. What survives is the
+                # shape of the error — the path that is missing is the mount
+                # DESTINATION inside Podman's rootless-netns tree, not a host file,
+                # which reads as the shared netns being torn down under a concurrent
+                # container creation. One thread is the cheapest way to test that: if
+                # the signature disappears, concurrency is the lever; if it survives,
+                # this hypothesis dies too and the search moves elsewhere.
+                #
+                # `--test-threads` caps how many streaming tests hit the libpod
                 # socket at once. The nested-virt (VM-in-runner) transport is what
                 # drops connections mid-stream — measured: on a single-level VM
                 # (Podman 5.8.1 and 6.0.1) the same suite never drops a byte, so the
@@ -104,7 +120,7 @@ jobs:
                 # a small, stable set that an identity list can gate (#1039). Kept at
                 # 2 rather than 1 so the suite still fits the VM's time budget.
                 for attempt in 1 2; do
-                  RUST_LOG=podup=warn cargo test --features test-helpers --test engine_integration -- --test-threads=2 > /tmp/cargo.log 2>&1
+                  RUST_LOG=podup=warn cargo test --features test-helpers --test engine_integration -- --test-threads=__THREADS__ > /tmp/cargo.log 2>&1
                   RC=$?
                   [ "$RC" -eq 0 ] && break
                   grep -qE 'IncompleteMessage|connection closed before message completed|channel closed|Connection reset' /tmp/cargo.log || break
@@ -145,10 +161,19 @@ jobs:
             - bash -c 'sudo -iu tester /usr/local/bin/run-suite.sh >/dev/console 2>&1'
             - bash -c 'echo PROBE_DONE >/dev/console; sleep 2; poweroff'
           EOF
+          # The seed heredoc is quoted, so the matrix value cannot expand inside
+          # it. Substitute the per-major thread cap here instead (#1039).
+          THREADS=2
+          [ "${{ matrix.podman }}" = "6" ] && THREADS=1
+          echo "test-threads for Podman ${{ matrix.podman }}: $THREADS"
+          sed -i "s/__THREADS__/$THREADS/" "$RUNNER_TEMP/user-data"
           cloud-localds "$RUNNER_TEMP/seed.iso" "$RUNNER_TEMP/user-data"
       - name: Boot VM (9p = repo only) + capture
         run: |
-          sudo timeout 2700 qemu-system-x86_64 -enable-kvm -cpu host -m 6144 -smp 4 \
+          # Raised with the job timeout for the one-thread experiment (#1039): qemu
+          # has its own cap, and leaving it at 45m would kill the VM before the job
+          # noticed, turning a slow run into an inconclusive one.
+          sudo timeout 4200 qemu-system-x86_64 -enable-kvm -cpu host -m 6144 -smp 4 \
             -drive file="$RUNNER_TEMP/vm.qcow2",if=virtio,format=qcow2 \
             -drive file="$RUNNER_TEMP/seed.iso",if=virtio,format=raw \
             -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
@@ -242,19 +267,23 @@ jobs:
           # (a suite that half-executed reports few failures and few passes),
           # which the identity gate above cannot see. It stays for both majors.
           #
-          # Why the failure COUNT is still only a warning, and why Podman 6 has
-          # no identity list yet: the count never separated a regression from
-          # noise — measured on this lane, Podman 5 fails the same ~10
-          # streaming/attach/run tests every run with ZERO connection-drop
-          # signatures, so "FAIL <= drop count" would redden every run. The
-          # identity gate replaces it for any major with a classified list.
-          # Podman 5 has one: every entry was proved environmental by running
-          # the same suite on a real host (155/155 passed) while the lane
-          # reported 10 failures. Podman 6 does not, because its set carries a
-          # variable tail (identities seen in 1-of-5 runs) that would redden
-          # innocent pull requests — the exact failure that forced this floor
-          # down from 120 to 115. Classifying it is #1039; until then Podman 6
-          # keeps the floor alone, and that gap is deliberate.
+          # Why the failure COUNT is still only a warning: it never separated a
+          # regression from noise — measured on this lane, Podman 5 fails the
+          # same ~10 streaming/attach/run tests every run with ZERO
+          # connection-drop signatures, so "FAIL <= drop count" would redden
+          # every run. The identity gate replaces it for any major with a
+          # classified list, and BOTH majors now have one.
+          #
+          # Podman 5's entries were each proved environmental by running the same
+          # suite on a real host (155/155) while the lane reported failures.
+          #
+          # Podman 6 went without a list because its failing set carried a
+          # variable tail that observation would have turned into false reds —
+          # and the floor it gated on instead reported the leg green through 31
+          # failures (141 passed, floor 115). That tail was one cause:
+          # serialising the leg removed it, and its list is now empty, so any
+          # failure there is a regression. See the file's own header for the
+          # evidence and for how thin it is.
           BASELINE="$(cat "$GITHUB_WORKSPACE/.github/podman-baseline-tests")"
           [ "$PASS" -ge "$BASELINE" ] || { echo "::error::core suite degraded on Podman $VER ($PASS passed, baseline >= $BASELINE) — real regression or fewer tests ran"; exit 1; }
           if [ "$FAIL" -gt "$FLAKY" ]; then
