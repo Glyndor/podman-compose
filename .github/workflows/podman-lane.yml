@@ -21,8 +21,10 @@ permissions:
 jobs:
   podman-vm:
     runs-on: ubuntu-24.04
-    # Raised for the one-thread experiment: serialising the suite costs wall
-    # clock, and a run that dies on the timeout answers nothing (#1039).
+    # Raised when the Podman 6 leg ran serialised (#1039) and deliberately kept
+    # there now that both legs are back at two threads (#1214): a run that dies on
+    # its own timeout answers nothing, and headroom on a lane that only pays for
+    # itself when it is trustworthy costs nothing.
     timeout-minutes: 75
     strategy:
       fail-fast: false
@@ -96,19 +98,19 @@ jobs:
                 # the second run, so this stabilises the lane for required-check gating
                 # without masking genuine bugs.
                 #
-                # EXPERIMENT (#1039): the thread cap is per major, substituted into
-                # this script when the seed is built — Podman 6 runs at 1, Podman 5
-                # stays at 2 as the control.
+                # The thread cap is substituted into this script when the seed is
+                # built, so it can differ per major; both are at 2 today (#1214).
                 #
-                # Every hypothesis for Podman 6's failing tail has been falsified in
-                # turn: journald, SELinux, and a boot race on systemd-resolved, the
-                # last one killed by its own instrumentation. What survives is the
-                # shape of the error — the path that is missing is the mount
-                # DESTINATION inside Podman's rootless-netns tree, not a host file,
-                # which reads as the shared netns being torn down under a concurrent
-                # container creation. One thread is the cheapest way to test that: if
-                # the signature disappears, concurrency is the lever; if it survives,
-                # this hypothesis dies too and the search moves elsewhere.
+                # It was 1 on Podman 6 for a while, and that was an experiment, not a
+                # setting: every other hypothesis for its failing tail had been
+                # falsified — journald, SELinux, a boot race on systemd-resolved —
+                # and what survived was the shape of the error, a mount whose
+                # DESTINATION inside Podman's rootless-netns tree is missing, which
+                # reads as the shared netns going away under a concurrent container
+                # creation. Removing the concurrency took that leg from 31 failures
+                # to zero and the signature vanished with them, which is how the
+                # cause was identified. It also doubled the leg's wall clock, and the
+                # cause being known does not make the price permanent.
                 #
                 # `--test-threads` caps how many streaming tests hit the libpod
                 # socket at once. The nested-virt (VM-in-runner) transport is what
@@ -117,8 +119,11 @@ jobs:
                 # flake is the double-virt socket under concurrent load, not a podup
                 # or libpod bug. Fewer concurrent streams means less peak pressure,
                 # which is the lever to shrink Podman 6's variable flaky tail toward
-                # a small, stable set that an identity list can gate (#1039). Kept at
-                # 2 rather than 1 so the suite still fits the VM's time budget.
+                # a small, stable set that an identity list can gate (#1039). Both
+                # legs run at 2 so the suite fits the VM's time budget; if the tail
+                # returns, the empty classified list reddens the leg by identity
+                # rather than letting it hide in a pass count, which is what makes
+                # this safe to try (#1214).
                 for attempt in 1 2; do
                   RUST_LOG=podup=warn cargo test --features test-helpers --test engine_integration -- --test-threads=__THREADS__ > /tmp/cargo.log 2>&1
                   RC=$?
@@ -163,16 +168,25 @@ jobs:
           EOF
           # The seed heredoc is quoted, so the matrix value cannot expand inside
           # it. Substitute the per-major thread cap here instead (#1039).
+          #
+          # 2026-07-27 (#1214): back to 2 on both majors. One thread was how the
+          # netns hypothesis was TESTED, not a tuning decision, and it doubled the
+          # Podman 6 leg to ~30 minutes on the lane that was already the long pole.
+          # Trying 2 is safe now in a way it was not then: the classified list is
+          # empty on both majors, so if the tail comes back it reddens the leg by
+          # identity instead of hiding inside a pass count. Either outcome is a
+          # result — green means the serialisation was overpriced, red means the
+          # window is real at this concurrency and #1207 gets its answer from the
+          # one environment that has ever shown it.
           THREADS=2
-          [ "${{ matrix.podman }}" = "6" ] && THREADS=1
           echo "test-threads for Podman ${{ matrix.podman }}: $THREADS"
           sed -i "s/__THREADS__/$THREADS/" "$RUNNER_TEMP/user-data"
           cloud-localds "$RUNNER_TEMP/seed.iso" "$RUNNER_TEMP/user-data"
       - name: Boot VM (9p = repo only) + capture
         run: |
-          # Raised with the job timeout for the one-thread experiment (#1039): qemu
-          # has its own cap, and leaving it at 45m would kill the VM before the job
-          # noticed, turning a slow run into an inconclusive one.
+          # Kept in step with the job timeout above: qemu has its own cap, and a
+          # value below the job's would kill the VM before the job noticed, turning
+          # a slow run into an inconclusive one.
           sudo timeout 4200 qemu-system-x86_64 -enable-kvm -cpu host -m 6144 -smp 4 \
             -drive file="$RUNNER_TEMP/vm.qcow2",if=virtio,format=qcow2 \
             -drive file="$RUNNER_TEMP/seed.iso",if=virtio,format=raw \
