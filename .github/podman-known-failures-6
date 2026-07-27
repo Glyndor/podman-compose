@@ -31,3 +31,15 @@
 # add it here with the evidence. Do NOT delete this file to make the red go away —
 # an empty list is what makes a regression loud, and going back to a count gate is
 # how #1072 shipped a bug with the pass count sitting comfortably above the floor.
+#
+# ONE THING TO KNOW BEFORE CLASSIFYING ANYTHING HERE: this leg's environment is not
+# fixed. It boots whatever Fedora Rawhide compose is newest when the job runs, so
+# most days it is a different operating system — different kernel, different
+# systemd, everything below Podman. Two runs of this leg are not two observations
+# of one environment, which is very likely part of why the tail this file's header
+# describes resisted classification for as long as it did. The gate now prints the
+# image alongside the counts (#1222); read it before deciding a failure is
+# environmental, and say which image you saw it on when you add a line here.
+#
+# The same caveat does not apply to Podman 5: that leg boots a released Fedora 44
+# image, which changes only when Fedora respins it.

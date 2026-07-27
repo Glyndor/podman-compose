@@ -45,6 +45,13 @@ jobs:
           fi
           [ -n "$img" ] || { echo "::error::could not resolve a Fedora image name for Podman $SEL at $base"; exit 1; }
           echo "image: $img"
+          # Carry it to the gate step. The name resolves to whatever compose is
+          # newest at this moment, so the Podman 6 leg boots a DIFFERENT operating
+          # system most days — and until now that fact lived only in the middle of
+          # this step's log. Two runs of this leg are not the same environment, and
+          # anyone comparing a failure against the run before it has to know which
+          # one they got (#1222).
+          echo "VM_IMAGE=$img" >> "$GITHUB_ENV"
           # The rawhide qcow2 is ~500 MB and the mirror occasionally drops the
           # connection mid-transfer (curl exit 18). Resume + retry so a transient
           # network blip doesn't fail the lane.
@@ -214,6 +221,15 @@ jobs:
           FLAKY=$(echo "$SUM" | grep -oE 'flaky=[0-9]+' | cut -d= -f2)
           PASS=${PASS:-0}; FAIL=${FAIL:-0}; FLAKY=${FLAKY:-0}
           echo "Podman $VER: $PASS passed, $FAIL failed ($FLAKY look like connection-drop flakes)"
+          echo "Podman $VER ran on image: ${VM_IMAGE:-unknown}"
+          # The run page, not just the log: whoever reads a red lane needs the
+          # environment next to the counts, and the rawhide leg's environment
+          # changes under it (#1222).
+          {
+            echo "### Podman $VER — $PASS passed, $FAIL failed, $FLAKY drop-like"
+            echo ""
+            echo "image: \`${VM_IMAGE:-unknown}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
           # Strip CR: the VM talks to us over `-serial stdio`, so every line of
           # this log arrives CRLF-terminated. The counts survive because they are
           # extracted with numeric patterns, but the identity list keeps the CR on
@@ -247,6 +263,7 @@ jobs:
             if [ -n "$unexpected" ]; then
               echo "::error::Podman $VER: these failing tests are not in $(basename "$known") — a test that used to pass is failing, which is a regression, not nested-virt noise:"
               echo "$unexpected" | awk '{print "  " $0}'
+              echo "Environment: Podman $VER on ${VM_IMAGE:-an unrecorded image}. Before concluding, check whether the run you are comparing against booted the same one — the rawhide leg usually does not (#1222)."
               echo "If a run proves the failure is environmental, add it to that file with the evidence; do not add it to make this red go away."
               exit 1
             fi
