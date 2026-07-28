@@ -98,10 +98,21 @@ jobs:
                 # Capture the FULL output: the per-failure detail (where the flake
                 # marker lives) precedes the summary, so a `tail` on the console
                 # would truncate it and hide why a test failed.
-                # Retry once on a nested-virt transient (a connection drop surfaces
-                # as Hyper(IncompleteMessage) and kin). A real failure reproduces on
-                # the second run, so this stabilises the lane for required-check gating
-                # without masking genuine bugs.
+                # Retry once on a nested-virt transient (a dropped connection). A real
+                # failure reproduces on the second run, so this stabilises the lane for
+                # required-check gating without masking genuine bugs.
+                #
+                # WHAT COUNTS AS A DROP — defined once, used by both the retry above and
+                # the FLAKY counter below, because the two drifting apart is how this
+                # went wrong (#1104). The list used to hold only the head-level shapes,
+                # and a dropped BODY is none of them: measured against a socket that
+                # severs a chunked body on purpose, hyper reports a Body error wrapping
+                # io UnexpectedEof, worded "unexpected EOF during chunk size line" when
+                # the cut lands between chunks and IncompleteBody when it lands
+                # mid-payload, with the Display form "error reading a body from
+                # connection". None matched, so a drop mid-body was neither retried nor
+                # counted — it just reddened the leg, which is exactly what happened to
+                # fifteen streaming tests when a mid-stream error was made fatal.
                 #
                 # EXPERIMENT (#1039): the thread cap is per major, substituted into
                 # this script when the seed is built — Podman 6 runs at 1, Podman 5
@@ -126,22 +137,23 @@ jobs:
                 # which is the lever to shrink Podman 6's variable flaky tail toward
                 # a small, stable set that an identity list can gate (#1039). Kept at
                 # 2 rather than 1 so the suite still fits the VM's time budget.
+                DROPPED='IncompleteMessage|connection closed before message completed|channel closed|Connection reset|error reading a body from connection|unexpected EOF during chunk size line|IncompleteBody|body-unexpected-eof'
                 for attempt in 1 2; do
                   RUST_LOG=podup=warn cargo test --features test-helpers --test engine_integration -- --test-threads=__THREADS__ > /tmp/cargo.log 2>&1
                   RC=$?
                   [ "$RC" -eq 0 ] && break
-                  grep -qE 'IncompleteMessage|connection closed before message completed|channel closed|Connection reset' /tmp/cargo.log || break
+                  grep -qE "$DROPPED" /tmp/cargo.log || break
                   echo "=== nested-virt transient on attempt $attempt; retrying suite ==="
                 done
                 tail -60 /tmp/cargo.log
                 echo "=== failures section (full) ==="
                 sed -n '/^failures:$/,/^test result:/p' /tmp/cargo.log | head -120
-                # Machine-readable summary computed from the FULL log. A nested-virt
-                # connection drop surfaces as Hyper(IncompleteMessage) (and kin);
-                # everything else counts as a real failure.
+                # Machine-readable summary computed from the FULL log, using the same
+                # drop signatures as the retry above; everything else counts as a real
+                # failure.
                 PASS=$(grep -oE 'test result: .* [0-9]+ passed' /tmp/cargo.log | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
                 FAIL=$(grep -oE '[0-9]+ failed' /tmp/cargo.log | grep -oE '[0-9]+' | tail -1)
-                FLAKY=$(grep -cE 'IncompleteMessage|connection closed before message completed|channel closed|Connection reset' /tmp/cargo.log)
+                FLAKY=$(grep -cE "$DROPPED" /tmp/cargo.log)
                 echo "PODUP_TESTS_RC=$RC"
                 echo "PODUP_SUMMARY pass=${PASS:-0} fail=${FAIL:-0} flaky=${FLAKY:-0}"
                 # Emit the IDENTITIES of the failing tests, not just the count.
