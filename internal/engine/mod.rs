@@ -556,6 +556,9 @@ fn walk_collect(dir: &std::path::Path, out: &mut Vec<PathBuf>) -> std::io::Resul
 mod tests;
 
 #[cfg(test)]
+mod stream_end_tests;
+
+#[cfg(test)]
 mod interactive_run_tests {
 	use super::wants_interactive_run;
 

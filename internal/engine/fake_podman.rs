@@ -5,7 +5,14 @@
 //! API responses without a real Podman daemon. [`Client`] opens a fresh
 //! connection per request (see `internal/libpod/client/mod.rs`), so this only
 //! ever needs to answer one HTTP/1.1 request per accepted connection — no
-//! keep-alive, no chunked framing.
+//! keep-alive.
+//!
+//! It does frame a chunked body, for one reason: a stream that ends *badly* has
+//! a wire shape, and podup's central open question about streaming (#1104) is
+//! whether it can tell that shape from a stream that ended well. A real Podman
+//! cannot be asked to break a stream on demand, and which shape it produces at a
+//! CLEAN end turns out to differ by version — so the two cases are pinned here,
+//! deterministically, with no daemon and no version in the picture.
 
 #![cfg(unix)]
 
@@ -17,10 +24,30 @@ use tokio::task::JoinHandle;
 
 use crate::libpod::Client;
 
-/// A test's routing rule: `(method, target) -> (status, JSON body)`, where
-/// `target` is the request path plus its raw query string (e.g.
+/// What the fake writes back for one request.
+pub(super) enum FakeReply {
+	/// A `content-length`-framed body, closed cleanly. What every routing test
+	/// that only cares about status codes wants.
+	Body(u16, String),
+	/// A 200 with a **chunked** body: each entry is written as one chunk, then
+	/// the terminating zero-length chunk is sent. This is a stream that ends the
+	/// way HTTP says it should.
+	ChunkedEnd(Vec<String>),
+	/// A 200 with a **chunked** body that stops between chunks: each entry is
+	/// written as one complete chunk and then the connection is closed with NO
+	/// terminating chunk. A stream that died where a chunk header should start.
+	ChunkedTruncated(Vec<String>),
+	/// A 200 with a **chunked** body cut in the middle of a chunk's payload: the
+	/// header promises more bytes than are then written, and the connection
+	/// closes. The other place a severed stream can land, and — measured — hyper
+	/// classifies the two differently, which is why both exist here.
+	ChunkedCutMidPayload(String),
+}
+
+/// A test's routing rule: `(method, target) -> reply`, where `target` is the
+/// request path plus its raw query string (e.g.
 /// `/v5.0.0/libpod/containers/proj-web-1/start`).
-type Responder = dyn Fn(&str, &str) -> (u16, String) + Send + Sync;
+type Responder = dyn Fn(&str, &str) -> FakeReply + Send + Sync;
 
 /// A fake libpod socket driven by a routing closure; see [`Responder`].
 pub(super) struct FakePodman {
@@ -55,6 +82,18 @@ impl Drop for FakePodman {
 pub(super) fn start<F>(respond: F) -> FakePodman
 where
 	F: Fn(&str, &str) -> (u16, String) + Send + Sync + 'static,
+{
+	start_replying(move |method, target| {
+		let (status, body) = respond(method, target);
+		FakeReply::Body(status, body)
+	})
+}
+
+/// As [`start`], but the routing closure chooses the wire shape too — including
+/// a chunked body that ends cleanly or one that is cut off mid-stream.
+pub(super) fn start_replying<F>(respond: F) -> FakePodman
+where
+	F: Fn(&str, &str) -> FakeReply + Send + Sync + 'static,
 {
 	let dir = tempfile::tempdir().expect("create temp dir for fake podman socket");
 	let sock_path = dir.path().join("podman.sock");
@@ -113,13 +152,36 @@ async fn serve_one(
 
 	requests.lock().unwrap().push(format!("{method} {target}"));
 
-	let (status, body) = respond(&method, &target);
-	let response = format!(
-		"HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {len}\r\nconnection: close\r\n\r\n{body}",
-		reason = reason_phrase(status),
-		len = body.len(),
-	);
-	stream.write_all(response.as_bytes()).await?;
+	match respond(&method, &target) {
+		FakeReply::Body(status, body) => {
+			let response = format!(
+				"HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {len}\r\nconnection: close\r\n\r\n{body}",
+				reason = reason_phrase(status),
+				len = body.len(),
+			);
+			stream.write_all(response.as_bytes()).await?;
+		}
+		FakeReply::ChunkedEnd(chunks) => {
+			write_chunked(&mut stream, &chunks).await?;
+			// The terminating zero-length chunk: this is the difference between
+			// a finished body and a severed one, and it is the whole subject of
+			// #1104.
+			stream.write_all(b"0\r\n\r\n").await?;
+		}
+		FakeReply::ChunkedTruncated(chunks) => {
+			write_chunked(&mut stream, &chunks).await?;
+			// No terminator. Closing here is what a dead stream looks like.
+		}
+		FakeReply::ChunkedCutMidPayload(chunk) => {
+			write_chunked(&mut stream, &[]).await?;
+			// Promise the whole chunk, deliver half of it, hang up.
+			let half = chunk.len() / 2;
+			stream
+				.write_all(format!("{:x}\r\n{}", chunk.len(), &chunk[..half]).as_bytes())
+				.await?;
+			stream.flush().await?;
+		}
+	}
 	stream.shutdown().await?;
 	Ok(())
 }
@@ -136,4 +198,20 @@ fn reason_phrase(status: u16) -> &'static str {
 		500 => "Internal Server Error",
 		_ => "Unknown",
 	}
+}
+
+/// Write a chunked-encoding response head and one chunk per entry, leaving the
+/// caller to decide whether the terminating chunk follows.
+async fn write_chunked(stream: &mut UnixStream, chunks: &[String]) -> std::io::Result<()> {
+	stream
+		.write_all(
+			b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+		)
+		.await?;
+	for chunk in chunks {
+		stream
+			.write_all(format!("{:x}\r\n{chunk}\r\n", chunk.len()).as_bytes())
+			.await?;
+	}
+	stream.flush().await
 }
