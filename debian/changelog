@@ -1,3 +1,23 @@
+podup (3.2.1) unstable; urgency=medium
+
+  Changed
+
+  * A severed stream is now named `body-unexpected-eof` in podup's diagnostics
+    instead of the catch-all `hyper-other`. `IncompleteMessage`, the predicate
+    that sounds like it covers this, is about the message head — a body cut
+    off mid-flight matched none of hyper's own predicates and fell through to
+    the least informative label there is. Measured against a socket that
+    severs a chunked body on purpose: both places a cut can land arrive as a
+    body error wrapping an unexpected end-of-file. Nothing branches on the
+    label, so no command behaves differently; this is what podup tells you
+    while a streaming bug is being tracked down (#1104).
+
+  Dependencies
+
+  * clap_complete 4.6.7 -> 4.6.8, used to generate the shell completions.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Mon, 27 Jul 2026 22:21:02 -0500
+
 podup (3.2.0) unstable; urgency=medium
 
   Changed
