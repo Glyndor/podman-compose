@@ -17,6 +17,14 @@
 name: benchmark
 
 on:
+  # The harness checks only guard anything if they run when the harness changes.
+  # Until #1227 they fired on dispatch and the monthly cron alone, so a PR could
+  # break run.sh or the timer and nothing would say so until the next 1st of the
+  # month. The engine job below stays dispatch-only: it needs the bench runner.
+  pull_request:
+    paths:
+      - "bench/**"
+      - ".github/workflows/benchmark.yml"
   workflow_dispatch:
   schedule:
     - cron: "0 4 1 * *" # monthly
