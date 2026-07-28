@@ -150,6 +150,21 @@ impl PodmanError {
 			Self::Hyper(e) if e.is_canceled() => "canceled",
 			Self::Hyper(e) if e.is_closed() => "closed",
 			Self::Hyper(e) if e.is_timeout() => "hyper-timeout",
+			// A body that stopped short is none of the above. `is_incomplete_message`
+			// is about the message head, so a severed *body* misses every predicate
+			// hyper exposes and used to land in `hyper-other` — the least
+			// informative label, for the likeliest shape.
+			//
+			// Measured against a fake socket that cuts a chunked body deliberately
+			// (`engine::stream_end_tests`), both places a cut can land arrive as a
+			// hyper Body error wrapping `io::ErrorKind::UnexpectedEof`:
+			//
+			//   between chunks  "unexpected EOF during chunk size line"
+			//   mid-payload     IncompleteBody
+			//
+			// The kind is what this keys on; hyper's message text distinguishing the
+			// two is not something to depend on.
+			Self::Hyper(e) if body_ended_early(e) => "body-unexpected-eof",
 			Self::Hyper(_) => "hyper-other",
 			Self::Connect(e) => match e.kind() {
 				std::io::ErrorKind::UnexpectedEof => "io-unexpected-eof",
@@ -235,6 +250,23 @@ impl PodmanError {
 			_ => false,
 		}
 	}
+}
+
+/// Whether a hyper error is a body that ended before it was complete — the shape
+/// a severed stream takes, which none of hyper's own predicates report. Walks the
+/// source chain for an `io::Error` of kind `UnexpectedEof` rather than matching on
+/// message text.
+fn body_ended_early(e: &hyper::Error) -> bool {
+	let mut source: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(e);
+	while let Some(current) = source {
+		if let Some(io) = current.downcast_ref::<std::io::Error>() {
+			if io.kind() == std::io::ErrorKind::UnexpectedEof {
+				return true;
+			}
+		}
+		source = std::error::Error::source(current);
+	}
+	false
 }
 
 #[cfg(test)]
