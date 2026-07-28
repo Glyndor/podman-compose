@@ -147,19 +147,19 @@ sequenceDiagram
 
 Peak memory and per-operation latency against docker-compose and podman-compose,
 **all three driving the same rootless Podman**, same digest-pinned images,
-median of 10 measured runs (12 iterations, 2 warm-up discarded), on podup 3.0.1.
-podup is fastest in every scenario but one teardown (`many-services down`, where
-docker-compose's 0.565 s edges podup's 0.580 s, inside a single standard
-deviation), and the widest gaps are the ones with many services.
+median of 10 measured runs (12 iterations, 2 warm-up discarded), on podup 3.2.1.
+podup is fastest in every scenario here, though three teardown rows win by less
+than their own standard deviation and should be read as ties; the widest gaps are
+the ones with many services.
 
 | | podup | docker-compose | podman-compose |
 |---|---|---|---|
-| memory per command | **7.8 MiB** | 28.7 MiB | 51.7 MiB |
-| `up`, 42 services | **1.12 s** | 1.54 s | 7.69 s |
-| `up`, 12 services | **0.38 s** | 0.48 s | 2.37 s |
-| `config` (parse only) | **&lt;0.01 s** | 0.04 s | 0.13 s |
+| memory per command | **7.6 MiB** | 28.8 MiB | 51.1 MiB |
+| `up`, 42 services | **1.10 s** | 1.61 s | 6.98 s |
+| `up`, 12 services | **0.39 s** | 0.50 s | 2.21 s |
+| `config` (parse only) | **9.0 ms** | 46.3 ms | 117.5 ms |
 
-<img src="docs/assets/bench.svg" alt="Bar chart: podup uses about 7 MiB per command against 29 MiB for docker-compose and 51 MiB for podman-compose, and is faster in all but one measured scenario" width="760">
+<img src="docs/assets/bench.svg" alt="Bar chart: podup uses about 8 MiB per command against 29 MiB for docker-compose and 51 MiB for podman-compose, and is faster in every measured scenario" width="760">
 
 Full tables and methodology: [docs/benchmarks.md](docs/benchmarks.md).
 
