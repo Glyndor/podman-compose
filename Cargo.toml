@@ -79,7 +79,7 @@ temp-env = "0.3"
 tokio = { version = "1", features = ["io-util"] }
 
 [workspace]
-exclude = ["fuzz"]
+exclude = ["bench/timeit", "fuzz"]
 
 [profile.release]
 opt-level = 3
