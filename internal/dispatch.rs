@@ -117,7 +117,10 @@ pub(crate) async fn dispatch(
 				// exited 0 — measured on 5.4.2 by restarting the libpod socket
 				// underneath an attached `up`.
 				if outcome == podup::AttachOutcome::StreamBroke {
-					return Err(podup::ComposeError::StreamTruncated);
+					return Err(podup::ComposeError::StreamTruncated(
+					"log stream ended while the container was still running: output is incomplete"
+						.to_string(),
+				));
 				}
 			}
 		}
