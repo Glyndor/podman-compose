@@ -72,8 +72,45 @@ impl Engine {
 			// pull either — the local tag is the declared state.
 			(false, _) if service.build.is_some() => {}
 			(false, "never") => {}
+			// Under `missing`, an image the prefetch stage already saw on this
+			// host needs no request at all. Skipping only what was observed in
+			// this invocation keeps the decision as fresh as the one the pull
+			// itself would have made.
+			(false, _) if self.image_already_seen_present(service) => {}
 			(false, _) => self.pull_image(service).await?,
 		}
 		Ok(())
+	}
+
+	/// Whether the prefetch stage observed this service's image present on the
+	/// host during this invocation, making its pull a no-op worth skipping.
+	///
+	/// False for anything but a normalized `missing` policy: `always` and
+	/// `newer` mean go to the registry, and widening this to them would bring
+	/// back #1076, where a pull that failed was reported as success — libpod
+	/// sends that failure as an in-band line on a 200, so no pull means no line
+	/// to miss.
+	///
+	/// False for a service pinning `platform:`. The observation matched an image
+	/// reference, which carries no architecture, so honouring it there could
+	/// start the wrong variant.
+	fn image_already_seen_present(&self, service: &Service) -> bool {
+		if service.platform.is_some() {
+			return false;
+		}
+		let raw_policy = self
+			.pull_policy_override
+			.as_deref()
+			.or(service.pull_policy.as_deref());
+		if crate::engine::build::libpod_pull_policy(raw_policy).unwrap_or("missing") != "missing" {
+			return false;
+		}
+		let Some(image) = service.image.as_deref() else {
+			return false;
+		};
+		self.images_seen_present
+			.lock()
+			.map(|seen| seen.contains(image))
+			.unwrap_or(false)
 	}
 }
