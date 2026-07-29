@@ -17,7 +17,19 @@ impl Engine {
 	/// Run a one-off command in a new container for a service.
 	///
 	/// The container is started, its output streamed, and it is removed when done
-	/// (unless `opts.rm` is false). Non-zero exit codes surface as `ComposeError::RunExited`.
+	/// (unless `opts.rm` is false).
+	///
+	/// # Errors
+	///
+	/// A command that ran and exited non-zero surfaces as
+	/// [`ComposeError::RunExited`](crate::ComposeError::RunExited), carrying its
+	/// code.
+	///
+	/// A stream that dies while the container is still running is a failed read,
+	/// not a finished command: it returns the transport error and never reaches
+	/// the exit-code wait, so there is no code to carry. A stream that ends after
+	/// the container has stopped is treated as finished, whether or not its body
+	/// was terminated properly, and the exit code is reported as usual.
 	pub async fn run(
 		&self,
 		file: &ComposeFile,

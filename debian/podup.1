@@ -1,4 +1,4 @@
-.TH PODUP 1 "July 2026" "podup 3.0.1" "User Commands"
+.TH PODUP 1 "July 2026" "podup 3.3.0" "User Commands"
 .SH NAME
 podup \- run docker-compose files on rootless Podman
 .SH SYNOPSIS
@@ -170,8 +170,13 @@ Print the public binding for a container port. \fB\-\-proto\fR sets the protocol
 (default \fBtcp\fR).
 .TP
 .B events
-Stream Podman events for this project's containers. \fB\-\-json\fR emits each
-event as a JSON line instead of a summary.
+Stream Podman events for this project's containers.
+\fB\-\-format\fR \fItable\fR|\fIjson\fR selects the output shape (json emits one
+object per line, not an array); \fB\-\-json\fR is a deprecated alias for it.
+\fB\-\-filter\fR \fIKEY=VALUE\fR keeps only matching events and is repeatable.
+\fB\-\-since\fR and \fB\-\-until\fR bound the window and must be given
+together to end the feed \- either alone, or an \fB\-\-until\fR in the future,
+leaves it following indefinitely.
 .TP
 .B images
 List images used by services.
@@ -284,9 +289,20 @@ A usage error (invalid arguments or flags).
 .TP
 .B 127
 \fBrun\fR/\fBexec\fR: the command was not found.
+.TP
+.B 130
+An attached \fBup\fR was ended by SIGINT or SIGTERM. 130 for both, matching
+\fBdocker compose\fR; the project is still torn down before the code is
+returned.
 .PP
 \fBrun\fR propagates the container's own exit code verbatim, so any other
 non-zero status comes from the container that was run.
+.PP
+A streaming command whose connection dies exits 1 rather than reporting success.
+This covers \fBlogs\fR, \fBstats\fR, an attached \fBup\fR, \fBrun\fR and
+\fBevents\fR. A stream that ends because its container stopped still exits 0.
+For \fBevents\fR, an unbounded feed that ends at all exits 1; bounding one
+needs \fB--since\fR and \fB--until\fR together, both already elapsed.
 .SH FILES
 .TP
 .B docker-compose.yml

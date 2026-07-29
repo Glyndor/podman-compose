@@ -90,20 +90,14 @@ release's Ed25519 signature and SHA-256 checksum, failing closed otherwise. See
 ### Podman version
 
 podup tracks the **latest stable Podman** and supports its **last two majors,
-Podman 5.x and 6.x**. It talks to Podman's native libpod API (still versioned
-5.x, at 5.2.0 on Podman 6), so it needs **Podman ≥ 5.0**. Both supported majors
+Podman 5.x and 6.x**. It talks to Podman's native libpod API, requesting the
+`/v5.0.0/libpod` path that Podman 6 still serves; the gate is the major version
+the engine reports, so it needs **Podman ≥ 5.0**. Both supported majors
 run the integration suite in CI on every engine change (Fedora 44 for the
 latest 5.x, rawhide for 6.x). Many distributions still ship 4.x, so check
 `podman --version` and upgrade if needed. Fedora, Debian trixie/sid and recent
 Ubuntu releases carry 5.x; on an older release, install or upgrade Podman
 following the official guide: <https://podman.io/docs/installation>.
-
-**Known limitation on Podman 6.** Copying *into* a container (`podup cp
-./file web:/path`) and `watch` rules whose action includes `sync` fail with a
-transport error. Copying *out* of a container works on both majors, and both
-directions work on Podman 5. Fedora, Arch and Manjaro ship Podman 6 today, so
-this affects them now; it is tracked in
-[#1097](https://github.com/Glyndor/podup/issues/1097).
 
 ### Platforms
 
