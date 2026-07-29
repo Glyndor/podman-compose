@@ -111,6 +111,14 @@ pub(crate) async fn dispatch(
 				if outcome == podup::AttachOutcome::Interrupted {
 					return Err(podup::ComposeError::Interrupted);
 				}
+				// Same ordering rule as the interrupt above: reported after the
+				// teardown, never instead of it. docker compose exits 1 when an
+				// attached stream dies with the container still running, and we
+				// exited 0 — measured on 5.4.2 by restarting the libpod socket
+				// underneath an attached `up`.
+				if outcome == podup::AttachOutcome::StreamBroke {
+					return Err(podup::ComposeError::StreamTruncated);
+				}
 			}
 		}
 		Commands::Down {
