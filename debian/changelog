@@ -1,3 +1,48 @@
+podup (3.3.0) unstable; urgency=medium
+
+  Changed
+
+  * All five streaming commands now report a stream that died instead of
+    exiting 0. An attached `up` whose log stream dies while its container is
+    still running exits 1, `run` reports the transport error rather than a
+    missing exit code, and `events` exits 1 when an unbounded feed ends at all.
+    `logs` and `stats` already did this. A stream that ends because its
+    container stopped still exits 0. The transport cannot tell a finished
+    stream from a broken one, so each command asks something else: the four
+    container-scoped ones re-check whether the container is still running, and
+    `events`, which follows no single container, keys on whether a bounded
+    window was asked for. Scripts gating on these exit codes should expect a
+    non-zero where they previously saw success on a lost connection.
+
+  * `up --wait` now implies `-d`, matching `docker compose up --wait`. It
+    previously ran the health wait and then attached to the logs, so the
+    canonical health-gated CI invocation never returned.
+
+  * `up` no longer pulls an image it already has, once per service. Under the
+    effective `missing` policy the image is checked once per invocation and the
+    pull is skipped for every service using it, so a warm `up` prints no
+    `Pulling` line and issues no pull request. A 42-service project on one
+    image dropped from 88 requests to 46. `always` and `newer` still go to the
+    registry, and a service pinning `platform:` still pulls.
+
+  * `events --since` and `--until`, and `logs --since` and `--until`, accept a
+    leading hyphen, so relative times such as `--until -30m` parse instead of
+    being read as an unknown flag. Bounding an events feed needs both flags,
+    both already elapsed; podup now warns when `--until` is given alone.
+
+  Fixed
+
+  * `top` escapes control characters in the process table. A process inside a
+    container can name itself, and that name was printed unescaped, so it could
+    emit ANSI into the reader's terminal. Every other table already escaped.
+
+  * A service now keeps one identity colour across every command. `ps` keyed on
+    the container name and `images` on the service name, so the same service
+    could appear in two different colours depending on which command printed
+    it.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Wed, 29 Jul 2026 10:18:37 -0500
+
 podup (3.2.1) unstable; urgency=medium
 
   Changed

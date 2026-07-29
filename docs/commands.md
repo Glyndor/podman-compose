@@ -44,6 +44,18 @@ Create and start all services (or only the named ones, plus their transitive
 | `--quiet-pull` | Suppress image-pull progress output. | off |
 | `--wait` | Wait until services are running/healthy before returning. | off |
 | `--wait-timeout <SECS>` | Maximum seconds to wait with `--wait` before giving up. | no limit |
+
+**`--wait` implies `-d`.** The flag means "return once the services are up", so
+`up --wait` does not stay attached to the logs afterwards — matching
+`docker compose up --wait`.
+
+**Under `missing`, an image already present is not pulled again.** The effective
+policy is `missing` unless `--pull` or a service's `pull_policy` says otherwise;
+in that case podup checks the image once per invocation and skips the pull for
+every service using it, so a warm `up` prints no `Pulling` line and issues no
+pull request. `always` and `newer` always go to the registry, and a service
+pinning `platform:` always pulls, because presence is matched on the image
+reference and that carries no architecture.
 | `--no-start` | Create the containers but do not start them. | off |
 | `--timestamps` | Prefix attached log lines with a timestamp (ignored with `-d`). | off |
 | `-V, --renew-anon-volumes` | Recreate anonymous volumes instead of keeping the previous ones. | off |
@@ -154,10 +166,16 @@ Stream Podman events for this project's containers.
 |---|---|---|
 | `--format <FMT>` | `table` (a `TYPE ACTION NAME` summary) or `json` (one object per line). | `table` |
 | `--filter <FILTER>` | Keep only events matching a predicate (`KEY=VALUE`, e.g. `event=start`). Repeatable. | none |
-| `--since <TIME>` | Only stream events at or after this timestamp or relative time. | stream start |
-| `--until <TIME>` | Only stream events up to this timestamp or relative time. | no end |
+| `--since <TIME>` | Only stream events at or after this timestamp or relative time (e.g. `-30m`). | stream start |
+| `--until <TIME>` | End of the window. Only closes the feed when paired with `--since` and already elapsed. | no end |
 
 `--json` is a hidden deprecated alias for `--format json`.
+
+**Bounding a feed needs both flags.** Measured against Podman 5.4.2:
+`--since -2h --until -1h` ends the feed; `--until` alone, `--since` alone, and
+any `--until` in the future all leave it following indefinitely. podup warns
+when `--until` is given without `--since`. This also decides the exit code — see
+[Exit status](#exit-status).
 
 ### `top [SERVICE...]`
 Show the running processes of service containers.
@@ -297,10 +315,6 @@ container side, e.g. `podup cp web:/app/data ./local`.
 | `-L, --follow-link` | Follow symlinks in the host source before copying into the container. | off |
 | `-a, --archive` | Accepted for compatibility (no effect under rootless Podman). | off |
 
-> **Podman 6:** copying *into* a container fails with a transport error.
-> Copying *out* works on both majors, and both directions work on Podman 5.
-> Tracked in [#1097](https://github.com/Glyndor/podup/issues/1097).
-
 ### `attach <SERVICE>`
 Attach to a service container's output (stdout/stderr), streaming it until the
 container exits or you detach. Output only — stdin is never attached.
@@ -418,11 +432,6 @@ The `action` of each rule may be:
 | `restart` | Restart the container without rebuilding. |
 | `sync+restart` | Sync the files, then restart the container. |
 | `sync+exec` | Sync the files, then run the rule's `exec` command in the container. |
-
-> **Podman 6:** the `sync` step copies into the container through the same path
-> as `cp`, so `sync`, `sync+restart` and `sync+exec` fail there. `rebuild` and
-> `restart` are unaffected, and every action works on Podman 5. Tracked in
-> [#1097](https://github.com/Glyndor/podup/issues/1097).
 
 ## Maintenance
 
@@ -624,6 +633,10 @@ returns the whole set, which a script reads as a match.
 | `130` | An attached `up` was ended by SIGINT or SIGTERM. |
 | other | `run` propagates the container's own exit code verbatim. |
 
+An attached `up` also exits `1` when a log stream dies while its container is
+still running, and `events` exits `1` when an unbounded feed ends at all. Both
+are new in 3.3.0 and both used to exit `0`; see the streaming rule below.
+
 `exec` propagates the command's exit code the same way `run` does, and `wait`
 returns the last non-zero code it saw.
 
@@ -644,13 +657,16 @@ splits `NetIO`/`BlockIO` into separate input/output fields. Raw numbers are
 exact and need no parsing, but it does mean a docker-compose JSON consumer needs
 adapting rather than working unchanged.
 
-**A streaming command that loses its connection fails.** `logs` and `stats` end
-when the containers they follow stop, and libpod marks that end with a chunked
-terminator. A lost terminator — a dropped connection, or a version that omits it
-— is indistinguishable from a real mid-stream break at the transport layer, so
-both commands resolve it out of band: they re-check whether the containers are
-still running. Still running means live output was truncated, and the command
-exits `1`.
+**A streaming command that loses its connection fails.** This covers five
+commands: `logs`, `stats`, an attached `up`, `run`, and `events`.
+
+A stream ends when the container it follows stops, and libpod marks that end
+with a chunked terminator. A lost terminator — a dropped connection, or a
+version that omits it — is indistinguishable from a real mid-stream break at the
+transport layer, so the transport is not asked. Four of the five re-check
+whether the container is still running: still running means live output was
+truncated, and the command exits `1`. `run` reports the transport error instead
+of an exit code, since the command it was running never produced one.
 
 This matters for anything scraping them. `logs -f` used to return success after
 losing its socket, so a monitor could not tell "the container finished" from "my
@@ -664,6 +680,26 @@ A stream that ends because its containers stopped still exits `0`, as does
 When the re-check itself cannot be made — usually because the same severed
 connection is needed for it — the command fails rather than assuming the end was
 clean.
+
+**`events` decides it differently**, because a feed is project-scoped and
+follows no single container, so there is nothing to re-check. What the caller
+asked for answers it instead:
+
+- **A bounded window** — `--since` and `--until` together, both already elapsed
+  — closes on its own, so reaching the end exits `0`.
+- **Anything else** is an unbounded feed. libpod never ends one, so *any* end
+  means the stream was lost and the command exits `1` — including a clean end,
+  which no check on the error shape could have caught.
+- **A transport failure always fails**, bounded or not. A severed socket is not
+  made expected by having asked for a window.
+- Ctrl-C or SIGTERM kills the process by signal, as before; no error is
+  invented.
+
+Note that a window needs **both** ends and both must already have elapsed.
+Measured against Podman 5.4.2: `--since -2h --until -1h` closes the feed, while
+either flag alone leaves it open, as does any `--until` in the future. So
+`--until 5m` follows indefinitely rather than stopping in five minutes. podup
+warns when `--until` is passed without `--since`.
 
 **`watch` is the exception.** A sync, rebuild, restart or exec that fails during
 a watch session is reported as a warning and the session keeps going; `watch`

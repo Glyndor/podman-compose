@@ -363,11 +363,17 @@ pub(crate) enum Commands {
 		/// object per line (NDJSON, not a JSON array).
 		#[arg(long, value_enum, default_value_t = EventsFormat::Table)]
 		format: EventsFormat,
-		/// Only stream events at or after this timestamp/relative time.
-		#[arg(long)]
+		/// Only stream events at or after this timestamp/relative time (e.g.
+		/// -30m, 2026-01-01T00:00:00).
+		///
+		/// `allow_hyphen_values` because a relative time is written with a
+		/// leading `-`; without it clap reads `-30m` as an unknown flag.
+		#[arg(long, allow_hyphen_values = true)]
 		since: Option<String>,
-		/// Only stream events up to this timestamp/relative time.
-		#[arg(long)]
+		/// Only stream events up to this timestamp/relative time. Only an
+		/// already-elapsed window ends the feed: libpod keeps a stream open past
+		/// a future time, so `--until -5m` bounds it and `--until 5m` does not.
+		#[arg(long, allow_hyphen_values = true)]
 		until: Option<String>,
 		/// Filter events by predicate (KEY=VALUE, e.g. event=start); repeatable.
 		#[arg(long)]
@@ -499,11 +505,12 @@ pub(crate) enum Commands {
 		/// Number of lines to show from the end of the logs (default: all).
 		#[arg(short = 'n', long)]
 		tail: Option<String>,
-		/// Show logs since a timestamp or relative time (e.g. 2024-01-01T00:00:00, 10m).
-		#[arg(long)]
+		/// Show logs since a timestamp or relative time (e.g.
+		/// 2024-01-01T00:00:00, -10m).
+		#[arg(long, allow_hyphen_values = true)]
 		since: Option<String>,
-		/// Show logs before a timestamp or relative time.
-		#[arg(long)]
+		/// Show logs before a timestamp or relative time (e.g. -5m).
+		#[arg(long, allow_hyphen_values = true)]
 		until: Option<String>,
 		/// Prefix each line with an RFC3339 timestamp.
 		#[arg(short = 't', long)]

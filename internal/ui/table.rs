@@ -38,7 +38,7 @@ pub fn fit_cell(cell: &str, width: usize) -> String {
 /// Escaping happens before padding, so the width the column reserves is the
 /// width actually printed. Doing it after would let an escaped cell overflow its
 /// column and break every row's alignment.
-fn sanitize_cell(s: &str) -> String {
+pub fn sanitize_cell(s: &str) -> String {
 	s.chars()
 		.flat_map(|c| {
 			if c.is_control() {

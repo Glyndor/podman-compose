@@ -9,10 +9,12 @@ A podup loss is published exactly like a podup win.
 - **podup** and **podman-compose** both drive **Podman**, so comparing them is a
   pure *tool* comparison — same engine, only the orchestrator differs. This is the
   apples-to-apples result.
-- **docker-compose** drives **dockerd**, a different daemon. Any number that
-  includes it is an end-to-end *stack* comparison, not a pure-tool one, and is
-  labelled as such. It is only measured when a Docker Engine is available on the
-  benchmark host; otherwise it is left blank, never estimated.
+- **docker-compose** is pointed at the **Podman socket** through `DOCKER_HOST`,
+  which is what makes it comparable: same engine, so the only difference left is
+  the orchestrator. Run against a Docker daemon instead, its numbers fold in the
+  engine difference and become an end-to-end *stack* comparison; the harness
+  detects which engine it drove and labels the report accordingly, so a reader
+  is never left guessing. It is never estimated when absent.
 
 ## Fairness rules (non-negotiable)
 
@@ -89,7 +91,7 @@ against 0.50 ms here.
 
 ```sh
 # build the release binary first; point the harness at it
-PODUP_BIN=target/release/podup bench/run.sh --iters 12 --warmup 2 --cores 2-9
+PODUP_BIN=target/release/podup bash bench/run.sh --iters 12 --warmup 2 --cores 2-9
 python3 bench/aggregate.py
 # -> bench/results/report.md and bench/results/summary.json
 ```
@@ -101,8 +103,9 @@ python3 bench/aggregate.py
 `run.sh` writes one raw row per timed run to `results/raw.csv`; `aggregate.py`
 discards warm-up and failed runs and computes the statistics into
 `results/report.md` + `results/summary.json`. Raw, host-specific results are not
-committed; the published numbers live in the repository `README.md`, with the
-methodology and host details alongside them.
+committed; the published numbers live in `docs/benchmarks.md`, with the
+methodology and host details alongside them, and a short summary in the
+repository `README.md`.
 
 The harness is reviewed by `podup-benchmark-fairness-auditor` (the harness is
 equitable) and `podup-benchmark-results-reviewer` (the published claims are
