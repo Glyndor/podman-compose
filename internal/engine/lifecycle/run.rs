@@ -241,21 +241,48 @@ impl Engine {
 			// writes there: holding its lock across the await loop would starve
 			// concurrent log emissions. Flush after each frame so `run` streams
 			// promptly.
-			{
+			// Held across the loop but dropped before the recheck below, which
+			// awaits: keeping stdout locked across that await would block any
+			// concurrent writer for the length of an API round trip.
+			let broke = {
 				let mut out = std::io::stdout().lock();
+				let mut broke = None;
 				while let Some(msg) = log_stream.next().await {
-					match msg.map_err(ComposeError::Podman)? {
-						crate::libpod::LogOutput::StdOut { message } => {
+					match msg {
+						Ok(crate::libpod::LogOutput::StdOut { message }) => {
 							let _ = out.write_all(String::from_utf8_lossy(&message).as_bytes());
 							let _ = out.flush();
 						}
-						crate::libpod::LogOutput::StdErr { message } => {
+						Ok(crate::libpod::LogOutput::StdErr { message }) => {
 							let mut err = std::io::stderr().lock();
 							let _ = err.write_all(String::from_utf8_lossy(&message).as_bytes());
 							let _ = err.flush();
 						}
+						// This arm used to abort the run. A lost chunked terminator
+						// is indistinguishable at the transport layer from a real
+						// mid-stream break (#1104), so aborting here fails a run
+						// whose command actually succeeded, on any version that
+						// drops it. Deciding out of band instead: the container's
+						// own state answers what the transport cannot.
+						Err(e) => {
+							broke = Some(e);
+							break;
+						}
 					}
 				}
+				broke
+			};
+			if let Some(e) = broke {
+				// Still running means the output really was truncated and the
+				// stream failed. Stopped means the command finished and only the
+				// terminator went missing, so fall through to `wait`, which
+				// reports the exit code the run actually produced.
+				if super::super::query::stream_broke_mid_output(
+					self.container_still_running(&run_name).await,
+				) {
+					return Err(ComposeError::Podman(e));
+				}
+				tracing::debug!("run {run_name}: log stream ended as the container stopped: {e}");
 			}
 
 			let wait_path = format!(
@@ -357,5 +384,79 @@ mod tests {
 		assert_eq!(lookup(&list, "A"), Some("a"));
 		assert_eq!(lookup(&list, "B"), Some("b"));
 		assert_eq!(lookup(&list, "C"), Some("c"));
+	}
+}
+
+/// What a non-interactive `run` does when its log stream dies under it.
+///
+/// The stream arm used to abort the run on any error. A lost chunked terminator
+/// is indistinguishable at the transport layer from a real break (#1104), so
+/// that failed a `run` whose command had succeeded. The container's state is the
+/// out-of-band answer, and `wait` then reports the real exit code.
+#[cfg(test)]
+#[cfg(unix)]
+mod stream_end_tests {
+	use crate::engine::fake_podman::{self, FakeReply};
+	use crate::engine::Engine;
+
+	fn compose() -> crate::compose::types::ComposeFile {
+		crate::parse_str("services:\n  app:\n    image: img\n").unwrap()
+	}
+
+	/// A fake whose log stream is cut with no terminating chunk, whose container
+	/// listing reports `state`, and whose `wait` reports `code`.
+	fn fake(state: &'static str, code: i64) -> fake_podman::FakePodman {
+		fake_podman::start_replying(move |method, target| {
+			if target.contains("/logs") {
+				FakeReply::ChunkedTruncated(vec!["output\n".to_string()])
+			} else if target.contains("/wait") {
+				FakeReply::Body(200, code.to_string())
+			} else if target.contains("/containers/json") {
+				FakeReply::Body(
+					200,
+					format!(r#"[{{"Names":["/proj-app-run-1"],"State":"{state}"}}]"#),
+				)
+			} else if method == "POST" {
+				FakeReply::Body(200, r#"{"Id":"cafe"}"#.to_string())
+			} else {
+				FakeReply::Body(404, r#"{"message":"not found"}"#.to_string())
+			}
+		})
+	}
+
+	fn options() -> crate::engine::RunOptions {
+		crate::engine::RunOptions {
+			cmd: vec![],
+			rm: false,
+			detach: false,
+			env_overrides: vec![],
+			name_override: Some("proj-app-run-1".to_string()),
+			service_ports: false,
+		}
+	}
+
+	#[tokio::test]
+	async fn a_cut_stream_after_the_container_stopped_reports_the_real_exit_code() {
+		let fake = fake("exited", 0);
+		let e = Engine::with_base_dir(fake.client(), "proj".into(), std::env::temp_dir());
+
+		e.run(&compose(), "app", options())
+			.await
+			.expect("the command finished; only the terminator went missing");
+	}
+
+	#[tokio::test]
+	async fn a_cut_stream_while_the_container_runs_is_a_failure() {
+		let fake = fake("running", 0);
+		let e = Engine::with_base_dir(fake.client(), "proj".into(), std::env::temp_dir());
+
+		let err = e
+			.run(&compose(), "app", options())
+			.await
+			.expect_err("output was truncated with the container still up: that is a failed read");
+		assert!(
+			matches!(err, crate::error::ComposeError::Podman(_)),
+			"expected the transport error to survive, got {err:?}"
+		);
 	}
 }

@@ -187,7 +187,7 @@ fn stop_on_write_error(container_name: &str, result: std::io::Result<()>) -> boo
 /// as stopped.
 ///
 /// Pure so the rule is pinned without a live socket.
-fn log_stream_broke_mid_output(still_running: Option<bool>) -> bool {
+pub(super) fn stream_broke_mid_output(still_running: Option<bool>) -> bool {
 	!matches!(still_running, Some(false))
 }
 
@@ -403,7 +403,7 @@ impl Engine {
 								// them and the container is gone either way.
 								Err(e) => {
 									let kind = e.stream_end_kind();
-									match log_stream_broke_mid_output(
+									match stream_broke_mid_output(
 										self.container_still_running(&container_name).await,
 									) {
 										true => {
@@ -488,7 +488,7 @@ impl Engine {
 						// truncated live output (#1104).
 						Err(e) => {
 							let kind = e.stream_end_kind();
-							match log_stream_broke_mid_output(
+							match stream_broke_mid_output(
 								self.container_still_running(&container_name).await,
 							) {
 								true => {
@@ -542,7 +542,7 @@ impl Engine {
 	/// `Ok(None)` is "could not tell" — an unreadable state is not confirmation
 	/// the end was expected, so the caller keeps the original error rather than
 	/// masking a possible failure. Mirrors the fail-closed rule `stats` uses.
-	async fn container_still_running(&self, container_name: &str) -> Option<bool> {
+	pub(super) async fn container_still_running(&self, container_name: &str) -> Option<bool> {
 		let filters = serde_json::json!({ "label": [format!("podup.project={}", self.project)] });
 		let path = format!(
 			"{API_PREFIX}/containers/json?all=true&filters={}",
@@ -647,5 +647,8 @@ fn filter_orphans(names: Vec<String>, known: &std::collections::HashSet<String>)
 	names.into_iter().filter(|n| !known.contains(n)).collect()
 }
 
+/// Kept out of `inspect.rs`, which is 11 lines under the 500-line limit.
+#[cfg(test)]
+mod attach_stream_tests;
 #[cfg(test)]
 mod tests;

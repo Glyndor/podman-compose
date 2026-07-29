@@ -1,6 +1,6 @@
 use super::{
-	filter_orphans, is_valid_log_time, log_query, log_stream_broke_mid_output,
-	validate_log_filters, LogsOptions,
+	filter_orphans, is_valid_log_time, log_query, stream_broke_mid_output, validate_log_filters,
+	LogsOptions,
 };
 use std::collections::HashSet;
 
@@ -342,13 +342,13 @@ async fn logs_tolerates_one_container_that_will_not_stream() {
 #[test]
 fn a_stream_ending_while_the_container_runs_is_a_break() {
 	// The container outlived its own log stream, so output was truncated.
-	assert!(log_stream_broke_mid_output(Some(true)));
+	assert!(stream_broke_mid_output(Some(true)));
 }
 
 #[test]
 fn a_stream_ending_after_the_container_stopped_is_clean() {
 	// The stream is supposed to end here; libpod just did not get to say so.
-	assert!(!log_stream_broke_mid_output(Some(false)));
+	assert!(!stream_broke_mid_output(Some(false)));
 }
 
 #[test]
@@ -359,5 +359,5 @@ fn an_unreadable_state_counts_as_a_break() {
 	// transport failure back into exit 0. Measured — the permissive version
 	// reported a still-running container as stopped when the socket restarted
 	// under an attached `logs -f`.
-	assert!(log_stream_broke_mid_output(None));
+	assert!(stream_broke_mid_output(None));
 }
