@@ -127,6 +127,17 @@ pub struct Engine {
 	/// CLI `up -V/--renew-anon-volumes`: when recreating a container, also remove
 	/// its old anonymous volumes instead of leaving them orphaned.
 	pub(super) renew_anon_volumes: bool,
+	/// Image references this engine observed present on the host during the
+	/// current invocation, recorded by the prefetch stage so the per-service
+	/// pull site does not ask again.
+	///
+	/// Only ever a record of what this engine saw itself, this run: it is not
+	/// persisted and not shared between engines. Two engines against different
+	/// sockets must not pool observations — a process-wide cache would let one
+	/// skip a pull for an image that only exists on the other's host, which
+	/// matters because podup is consumed as a library and a caller may hold more
+	/// than one engine.
+	pub(super) images_seen_present: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl Engine {
@@ -147,6 +158,7 @@ impl Engine {
 			run_labels: Vec::new(),
 			run_no_tty: false,
 			renew_anon_volumes: false,
+			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
 		}
 	}
 
@@ -167,6 +179,7 @@ impl Engine {
 			run_labels: Vec::new(),
 			run_no_tty: false,
 			renew_anon_volumes: false,
+			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
 		}
 	}
 

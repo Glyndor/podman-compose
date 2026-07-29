@@ -87,6 +87,21 @@ impl Engine {
 			// unconditionally: that request is a pure win, since
 			// `up_one_service` would have made it anyway, just later.
 			if policy == "missing" && self.image_present(image).await {
+				// Record what this check just observed, so the per-service pull
+				// site does not repeat it: without this the stage returns having
+				// learned the image is here, and `acquire_service_image` pulls it
+				// once per service anyway — 42 of the 88 requests a 42-service
+				// warm `up` used to issue.
+				//
+				// Not recorded for a service pinning `platform:`. Presence is
+				// matched on the reference, which says nothing about which
+				// architecture variant is local, so a hit here could stand in for
+				// the wrong image.
+				if service.platform.is_none() {
+					if let Ok(mut seen) = self.images_seen_present.lock() {
+						seen.insert(image.to_string());
+					}
+				}
 				return;
 			}
 			if let Err(e) = self.pull_image(service).await {
