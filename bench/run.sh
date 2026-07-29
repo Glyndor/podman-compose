@@ -3,7 +3,7 @@
 #
 # Drives each tool through the same scenario suite, the same number of times,
 # on the same machine, against digest-pinned, pre-pulled images. Each timed run
-# is wrapped in /usr/bin/time -v, so every row records wall-clock, peak resident
+# goes through bench/timeit, so every row records wall-clock, peak resident
 # memory and CPU time of the orchestrator process; the statistics (median / p95 /
 # stdev) are computed by aggregate.py, never here.
 #
@@ -27,7 +27,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCEN_DIR="$HERE/scenarios"
 OUT_DIR="$HERE/results"
 RAW="$OUT_DIR/raw.csv"
-TIME_BIN="/usr/bin/time"
+TIMEIT_DIR="$HERE/timeit"
+TIMEIT="$TIMEIT_DIR/target/release/timeit"
 
 ITERS=12
 WARMUP=2
@@ -46,6 +47,16 @@ while [ $# -gt 0 ]; do
 done
 
 mkdir -p "$OUT_DIR"
+
+# The timer is on the measured path, so build it before the first scenario
+# rather than discovering it is missing after half an hour of empty rows.
+if [ ! -x "$TIMEIT" ]; then
+	echo ">>> building the timer (bench/timeit)"
+	cargo build --release --manifest-path "$TIMEIT_DIR/Cargo.toml" >/dev/null || {
+		echo "bench: could not build $TIMEIT_DIR" >&2
+		exit 2
+	}
+fi
 
 # Scenario list and the op-group each one measures.
 #   updown  : time `up -d` and `down -v`
@@ -127,8 +138,8 @@ run() { # tool, compose-file, project, op-args...
 	esac
 }
 
-# Builds the real external command for a tool (so /usr/bin/time can exec it —
-# it cannot wrap a shell function) and echoes "wall_s max_rss_kb cpu_s rc".
+# Builds the real external command for a tool (the timer execs it, so it cannot
+# be a shell function) and echoes "wall_s max_rss_kb cpu_s rc".
 timed() { # tool, compose-file, project, op-args...
 	local tool="$1" file="$2" proj="$3"; shift 3
 	local cmd=(); [ -n "$CORES" ] && cmd=(taskset -c "$CORES")
@@ -138,20 +149,7 @@ timed() { # tool, compose-file, project, op-args...
 		podman-compose) cmd+=(podman-compose "${fargs[@]}" -p "$proj" "$@") ;;
 		docker-compose) cmd+=(docker-compose "${fargs[@]}" -p "$proj" "$@") ;;
 	esac
-	local tf; tf="$(mktemp)"
-	LC_ALL=C "$TIME_BIN" -v "${cmd[@]}" >/dev/null 2>"$tf"
-	local rc=$?
-	local wall rss cu cs
-	wall="$(grep -m1 'Elapsed' "$tf" | grep -oE '[0-9:.]+$')"
-	rss="$(grep -m1 'Maximum resident' "$tf" | grep -oE '[0-9]+$')"
-	cu="$(grep -m1 'User time' "$tf" | grep -oE '[0-9.]+$')"
-	cs="$(grep -m1 'System time' "$tf" | grep -oE '[0-9.]+$')"
-	rm -f "$tf"
-	LC_ALL=C awk -v w="$wall" -v r="${rss:-0}" -v u="${cu:-0}" -v s="${cs:-0}" -v rc="$rc" '
-		BEGIN{
-			n=split(w,p,":"); sec=(n==3)?p[1]*3600+p[2]*60+p[3]:(n==2)?p[1]*60+p[2]:p[1];
-			printf "%.6f %d %.3f %d", sec, r, u+s, rc
-		}'
+	LC_ALL=C "$TIMEIT" "${cmd[@]}"
 }
 
 teardown() { run "$1" "$2" "$3" down -v >/dev/null 2>&1; }

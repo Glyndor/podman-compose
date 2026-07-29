@@ -17,6 +17,14 @@
 name: benchmark
 
 on:
+  # The harness checks only guard anything if they run when the harness changes.
+  # Until #1227 they fired on dispatch and the monthly cron alone, so a PR could
+  # break run.sh or the timer and nothing would say so until the next 1st of the
+  # month. The engine job below stays dispatch-only: it needs the bench runner.
+  pull_request:
+    paths:
+      - "bench/**"
+      - ".github/workflows/benchmark.yml"
   workflow_dispatch:
   schedule:
     - cron: "0 4 1 * *" # monthly
@@ -36,6 +44,23 @@ jobs:
         run: python3 -m py_compile bench/aggregate.py
       - name: Exercise the aggregation stats path on inline sample rows
         run: python3 bench/aggregate.py --self-test
+      - name: Build the timer
+        run: cargo build --release --manifest-path bench/timeit/Cargo.toml
+      - name: Check the timer resolves below 10 ms
+        # The defect this timer was written for was an instrument that could not
+        # see under 10 ms, so it published `/bin/true` as 0.000 s. Assert the
+        # observable effect — a non-zero wall clock and a plausible RSS — rather
+        # than that the binary merely runs.
+        run: |
+          row="$(bench/timeit/target/release/timeit /bin/true)"
+          echo "timeit /bin/true -> $row"
+          # LC_ALL=C or a comma-decimal locale makes awk read "0.000626" as 0
+          # and the first bound fires on a perfectly good measurement.
+          echo "$row" | LC_ALL=C awk '{
+            if ($1 <= 0 || $1 >= 0.010) { print "wall clock not resolved below 10 ms: " $1; exit 1 }
+            if ($2 <= 0 || $2 > 4096) { print "max RSS implausible for /bin/true (KB): " $2; exit 1 }
+            if ($4 != 0) { print "exit code should be 0, got " $4; exit 1 }
+          }'
 
   benchmark:
     runs-on: [self-hosted, bench]
