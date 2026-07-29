@@ -61,6 +61,11 @@ pub enum ComposeError {
 	/// mapping; it is not printed, because the operator who pressed Ctrl-C does
 	/// not need to be told what they just did.
 	Interrupted,
+	/// A stream ended when it should not have: an attached `up` whose container
+	/// was still running, or an unbounded `events` feed that returned at all
+	/// (#1104). Carries a short description of which, since the detail (the
+	/// container, the transport error) is already warned as it happens.
+	StreamTruncated(String),
 	/// `podup update` (self-update) failed.
 	Update(String),
 	/// An `external: true` secret/config/network/volume is absent.
@@ -224,6 +229,7 @@ impl fmt::Display for ComposeError {
 			Self::Unsupported(s) => write!(f, "unsupported feature: {s}"),
 			Self::RunExited(code) => write!(f, "run container exited with code {code}"),
 			Self::Interrupted => write!(f, "interrupted"),
+			Self::StreamTruncated(what) => write!(f, "{what}"),
 			Self::Update(s) => write!(f, "update error: {s}"),
 			Self::ExternalNotFound(s) => write!(f, "external resource not found: {s}"),
 			Self::ScalePortConflict {

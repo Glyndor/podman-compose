@@ -130,19 +130,22 @@ impl PodmanError {
 		matches!(self, Self::Hyper(e) if e.is_incomplete_message())
 	}
 
-	/// How a streaming read ended, for the one question podup cannot currently
+	/// How a streaming read ended, for the one question the *transport* cannot
 	/// answer: was the stream *finished* or *broken*?
 	///
 	/// The parsers return `Ok(None)` on a clean body end, so in principle every
-	/// `Err` is a fault. In practice it is not — treating a mid-stream `Err` as a
-	/// command failure reddened fifteen tests on the lane's Podman 5.8.1 leg
-	/// while real 5.4.2 stayed green on the identical commit (#1104). Something
-	/// about how libpod ends a finished stream differs by version, and podup has
-	/// no way to tell which.
+	/// `Err` is a fault. In practice it is not, and the two cases are not
+	/// separable here: a body cut between chunks and one cut mid-payload arrive
+	/// alike, and a finished stream whose terminator went missing is
+	/// indistinguishable from either (#1104, pinned by `stream_end_tests`).
 	///
-	/// This names the hyper classification so a lane run can say *which* one
-	/// occurs, instead of the question being argued from the source. It is
-	/// diagnostic, not yet a decision: nothing branches on it.
+	/// Every streaming command therefore answers it out of band instead, by
+	/// asking something the transport cannot see — whether the container it was
+	/// following is still running, or whether the caller asked for a bounded
+	/// stream at all.
+	///
+	/// This names the hyper classification so a log can say *which* ending
+	/// occurred. It stays diagnostic: nothing branches on it.
 	pub(crate) fn stream_end_kind(&self) -> &'static str {
 		match self {
 			Self::Hyper(e) if e.is_incomplete_message() => "incomplete-message",

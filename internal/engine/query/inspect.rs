@@ -15,15 +15,16 @@ use super::Engine;
 
 /// How an attached `up` stopped streaming.
 ///
-/// The distinction has to survive back to the caller because the two endings
-/// mean opposite things to a script: the containers finishing on their own is
-/// success, and the operator pressing Ctrl-C is not. The caller still tears the
-/// project down either way — reporting the interrupt as an error from `attach`
+/// The distinction has to survive back to the caller because the three endings
+/// mean different things to a script: the containers finishing on their own is
+/// success, the operator pressing Ctrl-C is not, and a stream that died under a
+/// container still running is a failed read. The caller still tears the project
+/// down in every case. Reporting an ending as an error from `attach` itself
 /// would short-circuit that and leave the containers running, which is a worse
 /// bug than the exit code this exists to fix.
-/// `#[non_exhaustive]` for the same reason the other public types in this
-/// release gained it: a later ending — a stream that died rather than finished
-/// — is a variant, and without this it would be a major bump to add one.
+///
+/// `#[non_exhaustive]` since 3.0.0, so a further ending can be added without a
+/// major bump. `StreamBroke` (3.3.0) is one that already was.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttachOutcome {
@@ -31,6 +32,9 @@ pub enum AttachOutcome {
 	StreamsEnded,
 	/// SIGINT or SIGTERM arrived while streaming.
 	Interrupted,
+	/// At least one stream ended while its container was still running, so live
+	/// output was truncated rather than finished (#1104).
+	StreamBroke,
 }
 
 impl Engine {
@@ -457,12 +461,13 @@ impl Engine {
 				);
 				let client = &self.client;
 				let is_tty = *is_tty;
+				let cname = cname.clone();
 				async move {
 					let resp = match client.get_stream(&path).await {
 						Ok(r) => r,
 						Err(e) => {
 							tracing::warn!("attach_logs {prefix}: {e}");
-							return;
+							return false;
 						}
 					};
 					// TTY containers produce raw bytes (stdout/stderr merged).
@@ -480,9 +485,37 @@ impl Engine {
 							Ok(LogOutput::StdErr { message }) => {
 								eprint!("{prefix} | {}", String::from_utf8_lossy(&message));
 							}
-							Err(_) => break,
+							// An attach stream lives as long as its container and
+							// ends when the container stops, so a lost chunked
+							// terminator is indistinguishable at the transport
+							// layer from a real mid-stream break (#1104). The
+							// container answers what the transport cannot: still
+							// running means live output was truncated.
+							//
+							// This arm used to discard the error without even a
+							// warning, so `up` in the foreground could lose its
+							// connection to the engine and still exit 0.
+							Err(e) => {
+								let kind = e.stream_end_kind();
+								let broke = super::stream_broke_mid_output(
+									self.container_still_running(&cname).await,
+								);
+								if broke {
+									tracing::warn!(
+										"attach {prefix}: stream ended while the container was \
+										 still running [{kind}]: {e}"
+									);
+								} else {
+									tracing::warn!(
+										"attach {prefix}: stream ended as the container stopped \
+										 [{kind}]"
+									);
+								}
+								return broke;
+							}
 						}
 					}
+					false
 				}
 			})
 			.collect();
@@ -497,7 +530,15 @@ impl Engine {
 			use tokio::signal::unix::{signal, SignalKind};
 			let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
 			tokio::select! {
-				_ = futures_util::future::join_all(streams) => AttachOutcome::StreamsEnded,
+				broke = futures_util::future::join_all(streams) => {
+					// One truncated stream is enough: the output the user was
+					// watching is incomplete whatever the others did.
+					if broke.into_iter().any(|b| b) {
+						AttachOutcome::StreamBroke
+					} else {
+						AttachOutcome::StreamsEnded
+					}
+				}
 				_ = tokio::signal::ctrl_c() => AttachOutcome::Interrupted,
 				_ = sigterm.recv() => AttachOutcome::Interrupted,
 			}
@@ -542,5 +583,14 @@ mod attach_outcome_tests {
 	#[test]
 	fn the_two_endings_are_not_equal() {
 		assert_ne!(AttachOutcome::StreamsEnded, AttachOutcome::Interrupted);
+	}
+
+	/// A truncated stream is its own ending, not either of the first two. Folding
+	/// it into `StreamsEnded` is what let an attached `up` lose its connection to
+	/// the engine and still exit 0.
+	#[test]
+	fn a_broken_stream_is_neither_of_the_other_two() {
+		assert_ne!(AttachOutcome::StreamBroke, AttachOutcome::StreamsEnded);
+		assert_ne!(AttachOutcome::StreamBroke, AttachOutcome::Interrupted);
 	}
 }

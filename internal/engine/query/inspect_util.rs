@@ -140,12 +140,22 @@ pub(super) fn split_repo_tag(image_ref: &str) -> (String, String) {
 /// per input row (titles first). All but the last column are left-padded; the
 /// last is left ragged to avoid trailing whitespace.
 pub(super) fn align_top_columns(titles: &[String], processes: &[Vec<String>]) -> Vec<String> {
-	let mut rows: Vec<&[String]> = Vec::with_capacity(processes.len() + 1);
+	// Escaped before anything is measured. These cells hold a process `argv`
+	// read out of a container, which is attacker-controlled: without this a
+	// process can name itself with ANSI and repaint the reader's terminal. Every
+	// other table in podup goes through `fit_cell`, which sanitizes; `top`
+	// formats by hand and was the one that did not. Escaping first also keeps
+	// the width honest, since an escaped control character is wider than the
+	// byte it replaces.
+	let sanitize = |row: &[String]| -> Vec<String> {
+		row.iter().map(|c| crate::ui::sanitize_cell(c)).collect()
+	};
+	let mut rows: Vec<Vec<String>> = Vec::with_capacity(processes.len() + 1);
 	if !titles.is_empty() {
-		rows.push(titles);
+		rows.push(sanitize(titles));
 	}
 	for p in processes {
-		rows.push(p);
+		rows.push(sanitize(p));
 	}
 	let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
 	let mut widths = vec![0usize; col_count];
@@ -173,6 +183,25 @@ pub(super) fn align_top_columns(titles: &[String], processes: &[Vec<String>]) ->
 
 #[cfg(test)]
 mod tests {
+	/// A process can name itself, and `top` prints that name. Without escaping,
+	/// a container process called `\x1b[31mevil` repaints the reader's terminal
+	/// — the one table in podup that formatted by hand rather than through
+	/// `fit_cell`, which has sanitized since it was written.
+	#[test]
+	fn top_escapes_control_characters_from_process_argv() {
+		let titles = vec!["PID".to_string(), "COMMAND".to_string()];
+		let processes = vec![vec!["1".to_string(), "\u{1b}[31mevil".to_string()]];
+		let out = super::align_top_columns(&titles, &processes);
+		assert!(
+			!out.iter().any(|line| line.contains('\u{1b}')),
+			"no raw escape may reach the terminal: {out:?}"
+		);
+		assert!(
+			out[1].contains("\\u{1b}") || out[1].contains("\\x1b") || out[1].contains("\\e"),
+			"the sequence must survive as visible text, not vanish: {out:?}"
+		);
+	}
+
 	use super::{
 		align_top_columns, dedup_preserving_order, is_running_status, parse_port_proto,
 		select_replica, split_repo_tag,

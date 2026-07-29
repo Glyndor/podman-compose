@@ -18,7 +18,7 @@ pub use anstyle::{AnsiColor, Style};
 pub use anstream::ColorChoice;
 
 mod table;
-pub use table::{fit_cell, Table};
+pub use table::{fit_cell, sanitize_cell, Table};
 
 /// Apply the resolved colour choice process-wide and enable Windows VT once.
 ///
@@ -104,7 +104,28 @@ pub fn identity_style(label: &str) -> Style {
 				.flatten()
 		})
 		.unwrap_or_else(|| label.to_string());
-	service_style(&key)
+	service_style(strip_replica_suffix(&key))
+}
+
+/// Drop a trailing `-N` replica index, so every surface hashes the same key.
+///
+/// Without this the promise above held only within one command: `ps` keys a
+/// container as `web-1` while `images` keys the same service as `web`, so one
+/// service came out in two different colours depending on which command printed
+/// it. Measured before the fix, one project, one invocation: `migrate` was blue
+/// in `ps` and light magenta in `images`.
+///
+/// Only an all-digit suffix is stripped, so a service genuinely named `api-2`
+/// keeps its own identity rather than colliding with `api`.
+fn strip_replica_suffix(key: &str) -> &str {
+	match key.rsplit_once('-') {
+		Some((head, tail))
+			if !head.is_empty() && !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit()) =>
+		{
+			head
+		}
+		_ => key,
+	}
 }
 
 /// Enable or disable user-facing lifecycle progress output process-wide. The CLI
@@ -152,7 +173,13 @@ pub fn progress_line(kind: &str, name: &str, action: &str) {
 /// changed (dim).
 fn action_style(action: &str) -> Style {
 	let a = action.to_ascii_lowercase();
-	if a.starts_with("remov") || a.starts_with("kill") || a.starts_with("delet") {
+	// `unpaused` is checked before `paus` on purpose. It reaches the green arm
+	// either way — a container resuming is a thing becoming active, which is what
+	// green means here — but only by falling through, and adding `unpause` to the
+	// yellow arm's prefixes would silently invert it. Naming it pins the intent.
+	if a.starts_with("unpaus") {
+		Style::new().fg_color(Some(AnsiColor::Green.into()))
+	} else if a.starts_with("remov") || a.starts_with("kill") || a.starts_with("delet") {
 		Style::new().fg_color(Some(AnsiColor::Red.into()))
 	} else if a.starts_with("stop") || a.starts_with("paus") || a.starts_with("restart") {
 		Style::new().fg_color(Some(AnsiColor::Yellow.into()))

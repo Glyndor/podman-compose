@@ -44,8 +44,9 @@ A compose file is treated like a Makefile: running podup on one is equivalent to
 trusting its author. Path-valued keys the spec resolves relative to the compose
 file (`extends.file`, `env_file`, `label_file`, `include`) may reference paths
 outside the project directory, including `../`. Do **not** run podup on a compose
-file from an untrusted source. (`include` still rejects absolute paths as
-non-portable, but this is hardening, not a security guarantee.)
+file from an untrusted source. `include` accepts an absolute path and uses it as
+given, the same as `extends.file` and `env_file` — there is no containment here
+to rely on.
 
 ## Container hardening (compose security keys)
 

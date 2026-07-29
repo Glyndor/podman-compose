@@ -1,6 +1,6 @@
 [package]
 name = "podup"
-version = "3.2.1"
+version = "3.3.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Translate and run docker-compose files on rootless Podman"
@@ -79,7 +79,7 @@ temp-env = "0.3"
 tokio = { version = "1", features = ["io-util"] }
 
 [workspace]
-exclude = ["fuzz"]
+exclude = ["bench/timeit", "fuzz"]
 
 [profile.release]
 opt-level = 3

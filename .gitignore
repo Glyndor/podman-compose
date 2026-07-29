@@ -41,3 +41,4 @@ bench/results/
 .claude/
 .superpowers/
 .playwright-mcp/
+/bench/timeit/target

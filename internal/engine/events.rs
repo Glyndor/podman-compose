@@ -22,9 +22,12 @@ pub struct EventsOptions {
 }
 
 impl Engine {
-	/// Stream events for this project's containers until interrupted. With
-	/// `json`, each event is printed as a compact JSON line; otherwise as
-	/// `TYPE ACTION NAME`.
+	/// Stream events for this project's containers. With `json`, each event is
+	/// printed as a compact JSON line; otherwise as `TYPE ACTION NAME`.
+	///
+	/// The feed is unbounded, so it normally ends only when the caller stops it.
+	/// Returning at all therefore means the stream was lost, and this returns
+	/// `Err` — see [`Engine::stream_events_with_options`] for the bounded case.
 	pub async fn stream_events(&self, json: bool) -> Result<()> {
 		self.stream_events_with_options(json, &EventsOptions::default())
 			.await
@@ -32,6 +35,29 @@ impl Engine {
 
 	/// [`Engine::stream_events`] with `docker compose events`-style `--since`,
 	/// `--until`, and `--filter` options.
+	///
+	/// # Errors
+	///
+	/// A transport failure always returns the underlying error, whatever was
+	/// asked for. Beyond that, whether a *clean* ending is an error depends on
+	/// what the caller asked for:
+	///
+	/// - **`since` and `until` both set, both already elapsed** — the window
+	///   closes on its own, so a clean ending is what was asked for. Returns
+	///   `Ok(())`.
+	/// - **anything else** — the feed is unbounded and libpod never ends it, so
+	///   any ending means the stream was lost. Returns
+	///   [`ComposeError::StreamTruncated`](crate::ComposeError::StreamTruncated).
+	///
+	/// Also returns `Err` if a `--filter` is malformed or the stream cannot be
+	/// opened.
+	///
+	/// A window needs **both** ends to close, and both must already have
+	/// elapsed. Measured against Podman 5.4.2: `since` and `until` together
+	/// close the feed, whether absolute or relative (`-2h`..`-1h`); either one
+	/// alone leaves it open, as does any `until` in the future. So `--until 5m`
+	/// follows indefinitely rather than stopping in five minutes, and `--until
+	/// -5m` alone does too.
 	pub async fn stream_events_with_options(&self, json: bool, opts: &EventsOptions) -> Result<()> {
 		let filters = build_event_filters(&self.project, &opts.filters)?;
 		let mut path = format!(
@@ -50,22 +76,68 @@ impl Engine {
 			.await
 			.map_err(ComposeError::Podman)?;
 		let mut stream = crate::libpod::parse_json_lines::<Value>(resp.into_body());
-		// Warned, never fatal. The parser only yields `Err` on a transport
-		// failure or an unparseable frame — but "transport failure" turns out to
-		// include how libpod ends a finished stream on some versions:
-		// `engine_events_stream_connects` went red on the live lane's Podman
-		// 5.8.1 when this was treated as a command failure, while the same suite
-		// is green on 5.4.2. Until podup can tell that apart from a socket that
-		// genuinely died, reporting it would fail commands that worked.
+		// Whether a clean end was expected is decided by what was asked for, not
+		// by the shape of the end.
+		//
+		// The other streaming commands re-check the container they followed
+		// (#1169, #1204, #1242). An events feed is project-scoped and follows no
+		// single container, so there is nothing to re-check. What the client
+		// asked for answers it instead, at no API cost.
+		//
+		// Keying on the request rather than on `Err` versus a clean `None`
+		// matters: a closed window ends the feed *cleanly*, so an unbounded feed
+		// reaching `None` is the same anomaly as one reaching `Err`, and the
+		// previous code exited 0 for both.
+		//
+		// A window needs BOTH ends to close. Measured against 5.4.2 with curl,
+		// no podup involved, `stream=true`:
+		//
+		//   since + until, both past, absolute   closes
+		//   since + until, relative (-2h..-1h)   closes
+		//   until alone, past                    stays open
+		//   since alone, past                    stays open
+		//
+		// So `--until` on its own does not bound anything, whatever the user
+		// meant by it, and treating it as intent-to-bound would call an unbounded
+		// feed bounded. A future `until` never closes either, with or without
+		// `since`.
+		let bounded = opts.since.is_some() && opts.until.is_some();
+		if opts.until.is_some() && opts.since.is_none() {
+			tracing::warn!(
+				"events: --until without --since does not bound the feed; libpod keeps it open. \
+				 Pass both to bound a window."
+			);
+		}
+		let mut broke: Option<crate::libpod::PodmanError> = None;
 		while let Some(event) = stream.next().await {
 			match event {
 				Ok(value) => println!("{}", format_event(&value, json)),
 				Err(e) => {
-					tracing::warn!("events: stream ended early [{}]: {e}", e.stream_end_kind())
+					tracing::warn!("events: stream ended early [{}]: {e}", e.stream_end_kind());
+					broke = Some(e);
+					break;
 				}
 			}
 		}
-		Ok(())
+		// A transport failure is never expected, whatever was asked for. Intent
+		// says whether an *ending* was expected; it cannot make a severed socket
+		// expected. Reading it as "bounded means always fine" inverted the whole
+		// point of #1104 on the scriptable path: `--until` with `--format json`
+		// is what a script uses, and it would have truncated its window and
+		// reported success, while the interactive unbounded form got the strict
+		// check.
+		if let Some(e) = broke {
+			return Err(ComposeError::Podman(e));
+		}
+		if bounded {
+			return Ok(());
+		}
+		// An unbounded feed that ended cleanly still lost its connection: libpod
+		// does not end one, so reaching here at all is the anomaly.
+		Err(ComposeError::StreamTruncated(
+			"events stream ended on its own: an unbounded feed only ends when the client stops it"
+				.to_string(),
+		))
 	}
 }
 
@@ -241,6 +313,119 @@ mod event_colour_tests {
 		assert!(
 			out.ends_with("create\u{1b}[0m") || !out.ends_with("\u{1b}[0m "),
 			"{out:?}"
+		);
+	}
+}
+
+/// Whether an events feed that ended did so because it was asked to.
+///
+/// The four other streaming commands re-check the container they followed. An
+/// events feed follows none, so the discriminator is intent — which the client
+/// knows without an API call.
+#[cfg(test)]
+#[cfg(unix)]
+mod stream_end_tests {
+	use crate::engine::fake_podman::{self, FakeReply};
+	use crate::engine::{Engine, EventsOptions};
+
+	fn engine(fake: &fake_podman::FakePodman) -> Engine {
+		Engine::with_base_dir(fake.client(), "proj".into(), std::env::temp_dir())
+	}
+
+	/// One event, then the body ends the way the server chose.
+	fn fake(reply: fn() -> FakeReply) -> fake_podman::FakePodman {
+		fake_podman::start_replying(move |_method, _target| reply())
+	}
+
+	fn one_event() -> Vec<String> {
+		vec![r#"{"Type":"container","Action":"start","id":"abc"}"#.to_string()]
+	}
+
+	/// Both ends of an elapsed window, which is the only form libpod closes.
+	fn bounded() -> EventsOptions {
+		EventsOptions {
+			since: Some("2026-01-01T00:00:00Z".to_string()),
+			until: Some("2026-01-01T01:00:00Z".to_string()),
+			..Default::default()
+		}
+	}
+
+	#[tokio::test]
+	async fn an_unbounded_feed_that_ends_cleanly_is_still_a_failure() {
+		// The case no error-shaped check could catch: the server closed the body
+		// properly, so the parser reports a clean end, and this used to exit 0.
+		let fake = fake(|| FakeReply::ChunkedEnd(one_event()));
+		let err = engine(&fake)
+			.stream_events_with_options(false, &EventsOptions::default())
+			.await
+			.expect_err("only the client ends an unbounded feed, so any end is unexpected");
+		assert!(
+			matches!(err, crate::error::ComposeError::StreamTruncated(_)),
+			"expected the intent verdict, got {err:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn an_unbounded_feed_cut_mid_body_is_a_failure() {
+		let fake = fake(|| FakeReply::ChunkedTruncated(one_event()));
+		let err = engine(&fake)
+			.stream_events_with_options(false, &EventsOptions::default())
+			.await
+			.expect_err("a severed unbounded feed is a failure too");
+		assert!(
+			matches!(err, crate::error::ComposeError::Podman(_)),
+			"the transport error must survive so the operator sees the cause, got {err:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_bounded_feed_that_ends_is_success() {
+		// `--until` is the client saying the window closes on its own, so the end
+		// is what was asked for. Measured on 5.4.2: an already-elapsed window does
+		// end the feed cleanly.
+		let fake = fake(|| FakeReply::ChunkedEnd(one_event()));
+		engine(&fake)
+			.stream_events_with_options(false, &bounded())
+			.await
+			.expect("a bounded feed reaching the end of its window succeeded");
+	}
+
+	/// `--until` alone does not bound anything: measured against 5.4.2, libpod
+	/// leaves the feed open without a `since` to pair it with. Treating it as
+	/// bounded would call an unbounded feed bounded and hand back a success.
+	#[tokio::test]
+	async fn until_without_since_is_not_a_bounded_feed() {
+		let fake = fake(|| FakeReply::ChunkedEnd(one_event()));
+		let opts = EventsOptions {
+			until: Some("2026-01-01T00:00:00Z".to_string()),
+			..Default::default()
+		};
+		let err = engine(&fake)
+			.stream_events_with_options(false, &opts)
+			.await
+			.expect_err("until alone leaves the feed unbounded, so any end is unexpected");
+		assert!(
+			matches!(err, crate::error::ComposeError::StreamTruncated(_)),
+			"expected the unbounded verdict, got {err:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_bounded_feed_cut_mid_body_is_a_failure() {
+		// Intent says whether an *ending* was expected. It cannot make a severed
+		// socket expected, and this is the case that matters most: `--until` with
+		// `--format json` is the scriptable form, so swallowing the error here
+		// would truncate a window and report success on exactly the path a script
+		// trusts, while the interactive unbounded form kept the strict check.
+		// That inverts #1104 rather than completing it.
+		let fake = fake(|| FakeReply::ChunkedTruncated(one_event()));
+		let err = engine(&fake)
+			.stream_events_with_options(false, &bounded())
+			.await
+			.expect_err("a severed window is a failed read, bounded or not");
+		assert!(
+			matches!(err, crate::error::ComposeError::Podman(_)),
+			"the transport error must survive so the operator sees the cause, got {err:?}"
 		);
 	}
 }

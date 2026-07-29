@@ -97,9 +97,15 @@ pub(crate) async fn dispatch(
 					None => fut.await?,
 				}
 			}
+			// `--wait` implies detach, as it does in docker compose: the flag
+			// means "return once the services are up", so attaching afterwards
+			// would block forever on a command whose whole point is to finish.
+			// Measured against v5.1.3 on the same socket: `docker compose up
+			// --wait` exits 0, and `podup up --wait` hung until killed — which is
+			// the canonical health-gated CI idiom, so it hung the job.
 			if watch {
 				engine.watch(file).await?;
-			} else if !detach {
+			} else if !detach && !wait {
 				let outcome = engine.attach_logs_with_options(file, timestamps).await?;
 				// A failed teardown must surface as a non-zero exit, not be
 				// swallowed after the log streams end.
@@ -110,6 +116,17 @@ pub(crate) async fn dispatch(
 				// the exit code.
 				if outcome == podup::AttachOutcome::Interrupted {
 					return Err(podup::ComposeError::Interrupted);
+				}
+				// Same ordering rule as the interrupt above: reported after the
+				// teardown, never instead of it. docker compose exits 1 when an
+				// attached stream dies with the container still running, and we
+				// exited 0 — measured on 5.4.2 by restarting the libpod socket
+				// underneath an attached `up`.
+				if outcome == podup::AttachOutcome::StreamBroke {
+					return Err(podup::ComposeError::StreamTruncated(
+					"log stream ended while the container was still running: output is incomplete"
+						.to_string(),
+				));
 				}
 			}
 		}

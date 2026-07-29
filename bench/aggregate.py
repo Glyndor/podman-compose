@@ -6,6 +6,9 @@ whose command failed (rc != 0), and reports median / p95 / stdev / n per
 (tool, scenario, op) for three metrics: wall-clock seconds, peak resident memory
 (max RSS), and CPU time. Emits results/report.md and results/summary.json.
 
+raw.csv and summary.json stay in seconds at full precision — one canonical unit.
+Only the report picks a readable one, per row (see row_unit).
+
 No number is invented here: every statistic is computed from the measured rows,
 and a losing result is printed exactly like a winning one.
 """
@@ -63,6 +66,18 @@ SELF_TEST_ROWS = [
 	{"tool": "podup", "scenario": "single", "op": "down", "iter": "2", "phase": "measured", "seconds": "0.210", "max_rss_kb": "9600", "cpu_s": "0.052", "rc": "0"},
 	{"tool": "podman-compose", "scenario": "single", "op": "up", "iter": "1", "phase": "measured", "seconds": "0.800", "max_rss_kb": "30000", "cpu_s": "0.300", "rc": "0"},
 	{"tool": "podman-compose", "scenario": "single", "op": "up", "iter": "2", "phase": "measured", "seconds": "0.001", "max_rss_kb": "1", "cpu_s": "0.001", "rc": "1"},
+	# Sub-10 ms rows, the ones /usr/bin/time could not see. They exercise the
+	# millisecond branch of row_unit, which no whole-second fixture reaches.
+	{"tool": "podup", "scenario": "running-ops", "op": "ps", "iter": "1", "phase": "measured", "seconds": "0.008521", "max_rss_kb": "9100", "cpu_s": "0.003812", "rc": "0"},
+	{"tool": "podup", "scenario": "running-ops", "op": "ps", "iter": "2", "phase": "measured", "seconds": "0.008904", "max_rss_kb": "9150", "cpu_s": "0.003907", "rc": "0"},
+	{"tool": "podman-compose", "scenario": "running-ops", "op": "ps", "iter": "1", "phase": "measured", "seconds": "0.412", "max_rss_kb": "29000", "cpu_s": "0.240", "rc": "0"},
+	{"tool": "podman-compose", "scenario": "running-ops", "op": "ps", "iter": "2", "phase": "measured", "seconds": "0.421", "max_rss_kb": "29100", "cpu_s": "0.244", "rc": "0"},
+	# Multi-second rows, so the seconds branch of row_unit is exercised too. A
+	# fixture set that never crosses 1 s would leave half the formatting untested.
+	{"tool": "podup", "scenario": "wide-level", "op": "up", "iter": "1", "phase": "measured", "seconds": "6.745", "max_rss_kb": "12800", "cpu_s": "1.040", "rc": "0"},
+	{"tool": "podup", "scenario": "wide-level", "op": "up", "iter": "2", "phase": "measured", "seconds": "6.802", "max_rss_kb": "12900", "cpu_s": "1.061", "rc": "0"},
+	{"tool": "podman-compose", "scenario": "wide-level", "op": "up", "iter": "1", "phase": "measured", "seconds": "41.220", "max_rss_kb": "61000", "cpu_s": "18.400", "rc": "0"},
+	{"tool": "podman-compose", "scenario": "wide-level", "op": "up", "iter": "2", "phase": "measured", "seconds": "42.007", "max_rss_kb": "61200", "cpu_s": "18.910", "rc": "0"},
 ]
 
 
@@ -73,6 +88,32 @@ def pct(values, p):
 	s = sorted(values)
 	k = max(0, min(len(s) - 1, round(p / 100 * (len(s) - 1))))
 	return s[k]
+
+
+def row_unit(cells, metric):
+	"""Pick one time unit for a whole report row, from its largest value.
+
+	Returns (suffix, multiplier, decimals).
+
+	One unit per row, applied to every tool in it. Choosing per cell would break
+	the comparison the reader actually makes — one tool against another on the
+	same operation — by putting "90 ms" next to "0.11 s". Across rows the
+	workloads differ anyway, so a row is the widest scope where a shared unit
+	still means something.
+
+	p95 counts towards the choice, not just the median: a row whose median is a
+	few milliseconds but whose p95 is over a second reads better in seconds than
+	as a four-digit millisecond figure.
+	"""
+	values = []
+	for cell in cells:
+		if not cell:
+			continue
+		s = cell[metric]
+		values += [v for v in (s["median"], s["p95"]) if v == v]
+	if values and max(values) < 1.0:
+		return ("ms", 1000.0, 1)
+	return ("s", 1.0, 3)
 
 
 def stats(values):
@@ -162,21 +203,29 @@ def main():
 			for op in OP_ORDER:
 				if not any(op in summary.get(c, {}).get(scen, {}) for c in cols):
 					continue
-				cells = [fmt(summary.get(c, {}).get(scen, {}).get(op)) for c in cols]
+				row = [summary.get(c, {}).get(scen, {}).get(op) for c in cols]
+				cells = [fmt(cell, row) for cell in row]
 				lines.append(f"| {scen} | {OP_LABEL[op]} | " + " | ".join(cells) + " |")
 		lines.append("")
 
-	def wall(cell):
+	def wall(cell, row):
 		if not cell:
 			return "—"
+		suffix, mult, dec = row_unit(row, "seconds")
 		s = cell["seconds"]
-		return f"{s['median']:.3f} (p95 {s['p95']:.3f}, sd {s['stdev']:.3f})"
+		def q(v):
+			return f"{v * mult:.{dec}f}"
+		return f"{q(s['median'])} {suffix} (p95 {q(s['p95'])}, sd {q(s['stdev'])})"
 
-	def mem(cell):
+	def mem(cell, row):
 		if not cell:
 			return "—"
+		# CPU time gets the same treatment as wall clock: rusage resolves to
+		# microseconds, so a `ps` costing 4 ms of CPU no longer has to publish as
+		# 0.004 s next to a build costing seconds.
+		suffix, mult, dec = row_unit(row, "cpu_s")
 		r, c = cell["rss_mib"], cell["cpu_s"]
-		return f"{r['median']:.1f} MiB / {c['median']:.3f} s"
+		return f"{r['median']:.1f} MiB / {c['median'] * mult:.{dec}f} {suffix}"
 
 	lines.append("All numbers are over the measured iterations (warm-up "
 				 "discarded), same machine, same digest-pinned pre-pulled images, "
@@ -184,8 +233,11 @@ def main():
 
 	metric_table(
 		"Wall-clock — pure tool comparison (all drive Podman)",
-		"Seconds, lower is better. Median with p95 and stdev in parentheses. "
-		"Identical engine, so the only difference is the compose tool. "
+		"Lower is better. Median with p95 and stdev in parentheses. Each row "
+		"carries one unit, picked from the largest value in it, so the tools in "
+		"a row stay directly comparable; raw.csv and summary.json keep every "
+		"figure in seconds. Identical engine, so the only difference is the "
+		"compose tool. "
 		"docker-compose appears here when it was pointed at the Podman socket "
 		"rather than at a Docker daemon.",
 		same, wall)
@@ -211,6 +263,10 @@ def main():
 		# The self-test runs on six fixture rows. Writing them out would replace a
 		# real report and summary — the output of a benchmark that takes the better
 		# part of an hour and cannot be recomputed, since raw.csv is the only copy.
+		# Printed, not just built: the fixtures exist to exercise the formatting,
+		# and a table nobody looks at cannot show that a row picked the wrong
+		# unit or that a cell came out empty.
+		print("\n".join(lines))
 		print(f"self-test ok ({len(rows)} fixture rows); {MD} and {JSON} left untouched")
 		return 0
 
