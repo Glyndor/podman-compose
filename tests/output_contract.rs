@@ -491,3 +491,68 @@ async fn ls_tints_each_project_name() {
 		"two projects must not share one colour, or the column says nothing:\n{text}"
 	);
 }
+
+/// `autostart status` gives one answer one colour.
+///
+/// With no unit file on disk it gave two: `installed: no` was dim while
+/// `enabled: not-found` was red, though both report the same fact about the same
+/// uninstalled unit and neither is a failure. The red one belonged to the case
+/// where nothing is wrong, which is the reading an operator scanning six
+/// consecutive yes/no lines will act on first.
+///
+/// Compares the two lines' value styles against each other rather than against a
+/// literal escape sequence, so the test cannot pass by re-deriving what the
+/// renderer was going to emit anyway.
+#[test]
+fn autostart_status_renders_one_negative_one_way() {
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(&compose, "services:\n  web:\n    image: alpine:latest\n").unwrap();
+	let out = Command::new(bin())
+		.args([
+			"-f",
+			&compose.to_string_lossy(),
+			"-p",
+			&format!("t{}-nounit", std::process::id()),
+			"--ansi",
+			"always",
+			"autostart",
+			"status",
+		])
+		.output()
+		.expect("run podup autostart status");
+	let text = String::from_utf8_lossy(&out.stdout);
+
+	// The style applied to a line's value: everything after the label's own reset.
+	let value_style = |label: &str| -> Option<String> {
+		text.lines()
+			.find(|l| l.contains(&format!("{label}:")))
+			.and_then(|l| l.split_once("\u{1b}[0m "))
+			.map(|(_, rest)| {
+				// The whole leading SGR sequence, terminator included. Stopping at
+				// the first non-alphanumeric char instead truncates `\x1b[2m` and
+				// `\x1b[31m` to the same `\x1b[`, which made an earlier version of
+				// this test pass with the control deleted.
+				let mut style = String::new();
+				for c in rest.chars() {
+					style.push(c);
+					if c == 'm' {
+						break;
+					}
+				}
+				style
+			})
+	};
+
+	let installed = value_style("installed");
+	let enabled = value_style("enabled");
+	assert!(
+		installed.is_some() && enabled.is_some(),
+		"both lines must be present; got:\n{text}"
+	);
+	assert_eq!(
+		installed, enabled,
+		"`installed: no` and `enabled: not-found` report the same uninstalled \
+		 unit, so they must not be styled differently; got:\n{text}"
+	);
+}
