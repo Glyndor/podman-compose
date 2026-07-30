@@ -18,6 +18,7 @@ pub use anstyle::{AnsiColor, Style};
 pub use anstream::ColorChoice;
 
 mod palette;
+pub mod progress;
 mod table;
 pub use table::{fit_cell, sanitize_cell, Table};
 
