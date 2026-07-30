@@ -431,3 +431,115 @@ async fn a_piped_down_gets_transitions_for_what_exists() {
 		"the network needs both; got:\n{stderr}"
 	);
 }
+
+/// `build` writes its output to stderr, leaving stdout a clean pipe.
+///
+/// It used `print!`, contradicting the documented promise that stdout stays
+/// pipeable — the one thing a caller redirecting `podup build > log` relies on,
+/// and the same promise `config` and `generate quadlet` are built around.
+#[tokio::test]
+async fn build_leaves_stdout_a_clean_pipe() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	fs::write(
+		dir.path().join("Dockerfile"),
+		"FROM alpine:latest\nRUN true\n",
+	)
+	.unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(
+		&compose,
+		"services:\n  tiny:\n    image: podup-build-probe:1\n    build:\n      context: .\n",
+	)
+	.unwrap();
+	let out = Command::new(bin())
+		.args([
+			"-f",
+			&compose.to_string_lossy(),
+			"-p",
+			&format!("t{}-bld", std::process::id()),
+			"build",
+		])
+		.output()
+		.expect("run podup build");
+	let stdout = String::from_utf8_lossy(&out.stdout);
+	assert!(
+		stdout.trim().is_empty(),
+		"build must not write to stdout; got:\n{stdout}"
+	);
+	assert!(
+		!String::from_utf8_lossy(&out.stderr).trim().is_empty(),
+		"the build output has to go somewhere, and that somewhere is stderr"
+	);
+}
+
+/// `pull` reports through the progress layer, with a matching `Pulled`.
+///
+/// It used a bare `eprintln!` — the one user-facing line in the binary that
+/// bypassed `ui` entirely, so it ignored `PROGRESS_ENABLED` and an embedder
+/// asking podup to stay silent got it anyway. There was never a `Pulled` at all,
+/// so a pull that finished looked exactly like one that hung.
+#[tokio::test]
+async fn pull_reports_both_ends() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(&compose, "services:\n  x:\n    image: alpine:latest\n").unwrap();
+	let p = Project {
+		compose: compose.to_string_lossy().into_owned(),
+		name: format!("t{}-pull", std::process::id()),
+		_dir: dir,
+	};
+	let stderr = p.progress(&["pull"]);
+	assert!(
+		stderr.contains("Pulling") && stderr.contains("Pulled"),
+		"pull must report starting and finishing; got:\n{stderr}"
+	);
+	assert_eq!(
+		stderr.matches("Pulling").count(),
+		1,
+		"one image, one Pulling; got:\n{stderr}"
+	);
+}
+
+/// One image, one `Pulling`, even on the `up` path.
+///
+/// `up` warms the image cache before the per-level walk and then pulls again
+/// inside it, and both reported — so `Pulling` appeared twice per image on `up`
+/// while a standalone `pull` printed it once. The prefetch is best-effort
+/// warming and the walk's own pull is the authoritative one, so only the second
+/// speaks.
+///
+/// `pull_policy: always` is what forces both stages to actually issue a pull for
+/// an image that is already local; with the default `missing` the prefetch would
+/// short-circuit and the duplication could not appear whether or not the control
+/// exists.
+#[tokio::test]
+async fn up_pulls_an_image_once() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(
+		&compose,
+		"services:\n  web:\n    image: alpine:latest\n    pull_policy: always\n    command: \
+		 [\"sleep\", \"infinity\"]\n",
+	)
+	.unwrap();
+	let p = Project {
+		compose: compose.to_string_lossy().into_owned(),
+		name: format!("t{}-once", std::process::id()),
+		_dir: dir,
+	};
+	let stderr = p.progress(&["up", "-d"]);
+	let pulls = stderr.matches("Pulling").count();
+	assert!(
+		pulls <= 1,
+		"one image must produce at most one Pulling on up; got {pulls} in:\n{stderr}"
+	);
+}

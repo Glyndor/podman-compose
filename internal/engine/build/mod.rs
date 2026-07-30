@@ -394,8 +394,13 @@ impl Engine {
 		while let Some(result) = stream.next().await {
 			match result {
 				Ok(output) => {
+					// stderr, not stdout. Build output went to stdout via `print!`,
+					// which contradicted the documented promise that stdout stays
+					// a clean pipe — the one thing a caller redirecting `podup
+					// build > log` relies on, and the same promise `config` and
+					// `generate quadlet` are built around.
 					if !opts.quiet && !output.stream.is_empty() {
-						print!("{}", output.stream);
+						eprint!("{}", output.stream);
 					}
 					if let Some(err) = output.error_detail.and_then(|e| e.message) {
 						return Err(ComposeError::Build(err));

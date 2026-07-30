@@ -145,7 +145,7 @@ impl Engine {
 			// reuse it here instead of letting `pull_image` resolve (and
 			// potentially re-warn about) it a second time.
 			let pull_err = self
-				.pull_image_with_policy(service, key.1)
+				.pull_image_with_policy(service, key.1, self.quiet_pull)
 				.await
 				.err()
 				.map(|e| e.to_string());
@@ -188,7 +188,21 @@ impl Engine {
 
 	pub(in crate::engine) async fn pull_image(&self, service: &Service) -> Result<()> {
 		let pull_policy = self.resolved_pull_policy(service);
-		self.pull_image_with_policy(service, pull_policy).await
+		self.pull_image_with_policy(service, pull_policy, self.quiet_pull)
+			.await
+	}
+
+	/// [`Self::pull_image`] with no user-facing progress, whatever `--quiet-pull`
+	/// says.
+	///
+	/// For the `up` prefetch, which only warms the cache: `up_one_service`'s own
+	/// pull is the authoritative one, and reporting from both is what printed
+	/// `Pulling` twice per image on `up` while a standalone `pull` printed it
+	/// once.
+	pub(in crate::engine) async fn pull_image_quietly(&self, service: &Service) -> Result<()> {
+		let pull_policy = self.resolved_pull_policy(service);
+		self.pull_image_with_policy(service, pull_policy, true)
+			.await
 	}
 
 	/// Resolve the effective libpod pull policy for `service`: the
@@ -220,19 +234,26 @@ impl Engine {
 	/// which must resolve the policy anyway to compute its dedup key — can
 	/// reuse that value instead of resolving (and potentially re-warning
 	/// about an unrecognized one) a second time.
-	async fn pull_image_with_policy(&self, service: &Service, pull_policy: &str) -> Result<()> {
+	async fn pull_image_with_policy(
+		&self,
+		service: &Service,
+		pull_policy: &str,
+		quiet: bool,
+	) -> Result<()> {
 		let image = match &service.image {
 			Some(img) => img.clone(),
 			None => return Ok(()),
 		};
 
-		// Progress goes to stderr so it shows at default verbosity (the non-watch
-		// log floor is WARN, so info!/debug! would print nothing) and `--quiet`
-		// actually suppresses it, matching `docker compose pull`.
-		if self.quiet_pull {
+		// Through the progress layer, not a bare `eprintln!`. This was the one
+		// user-facing line in the binary that bypassed `ui` entirely, so it
+		// ignored `PROGRESS_ENABLED` and an embedder that asked podup to stay
+		// silent got it anyway — and there was never a matching `Pulled`, so a
+		// pull that finished looked exactly like one that hung.
+		if quiet {
 			debug!("pulling {image}");
 		} else {
-			eprintln!("Pulling {image}");
+			crate::ui::progress::start("Image", &image, "Pulling");
 		}
 
 		let mut query = format!("reference={}&policy={}", urlencoded(&image), pull_policy);
@@ -274,7 +295,12 @@ impl Engine {
 
 		match pull_err {
 			Some(e) => Err(ComposeError::Build(format!("pull {image} failed: {e}"))),
-			None => Ok(()),
+			None => {
+				if !quiet {
+					crate::ui::progress_line("Image", &image, "Pulled");
+				}
+				Ok(())
+			}
 		}
 	}
 
