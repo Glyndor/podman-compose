@@ -50,6 +50,20 @@ pub fn sanitize_cell(s: &str) -> String {
 		.collect()
 }
 
+/// The style for a [`Table::caution_col`] cell: yellow for the answer that
+/// warrants a second look, dim for the default one, and nothing for a value that
+/// is neither.
+///
+/// Pure and taking the cell text, so the mapping is unit-testable without
+/// rendering a table or reading the process-global colour choice.
+fn caution_style(cell: &str) -> super::Style {
+	match cell.trim() {
+		"yes" => super::Style::new().fg_color(Some(super::AnsiColor::Yellow.into())),
+		"no" => super::Style::new().dimmed(),
+		_ => super::Style::new(),
+	}
+}
+
 /// A list-command table whose columns size to their content (capped, so a
 /// pathologically long cell truncates with an ellipsis rather than pushing every
 /// later column past its header). The trailing column is emitted raw.
@@ -63,6 +77,9 @@ pub struct Table {
 	/// The column (if any) carrying an identity — a service or container name —
 	/// tinted with that identity's stable colour.
 	identity_col: Option<usize>,
+	/// The column (if any) holding a yes/no answer where `yes` is the one worth
+	/// noticing. See [`Table::caution_col`].
+	caution_col: Option<usize>,
 	rows: Vec<Vec<String>>,
 	/// Per-row identity key, parallel to `rows`. `None` falls back to the
 	/// identity cell's own text.
@@ -78,6 +95,7 @@ impl Table {
 			caps: vec![None; headers.len()],
 			status_col: None,
 			identity_col: None,
+			caution_col: None,
 			rows: Vec::new(),
 			keys: Vec::new(),
 		}
@@ -107,6 +125,20 @@ impl Table {
 	/// status meaning — so an identity colour can never be misread as a state.
 	pub fn identity_col(mut self, col: usize) -> Self {
 		self.identity_col = Some(col);
+		self
+	}
+
+	/// Mark column `col` as a yes/no answer where `yes` is the one worth noticing:
+	/// `yes` takes the yellow band, `no` is dimmed as the unremarkable default.
+	///
+	/// Deliberately not [`Table::status_col`], which would paint `yes` green.
+	/// Green means healthy/up everywhere else in this CLI, and the column this
+	/// was written for — `volumes`' `EXTERNAL` — is not reporting health. It
+	/// reports the one volume podup will refuse to delete, so a `down -v` that
+	/// leaves something standing is explicable. That is a caution, and yellow is
+	/// already the band this CLI uses for *survives*.
+	pub fn caution_col(mut self, col: usize) -> Self {
+		self.caution_col = Some(col);
 		self
 	}
 
@@ -185,6 +217,9 @@ impl Table {
 					// either way, so alignment is untouched.
 					return super::paint(super::identity_style(key.unwrap_or(cell)), &padded, true);
 				}
+				if colour && Some(i) == self.caution_col {
+					return super::paint(caution_style(cell), &padded, true);
+				}
 				padded
 			})
 			.collect::<Vec<_>>()
@@ -233,6 +268,36 @@ mod tests {
 		assert!(!out.contains('\x07'), "{out:?}");
 		assert!(!out.contains('\t'), "{out:?}");
 		assert!(out.contains("name"), "{out:?}");
+	}
+
+	/// A caution column separates its two answers, and `yes` is not the same as
+	/// `no` with a different word. Asserted as "the two styles differ" rather
+	/// than against a literal escape sequence: re-deriving the expected code from
+	/// the same constant the renderer reads would pass whether or not the
+	/// renderer consulted it.
+	#[test]
+	fn caution_style_distinguishes_yes_from_no() {
+		assert_ne!(caution_style("yes"), caution_style("no"));
+		// Padding must not change the answer — cells reach it already padded.
+		assert_eq!(caution_style("yes  "), caution_style("yes"));
+	}
+
+	/// A value that is neither answer is left alone rather than given an
+	/// arbitrary colour, matching how `status_style` treats an unknown word.
+	#[test]
+	fn caution_style_leaves_an_unknown_value_alone() {
+		assert_eq!(caution_style("maybe"), super::super::Style::new());
+	}
+
+	/// The caution column reaches the rendered row. `render` is the uncoloured
+	/// path, so this pins that the column is *declared*; the colour itself is
+	/// asserted on `caution_style` above.
+	#[test]
+	fn caution_col_survives_rendering() {
+		let mut t = Table::new(&["NAME", "EXTERNAL"]).caution_col(1);
+		t.push(vec!["theirs".into(), "yes".into()]);
+		let rows = t.render();
+		assert!(rows[1].contains("yes"), "{rows:?}");
 	}
 
 	/// Printable text is untouched.

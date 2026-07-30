@@ -87,9 +87,15 @@ impl Engine {
 		// On `ui::Table` rather than a hand-rolled `{:<40} {:<12}`: cells are
 		// escaped and columns sized in one place, so this stops being a third
 		// layout dialect that has to be fixed separately every time.
+		// EXTERNAL printed `yes`/`no` in plain text while every other meaningful
+		// column in the binary carried colour, so the most consequential fact in
+		// the table was the least visible one. `caution_col` rather than
+		// `status_col`: green would say "healthy", and an external volume is not
+		// healthy or unhealthy — it is the one podup will not delete.
 		let mut table = crate::ui::Table::new(&["NAME", "DRIVER", "EXTERNAL"])
 			.cap(0, 48)
-			.identity_col(0);
+			.identity_col(0)
+			.caution_col(2);
 		for (_, name, driver, external) in &rows {
 			table.push(vec![
 				name.clone(),
