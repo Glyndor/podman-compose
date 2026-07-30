@@ -305,3 +305,63 @@ async fn top_styles_its_process_rows() {
 		"process rows must carry the dim styling, not just the two headers; got:\n{text}"
 	);
 }
+
+/// A piped `stats` stays a readable transcript, and its machine paths are never
+/// repainted.
+///
+/// The live view is gated on **stdout** rather than stderr, because `stats` is
+/// its own output — `stats > file` on a terminal must still produce a file of
+/// frames rather than a file of cursor moves. `--format json` never repaints at
+/// all, whatever the terminal says, and keeps the split it already had: NDJSON
+/// while streaming, one pretty array for `--no-stream`.
+#[tokio::test]
+async fn piped_stats_is_frames_and_json_never_repaints() {
+	if !podman_up().await {
+		return;
+	}
+	let p = Project::start("stt");
+
+	let table = p.run(&["stats", "--no-stream"]);
+	assert!(
+		!table.contains('\u{1b}'),
+		"a piped stats table must carry no escapes; got:\n{table:?}"
+	);
+	assert!(
+		table.contains("NAME") && table.contains("PIDS"),
+		"and it must still be the table; got:\n{table}"
+	);
+
+	let json = p.run(&["stats", "--no-stream", "--format", "json"]);
+	assert!(
+		!json.contains('\u{1b}'),
+		"the machine path must carry no escapes; got:\n{json:?}"
+	);
+	let parsed: serde_json::Value =
+		serde_json::from_str(&json).expect("--no-stream --format json stays one pretty document");
+	assert!(parsed.is_array(), "and it stays an array: {parsed}");
+}
+
+/// The header sits over its own columns.
+///
+/// It was a hand-written constant kept separately from the row layout, and the
+/// two had drifted: `PIDS` began exactly where its data stopped, so the label
+/// was entirely off the column it named. Asserted against the rendered output
+/// rather than against a literal, so it measures what a reader sees.
+#[tokio::test]
+async fn the_stats_header_matches_its_rows() {
+	if !podman_up().await {
+		return;
+	}
+	let p = Project::start("stthdr");
+	let out = p.run(&["stats", "--no-stream"]);
+	let mut lines = out.lines().filter(|l| !l.trim().is_empty());
+	let header = lines.next().unwrap_or_default();
+	let Some(row) = lines.next() else {
+		return; // nothing sampled yet; the width rule is asserted in the unit tests
+	};
+	assert_eq!(
+		header.chars().count(),
+		row.chars().count(),
+		"header and row must be the same width\nH: {header:?}\nR: {row:?}"
+	);
+}
