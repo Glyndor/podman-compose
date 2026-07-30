@@ -66,6 +66,17 @@ impl Project {
 		String::from_utf8_lossy(&out.stdout).into_owned()
 	}
 
+	/// The progress stream, which lifecycle commands write to stderr so stdout
+	/// stays a clean pipe. [`Project::run`] returns stdout and therefore cannot
+	/// see any of it.
+	fn progress(&self, args: &[&str]) -> String {
+		let out = Command::new(bin())
+			.args(["-f", &self.compose, "-p", &self.name])
+			.args(args)
+			.output()
+			.expect("run podup");
+		String::from_utf8_lossy(&out.stderr).into_owned()
+	}
 }
 
 impl Drop for Project {
@@ -346,4 +357,40 @@ async fn up_reports_the_networks_and_volumes_it_creates() {
 			"up must report creating {needle}; got stderr:\n{stderr}"
 		);
 	}
+}
+
+/// `down` only reports removals that happened.
+///
+/// It reported three that had not: measured on a project name that had never
+/// been created, `down -v` printed `Network …_extra Removed`, `Network
+/// …_default Removed` and `Volume …_data Removed`. The cause was `delete_ok`
+/// discarding the boolean `delete_existed` returns — the very distinction that
+/// method exists to preserve, and which the container path had always used — so
+/// a 404 reached the caller as `Ok(())` and was announced as a deletion.
+///
+/// A volume is where this is worst: it names data the operator is being told is
+/// gone. The reference prints nothing at all here and exits 0.
+#[tokio::test]
+async fn down_does_not_report_removing_what_never_existed() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(
+		&compose,
+		"services:\n  web:\n    image: alpine:latest\n    volumes:\n      - data:/data\nvolumes:\n  \
+		 data:\nnetworks:\n  extra:\n",
+	)
+	.unwrap();
+	let p = Project {
+		compose: compose.to_string_lossy().into_owned(),
+		name: format!("t{}-ghost", std::process::id()),
+		_dir: dir,
+	};
+	let stderr = p.progress(&["down", "-v"]);
+	assert!(
+		!stderr.contains("Removed"),
+		"nothing existed, so nothing may be reported as removed; got stderr:\n{stderr}"
+	);
 }

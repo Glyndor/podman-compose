@@ -123,9 +123,11 @@ impl Engine {
 				continue;
 			};
 			let del = format!("{API_PREFIX}/networks/{}", urlencoded(net_name));
-			match self.client.delete_ok(&del).await {
-				Ok(_) => crate::ui::progress_line("Network", net_name, "Removed"),
-				Err(e) if e.is_status(404) => {}
+			// A 404 here means the object disappeared between the list and the
+			// delete, so this sweep did not remove it and must not say it did.
+			match self.client.delete_existed(&del).await {
+				Ok(true) => crate::ui::progress_line("Network", net_name, "Removed"),
+				Ok(false) => {}
 				Err(e) => {
 					tracing::warn!("could not remove network {net_name}: {e}");
 					first_err.get_or_insert(crate::error::ComposeError::Podman(e));
@@ -159,9 +161,11 @@ impl Engine {
 				continue;
 			};
 			let del = format!("{API_PREFIX}/volumes/{}", urlencoded(name));
-			match self.client.delete_ok(&del).await {
-				Ok(_) => crate::ui::progress_line("Volume", name, "Removed"),
-				Err(e) if e.is_status(404) => {}
+			// A 404 here means the object disappeared between the list and the
+			// delete, so this sweep did not remove it and must not say it did.
+			match self.client.delete_existed(&del).await {
+				Ok(true) => crate::ui::progress_line("Volume", name, "Removed"),
+				Ok(false) => {}
 				Err(e) => {
 					tracing::warn!("could not remove volume {name}: {e}");
 					first_err.get_or_insert(crate::error::ComposeError::Podman(e));
