@@ -17,30 +17,34 @@ pub(crate) use types::{
 ///
 /// Deliberately avoids green and cyan. Green is the "healthy" colour everywhere
 /// else in podup and cyan is an identity colour, so using them here put the two
-/// most-read surfaces in competition for one vocabulary. Help uses weight and
-/// white, which mean nothing elsewhere.
+/// most-read surfaces in competition for one vocabulary. Help uses weight
+/// (bold, underline, dim) and no explicit foreground colour, which means
+/// nothing elsewhere.
 ///
-/// All eight slots are set. Starting from `plain()` and overriding four left
-/// clap's own `error:` unstyled while podup's printed bold red — one binary,
-/// two answers to the same question.
+/// No slot sets an explicit `AnsiColor`, `error`/`invalid` excepted — those are
+/// status colours (red), not identity, and stay. An explicit `White` was tried
+/// first, on the reasoning that *some* colour should mark headings; measured
+/// against the same reference palette this branch's tests pin
+/// (`ui::palette_tests`), it read 1.82:1 on a white terminal background — worse
+/// than the green/cyan it replaced — and bold commonly promotes `White` to the
+/// terminal's bright-white ANSI code, which measured 1.00:1 on white, i.e.
+/// invisible. Leaving the foreground unset uses the terminal's own default
+/// text colour instead, which is readable on both themes by construction: it
+/// is what the terminal owner already chose for their body text.
+///
+/// All eight slots are still explicitly set, even where that means an empty
+/// style — clap's own `plain()` already leaves `error:` unstyled while podup
+/// printed it bold red, so nothing here may silently fall back to a starting
+/// point that disagreed with the rest of the binary.
 const HELP_STYLES: clap::builder::Styles = clap::builder::Styles::plain()
-	.header(
-		clap::builder::styling::AnsiColor::White
-			.on_default()
-			.bold()
-			.underline(),
-	)
-	.usage(clap::builder::styling::AnsiColor::White.on_default().bold())
-	.literal(clap::builder::styling::AnsiColor::White.on_default().bold())
-	.placeholder(
-		clap::builder::styling::AnsiColor::White
-			.on_default()
-			.dimmed(),
-	)
+	.header(clap::builder::styling::Style::new().bold().underline())
+	.usage(clap::builder::styling::Style::new().bold())
+	.literal(clap::builder::styling::Style::new().bold())
+	.placeholder(clap::builder::styling::Style::new().dimmed())
 	.error(clap::builder::styling::AnsiColor::Red.on_default().bold())
-	.valid(clap::builder::styling::AnsiColor::White.on_default().bold())
+	.valid(clap::builder::styling::Style::new().bold())
 	.invalid(clap::builder::styling::AnsiColor::Red.on_default())
-	.context(clap::builder::styling::AnsiColor::White.on_default());
+	.context(clap::builder::styling::Style::new());
 
 /// Read `--ansi` straight off argv, before clap parses anything.
 ///

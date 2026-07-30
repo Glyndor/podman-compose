@@ -36,8 +36,12 @@ enabled directly). Where it does not, podup falls back to six basic ANSI
 colours (cyan, magenta, blue and their bright variants), which render
 everywhere but cannot fully clear that bar: of the sixteen standard ANSI
 colours, only cyan and bright magenta stay readable on both a light and a dark
-background, and two of the fallback's own six fall short (blue against black,
-bright cyan against white). The fallback stays anyway, on the view that
+background, and four of the fallback's own six fall short (magenta and blue
+against black, bright cyan against white, bright blue against black). ANSI-16
+colours have no fixed RGB — a terminal theme picks its own — so these figures,
+like the wide palette's, are relative to the reference palette this branch's
+tests pin (`internal/ui/palette_tests.rs`, the standard VGA 16-colour set),
+not a universal guarantee. The fallback stays anyway, on the view that
 distinguishing six services imperfectly beats distinguishing two well, and any
 terminal from the last decade qualifies for the wide palette instead. Both
 palettes obey `--ansi`, `NO_COLOR` and TTY detection: if colour is off,

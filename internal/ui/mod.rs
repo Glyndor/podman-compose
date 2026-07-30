@@ -113,6 +113,12 @@ pub fn set_services(names: &[String]) {
 /// the same colour for the same container, which is what makes `ps`, `logs`,
 /// `stats` and the progress lines agree.
 pub fn identity_style(label: &str) -> Style {
+	slot_to_style(identity_slot(label), palette::wide_palette_available())
+}
+
+/// The palette slot backing [`identity_style`]. See [`service_slot`] for why
+/// this exists as its own, unrendered step.
+pub(crate) fn identity_slot(label: &str) -> usize {
 	let key = PROJECT
 		.read()
 		.ok()
@@ -122,7 +128,7 @@ pub fn identity_style(label: &str) -> Style {
 				.flatten()
 		})
 		.unwrap_or_else(|| label.to_string());
-	service_style(strip_replica_suffix(&key))
+	service_slot(strip_replica_suffix(&key))
 }
 
 /// Drop a trailing `-N` replica index, so every surface hashes the same key.
@@ -338,14 +344,26 @@ const SERVICE_PALETTE: [AnsiColor; 6] = [
 	AnsiColor::BrightBlue,
 ];
 
-/// The stable colour for a service's aggregated-log prefix.
-pub fn service_style(name: &str) -> Style {
-	let index = SERVICES
+/// The palette slot backing [`service_style`], before it is rendered into a
+/// [`Style`] for whichever palette the terminal supports.
+///
+/// Split out so a routing regression can be asserted on the slot itself: the
+/// narrow (6-colour) fallback wraps a slot index mod 6, so two different
+/// wide-palette slots can render as the same `Style` there. A test comparing
+/// rendered `Style`s can miss exactly the collision it exists to catch on a
+/// terminal that never announces the wide palette; the slot never wraps, so
+/// it stays a real comparison on both.
+pub(crate) fn service_slot(name: &str) -> usize {
+	SERVICES
 		.read()
 		.ok()
 		.and_then(|slot| slot.as_ref().map(|map| palette::colour_for(name, map)))
-		.unwrap_or_else(|| palette::colour_for(name, &std::collections::HashMap::new()));
-	slot_to_style(index, palette::wide_palette_available())
+		.unwrap_or_else(|| palette::colour_for(name, &std::collections::HashMap::new()))
+}
+
+/// The stable colour for a service's aggregated-log prefix.
+pub fn service_style(name: &str) -> Style {
+	slot_to_style(service_slot(name), palette::wide_palette_available())
 }
 
 /// The style for a palette slot, from whichever palette the terminal supports.
@@ -363,6 +381,18 @@ fn slot_to_style(slot: usize, wide: bool) -> Style {
 	} else {
 		Style::new().fg_color(Some(SERVICE_PALETTE[slot % SERVICE_PALETTE.len()].into()))
 	}
+}
+
+/// Render a palette slot (from [`identity_slot`]/[`service_slot`]) into a
+/// [`Style`] for whichever palette the terminal supports right now.
+///
+/// The `pub(crate)` counterpart to [`identity_style`]/[`service_style`] for a
+/// caller that needs to resolve its *own* slot (e.g. the log-prefix module,
+/// which must never let its routing collapse into a raw per-label hash — see
+/// `engine::query::log_prefix::prefix_slot`) rather than one of the two
+/// label-keyed lookups here.
+pub(crate) fn style_for_slot(slot: usize) -> Style {
+	slot_to_style(slot, palette::wide_palette_available())
 }
 
 /// Whether an `Exited (N)` / `exited(N)` label reports a clean finish.

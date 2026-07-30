@@ -9,26 +9,40 @@ use std::io::Write;
 /// held in memory forever.
 const MAX_PENDING: usize = 64 * 1024;
 
-/// The identity colour for a log-prefix label.
+/// The palette slot for a log-prefix label.
 ///
-/// Delegates to [`crate::ui::identity_style`], never `crate::ui::service_style`
+/// Delegates to [`crate::ui::identity_slot`], never `crate::ui::service_slot`
 /// directly: the label reaching this module still carries its replica suffix
-/// (`web-1`, from `display_label`), and only `identity_style` strips that (and
+/// (`web-1`, from `display_label`), and only `identity_slot` strips that (and
 /// a project prefix) before resolving through the per-project colour registry
-/// `set_services` fills. Calling `service_style` on the raw label bypassed the
-/// registry entirely — that key was never in it — so every log prefix silently
-/// fell back to the per-label hash instead of the sequential colour `ps` uses.
-/// Measured on an 8-service project: `ps` gave 8 distinct colours, `logs` only
-/// 6, before this indirection existed.
+/// `set_services` fills. Resolving `service_slot` against the raw label
+/// bypassed the registry entirely — that key was never in it — so every log
+/// prefix silently fell back to the per-label hash instead of the sequential
+/// colour `ps` uses. Measured on an 8-service project: `ps` gave 8 distinct
+/// colours, `logs` only 6, before this indirection existed.
 ///
-/// Kept as its own function (rather than calling `identity_style` inline in
-/// [`LinePrefixer::new`]) so the routing choice is unit-testable on its own:
-/// [`LinePrefixer::new`]'s final output is gated by `stdout_colored`, which is
-/// false under the test harness (stdout is not a TTY there), so no test that
-/// only inspects a built `LinePrefixer`'s output can ever observe which style
-/// function was called.
+/// [`prefix_style`] renders this into a [`crate::ui::Style`] and nothing else
+/// — so the routing choice this function makes is the one thing a regression
+/// test needs to pin down, and it can compare the slot directly rather than a
+/// rendered `Style`. That distinction matters: the narrow (6-colour) fallback
+/// wraps a slot index mod 6, so two different wide-palette slots can render
+/// identically there, which would silently swallow a routing regression that
+/// a `Style` comparison alone could not see.
+fn prefix_slot(label: &str) -> usize {
+	crate::ui::identity_slot(label)
+}
+
+/// The identity colour for a log-prefix label. See [`prefix_slot`] for the
+/// routing decision this renders.
+///
+/// Kept as its own function (rather than calling [`crate::ui::identity_style`]
+/// inline in [`LinePrefixer::new`]) so the routing choice is unit-testable on
+/// its own: [`LinePrefixer::new`]'s final output is gated by `stdout_colored`,
+/// which is false under the test harness (stdout is not a TTY there), so no
+/// test that only inspects a built `LinePrefixer`'s output can ever observe
+/// which slot function was called.
 fn prefix_style(label: &str) -> crate::ui::Style {
-	crate::ui::identity_style(label)
+	crate::ui::style_for_slot(prefix_slot(label))
 }
 
 /// Tags each complete log line with `{label} | `, the way `docker compose logs`
@@ -116,28 +130,43 @@ impl LinePrefixer {
 
 #[cfg(test)]
 mod tests {
-	use super::{prefix_style, LinePrefixer};
+	use super::{prefix_slot, prefix_style, LinePrefixer};
 
-	/// The regression this guards: `new` used to call `service_style(label)`
-	/// directly on the raw, replica-suffixed label, which is never a key in the
-	/// per-project registry `identity_style` resolves against — every log
+	/// The regression this guards: `new` used to resolve `service_slot(label)`
+	/// directly against the raw, replica-suffixed label, which is never a key
+	/// in the per-project registry `identity_slot` resolves against — every log
 	/// prefix silently fell back to the hash instead of the sequential colour
-	/// `ps` uses for the same container. `identity_style` strips the `-N`
-	/// replica suffix before resolving, so `prefix_style("web-1")` must land on
-	/// the exact same colour as `identity_style("web")` applied to the same
-	/// container — and, since the raw hash of the two strings differs, must
-	/// disagree with `service_style("web-1")` applied to the untouched label.
+	/// `ps` uses for the same container.
+	///
+	/// Both checks are on `prefix_slot`, the actual routing decision, not the
+	/// `Style` [`prefix_style`] renders it into: the narrow (6-colour) fallback
+	/// wraps a slot index mod 6, and for these two labels slot 1 ("web") and
+	/// slot 19 ("web-1") both land on Magenta there. A `Style` comparison here
+	/// was red on any terminal that never announces the wide palette (no
+	/// `TERM`/`COLORTERM`, which is every Linux/macOS CI leg today) whether or
+	/// not the regression it guards was present. The slot itself never wraps,
+	/// so it stays a real, palette-independent assertion — and since
+	/// `prefix_style` does nothing but render `prefix_slot`'s output (see its
+	/// doc comment), pinning the slot pins the `Style` too.
 	#[test]
 	fn prefix_style_routes_through_identity_style_not_service_style() {
 		assert_eq!(
-			prefix_style("web-1"),
-			crate::ui::identity_style("web"),
+			prefix_slot("web-1"),
+			crate::ui::identity_slot("web"),
 			"the replica suffix must be stripped before resolving the colour"
 		);
 		assert_ne!(
-			prefix_style("web-1"),
-			crate::ui::service_style("web-1"),
+			prefix_slot("web-1"),
+			crate::ui::service_slot("web-1"),
 			"the raw, suffixed label must not be hashed directly"
+		);
+		// `prefix_style` is a pure rendering of `prefix_slot`, so its `Style`
+		// still agrees with `identity_style` on a wide-palette terminal — kept
+		// as a smoke test that the rendering step itself is wired up.
+		assert_eq!(
+			prefix_style("web-1"),
+			crate::ui::identity_style("web"),
+			"prefix_style must render the same slot identity_style does"
 		);
 	}
 

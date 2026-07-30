@@ -330,8 +330,9 @@ async fn run() -> podup::Result<()> {
 		podup::ui::set_project(&project);
 		// Register the service names so each gets its own identity colour. The
 		// hash this replaces could not know how many services existed, so two
-		// could share one. The `down`-by-label path has no compose file and
-		// keeps the hash fallback.
+		// could share one. The `down`-by-label path has no compose file to read
+		// service names from up front; it registers them itself, from the live
+		// container listing it fetches immediately before tearing down.
 		podup::ui::set_services(&file.services.keys().cloned().collect::<Vec<_>>());
 		let client = podup::podman::connect(resolve_socket(cli.socket.as_deref()).as_deref())?;
 		let engine = podup::Engine::with_base_dir(client, project, base_dir);
