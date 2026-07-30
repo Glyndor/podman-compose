@@ -13,14 +13,72 @@ pub(crate) use types::{
 	OutputFormat, RmiScope,
 };
 
-/// Help-screen colours (clap honours its own TTY/`NO_COLOR`/`CLICOLOR` detection
-/// for these, since help is rendered before `--ansi` is parsed): green-bold
-/// section headers and usage, cyan-bold flag/command literals, plain placeholders.
+/// Help-screen colours.
+///
+/// Deliberately avoids green and cyan. Green is the "healthy" colour everywhere
+/// else in podup and cyan is an identity colour, so using them here put the two
+/// most-read surfaces in competition for one vocabulary. Help uses weight and
+/// white, which mean nothing elsewhere.
+///
+/// All eight slots are set. Starting from `plain()` and overriding four left
+/// clap's own `error:` unstyled while podup's printed bold red — one binary,
+/// two answers to the same question.
 const HELP_STYLES: clap::builder::Styles = clap::builder::Styles::plain()
-	.header(clap::builder::styling::AnsiColor::Green.on_default().bold())
-	.usage(clap::builder::styling::AnsiColor::Green.on_default().bold())
-	.literal(clap::builder::styling::AnsiColor::Cyan.on_default().bold())
-	.placeholder(clap::builder::styling::AnsiColor::Cyan.on_default());
+	.header(
+		clap::builder::styling::AnsiColor::White
+			.on_default()
+			.bold()
+			.underline(),
+	)
+	.usage(clap::builder::styling::AnsiColor::White.on_default().bold())
+	.literal(clap::builder::styling::AnsiColor::White.on_default().bold())
+	.placeholder(
+		clap::builder::styling::AnsiColor::White
+			.on_default()
+			.dimmed(),
+	)
+	.error(clap::builder::styling::AnsiColor::Red.on_default().bold())
+	.valid(clap::builder::styling::AnsiColor::White.on_default().bold())
+	.invalid(clap::builder::styling::AnsiColor::Red.on_default())
+	.context(clap::builder::styling::AnsiColor::White.on_default());
+
+/// Read `--ansi` straight off argv, before clap parses anything.
+///
+/// clap renders `--help` inside the parse call, and the colour choice was only
+/// applied after it returned — so `podup --ansi never --help` came out coloured
+/// while `NO_COLOR=1 podup --help` did not. One flag, two answers.
+///
+/// Accepts both spellings clap does (`--ansi never`, `--ansi=never`) and is
+/// deliberately forgiving: an unrecognised value yields `None` and leaves the
+/// real parser to produce the error message.
+pub(crate) fn ansi_from_argv<I: Iterator<Item = String>>(args: I) -> Option<AnsiMode> {
+	let mut args = args.peekable();
+	while let Some(arg) = args.next() {
+		// `--` ends podup's own options: `run`/`exec`/`help` forward everything
+		// after it to the container's command with `allow_hyphen_values`, so a
+		// passthrough argument may legitimately read `--ansi always` and must not
+		// be mistaken for podup's flag. clap already stops here; before this, the
+		// pre-scan did not, and `NO_COLOR=1 podup <typo> exec svc -- --ansi always`
+		// painted clap's error in colour.
+		if arg == "--" {
+			return None;
+		}
+		let value = if let Some(v) = arg.strip_prefix("--ansi=") {
+			v.to_string()
+		} else if arg == "--ansi" {
+			args.next()?
+		} else {
+			continue;
+		};
+		return match value.as_str() {
+			"auto" => Some(AnsiMode::Auto),
+			"always" => Some(AnsiMode::Always),
+			"never" => Some(AnsiMode::Never),
+			_ => None,
+		};
+	}
+	None
+}
 
 /// Top-level clap parser for the `podup` CLI; fields carry the per-flag docs.
 //
@@ -86,4 +144,82 @@ pub(crate) struct Cli {
 
 	#[command(subcommand)]
 	pub(crate) command: Commands,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{ansi_from_argv, AnsiMode};
+
+	fn argv(args: &[&str]) -> impl Iterator<Item = String> + use<> {
+		args.iter()
+			.map(|s| s.to_string())
+			.collect::<Vec<_>>()
+			.into_iter()
+	}
+
+	/// clap renders help before the parsed `--ansi` is applied, so the flag has
+	/// to be read straight off argv or `podup --ansi never --help` comes out
+	/// coloured — which it did, while `NO_COLOR=1 podup --help` did not.
+	#[test]
+	fn ansi_is_found_before_the_subcommand() {
+		assert_eq!(
+			ansi_from_argv(argv(&["podup", "--ansi", "never", "--help"])),
+			Some(AnsiMode::Never)
+		);
+		assert_eq!(
+			ansi_from_argv(argv(&["podup", "--ansi=always", "up"])),
+			Some(AnsiMode::Always)
+		);
+	}
+
+	/// It is a global flag, so it is equally valid after the subcommand.
+	#[test]
+	fn ansi_is_found_after_the_subcommand() {
+		assert_eq!(
+			ansi_from_argv(argv(&["podup", "up", "--ansi", "never"])),
+			Some(AnsiMode::Never)
+		);
+	}
+
+	/// No flag means no opinion; the existing auto-detection decides.
+	#[test]
+	fn absent_ansi_yields_none() {
+		assert_eq!(ansi_from_argv(argv(&["podup", "up", "-d"])), None);
+		assert_eq!(ansi_from_argv(argv(&["podup", "--ansi"])), None);
+		assert_eq!(ansi_from_argv(argv(&["podup", "--ansi", "sideways"])), None);
+	}
+
+	/// `--` ends podup's options. Everything after it is the container's command,
+	/// which `run`/`exec` forward verbatim with `allow_hyphen_values`, so a
+	/// passthrough argument reading `--ansi always` is not podup's flag.
+	#[test]
+	fn ansi_after_a_double_dash_is_not_ours() {
+		assert_eq!(
+			ansi_from_argv(argv(&["podup", "exec", "svc", "--", "--ansi", "always"])),
+			None
+		);
+		assert_eq!(
+			ansi_from_argv(argv(&[
+				"podup",
+				"exec",
+				"svc",
+				"--",
+				"sh",
+				"-c",
+				"--ansi=never"
+			])),
+			None
+		);
+	}
+
+	/// A flag before the `--` is still ours.
+	#[test]
+	fn ansi_before_a_double_dash_is_ours() {
+		assert_eq!(
+			ansi_from_argv(argv(&[
+				"podup", "--ansi", "never", "exec", "svc", "--", "true"
+			])),
+			Some(AnsiMode::Never)
+		);
+	}
 }

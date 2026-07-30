@@ -234,6 +234,12 @@ fn render_help(rendered: &clap::builder::StyledStr, colour: bool) -> String {
 }
 
 pub(crate) fn parse_cli() -> Cli {
+	// Apply `--ansi` before clap renders anything: `--help` and clap's own
+	// errors are produced inside the parse call below, so a choice applied
+	// afterwards arrives too late for them.
+	if let Some(mode) = crate::cli::ansi_from_argv(std::env::args()) {
+		podup::ui::set_color_choice(mode.into());
+	}
 	match Cli::try_parse() {
 		Ok(cli) => cli,
 		Err(e) => match e.kind() {
