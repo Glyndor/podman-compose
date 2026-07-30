@@ -224,7 +224,17 @@ stands out.
 
 ### `stats [SERVICE...]`
 Live resource usage (CPU, memory, network, block I/O, PIDs) for service
-containers.
+containers. On a terminal the table repaints in place; anywhere else each frame
+is appended, so a redirected `stats` stays a file of readable frames rather than
+a file of cursor moves.
+
+CPU and memory percentages are coloured by band — dim below 5%, green to 50,
+yellow to 85, red above — so an idle container recedes and the one in trouble is
+the one that catches the eye. The absolute figures and the PID count are
+secondary detail and stay dim.
+
+`--format json` never repaints, whatever the terminal is: NDJSON while
+streaming, one pretty array with `--no-stream`.
 
 | Flag | Description | Default |
 |---|---|---|
