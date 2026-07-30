@@ -19,6 +19,7 @@ mod live;
 mod row;
 
 pub use board::{Board, Kind, Row, State};
+pub use live::{Region, Target};
 
 /// How often the region repaints while nothing is happening, so the spinner
 /// turns during a long pull instead of looking like a hang. The same cadence
@@ -41,8 +42,11 @@ struct Session {
 	board: Board,
 	/// `None` when the sink is plain: not a terminal, colour off, or the
 	/// terminal size could not be read.
-	region: Option<live::LiveRegion>,
+	region: Option<live::Region>,
 	frame: usize,
+	/// Width of the name column, sized from the seeded rows so it does not jump
+	/// as rows come and go.
+	name_width: usize,
 }
 
 /// Whether a live region is allowed right now.
@@ -87,13 +91,14 @@ pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
 		.max()
 		.unwrap_or(0)
 		.clamp(12, 40);
-	let region = live_allowed().map(|width| live::LiveRegion::new(name_width, width));
+	let region = live_allowed().map(|_| live::Region::new(live::Target::Stderr));
 	let live = region.is_some();
 	if let Ok(mut slot) = SESSION.lock() {
 		*slot = Some(Session {
 			board,
 			region,
 			frame: 0,
+			name_width,
 		});
 	}
 	if live {
@@ -207,8 +212,26 @@ pub fn end() {
 		return;
 	};
 	if let Some(mut session) = slot.take() {
-		if let Some(region) = session.region.as_mut() {
-			region.finish(&mut session.board, Instant::now());
+		// One last paint with the region emptied, so the last thing on screen is
+		// the permanent record rather than a half-drawn board.
+		if session.region.is_some() {
+			let width = live_allowed().unwrap_or(0);
+			let now = Instant::now();
+			let scrollback: Vec<String> = session
+				.board
+				.take_completed_prefix()
+				.iter()
+				.map(|r| row::render(r, session.name_width, 0, now, width))
+				.collect();
+			let leftover: Vec<String> = session
+				.board
+				.live_rows()
+				.iter()
+				.map(|r| row::render(r, session.name_width, 0, now, width))
+				.collect();
+			if let Some(region) = session.region.as_mut() {
+				region.show(&scrollback, &leftover);
+			}
 		}
 	}
 }
@@ -223,13 +246,31 @@ fn repaint() {
 		return;
 	};
 	let frame = session.frame;
+	let name_width = session.name_width;
 	let Session { board, region, .. } = session;
-	if let Some(region) = region.as_mut() {
-		if let Some(width) = live_allowed() {
-			region.refresh_width(width);
-		}
-		region.repaint(board, frame, Instant::now());
+	let Some(region) = region.as_mut() else {
+		return;
+	};
+	// Re-read the width every repaint, so a resize mid-command does not leave
+	// every later line wrapping — and wrapping is what breaks the arithmetic.
+	let width = live_allowed().unwrap_or(0);
+	let now = Instant::now();
+	let scrollback: Vec<String> = board
+		.take_completed_prefix()
+		.iter()
+		.map(|r| row::render(r, name_width, frame, now, width))
+		.collect();
+	let mut lines = Vec::new();
+	let rows = board.live_rows();
+	if !rows.is_empty() {
+		let (done, total) = board.tally();
+		lines.push(row::summary(done, total));
+		lines.extend(
+			rows.iter()
+				.map(|r| row::render(r, name_width, frame, now, width)),
+		);
 	}
+	region.show(&scrollback, &lines);
 }
 
 /// Advance the spinner and repaint, so a long pull turns rather than freezing.

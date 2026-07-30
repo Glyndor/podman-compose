@@ -55,7 +55,19 @@ podup (3.4.0) unstable; urgency=medium
   * `build` writes its output to stderr. It used stdout, contradicting the
     promise that stdout stays a clean pipe.
 
+  * `stats` repaints its table in place on a terminal instead of reprinting a
+    fresh frame every second. Redirected output, and `--format json` on any
+    terminal, still get plain appended frames.
+
   Fixed
+
+  * `stats`' header had drifted off its own columns. It was a hand-written
+    constant kept separately from the row layout, and the `PIDS` label began
+    exactly where its data stopped. Both are now built from one set of widths.
+
+  * `stats` coloured everything below 70% the same green, so a container at
+    0.02% looked exactly like one at 69%. Four bands now, with idle rows dimmed.
+    `PIDS` was the only unstyled column of the six.
 
   * `down` reported removing networks and volumes that never existed. On a
     project name that had never been created it announced three removals,
