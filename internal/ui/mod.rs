@@ -176,6 +176,13 @@ pub fn progress_line(kind: &str, name: &str, action: &str) {
 	if !progress_enabled() {
 		return;
 	}
+	// A board, when one is open, owns the rendering: it needs the event as a
+	// state change rather than as a line, and it decides where on screen the
+	// row goes. Routing here rather than at each site is what let the board
+	// arrive without touching the 21 call sites that report an ending.
+	if progress::finish(kind, name, action) {
+		return;
+	}
 	let verb = action_style(action);
 	let ident = identity_style(name);
 	// anstream::stderr strips the ANSI codes itself when colour is off.
