@@ -394,3 +394,65 @@ async fn down_does_not_report_removing_what_never_existed() {
 		"nothing existed, so nothing may be reported as removed; got stderr:\n{stderr}"
 	);
 }
+
+/// Every lifecycle command says so when it did nothing.
+///
+/// Measured before the fix on a project that was never created: `rm`, `stop`,
+/// `restart`, `kill`, `pause` and `unpause` each printed zero lines and exited
+/// 0, which reads exactly like success. Only `start` said anything. The cause is
+/// that `live_replica_names` falls back to the *static* compose names when
+/// nothing is running, so each command dutifully walked a list of container
+/// names and 404'd on every one of them.
+#[tokio::test]
+async fn idle_lifecycle_commands_say_they_did_nothing() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(&compose, "services:\n  web:\n    image: alpine:latest\n").unwrap();
+	let p = Project {
+		compose: compose.to_string_lossy().into_owned(),
+		name: format!("t{}-idle", std::process::id()),
+		_dir: dir,
+	};
+	for (args, verb) in [
+		(vec!["rm", "-f"], "remove"),
+		(vec!["stop"], "stop"),
+		(vec!["start"], "start"),
+		(vec!["restart"], "restart"),
+		(vec!["kill"], "signal"),
+		(vec!["pause"], "pause"),
+		(vec!["unpause"], "unpause"),
+	] {
+		let stderr = p.progress(&args);
+		assert!(
+			stderr.contains(&format!("no containers to {verb}")),
+			"`{}` on an uncreated project must say it did nothing; got stderr:\n{stderr}",
+			args.join(" ")
+		);
+	}
+}
+
+/// The acceptance twin of the test above: when the command really does act, the
+/// note must not appear. Without this pairing, a `note_if_idle` that fired
+/// unconditionally would satisfy the rejection test and prove nothing.
+#[tokio::test]
+async fn lifecycle_commands_stay_quiet_when_they_did_act() {
+	if !podman_up().await {
+		return;
+	}
+	let p = Project::start("acted");
+	for (args, verb) in [
+		(vec!["restart"], "restart"),
+		(vec!["stop"], "stop"),
+		(vec!["rm", "-f"], "remove"),
+	] {
+		let stderr = p.progress(&args);
+		assert!(
+			!stderr.contains(&format!("no containers to {verb}")),
+			"`{}` acted, so it must not claim there was nothing to do; got stderr:\n{stderr}",
+			args.join(" ")
+		);
+	}
+}

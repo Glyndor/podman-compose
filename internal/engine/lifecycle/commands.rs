@@ -11,6 +11,22 @@ use super::targets::{stop_deadline, stop_timeout_param};
 use crate::engine::Engine;
 use crate::libpod::API_PREFIX;
 
+/// Say so when a command finished having done nothing.
+///
+/// `start` already did this — *"no containers to start (project not created)"* —
+/// and the other six lifecycle commands did not: `rm`, `stop`, `restart`, `kill`,
+/// `pause` and `unpause` all exited 0 in complete silence on a project that was
+/// never created, which reads exactly like success. Measured before the fix, all
+/// six printed zero lines.
+///
+/// One helper rather than a literal per command, so the wording cannot drift into
+/// seven dialects of the same sentence.
+fn note_if_idle(acted: &std::sync::atomic::AtomicBool, verb: &str) {
+	if !acted.load(std::sync::atomic::Ordering::Relaxed) {
+		crate::ui::progress_note(&format!("no containers to {verb}"));
+	}
+}
+
 impl Engine {
 	/// Run a lifecycle POST against one container with a consistent outcome:
 	/// success prints a `Container {container}  {done}` progress line; "already
@@ -19,20 +35,28 @@ impl Engine {
 	/// a real error that propagates (setting a non-zero exit) instead of being
 	/// swallowed into a warning. Shared by stop/start/restart/kill/pause/unpause
 	/// so they all behave the same.
+	///
+	/// Returns whether the container was actually acted on. This is the only
+	/// place that knows: `live_replica_names` falls back to the *static* compose
+	/// names when nothing is running, so a command on a project that was never
+	/// created still walks a full list of container names and 404s on every one
+	/// of them. Six commands exited 0 in complete silence that way (#1248), and
+	/// telling that apart from real work requires the answer here, not a count of
+	/// names upstream.
 	pub(super) async fn run_lifecycle_op(
 		&self,
 		path: &str,
 		container: &str,
 		done: &str,
-	) -> Result<()> {
+	) -> Result<bool> {
 		match self.client.post_empty_ok(path).await {
 			Ok(()) => {
 				crate::ui::progress_line("Container", container, done);
-				Ok(())
+				Ok(true)
 			}
 			Err(e) if e.is_status(304) || e.is_status(404) || e.is_kill_of_stopped() => {
 				tracing::debug!("{container}: {done} skipped ({e})");
-				Ok(())
+				Ok(false)
 			}
 			Err(e) => Err(ComposeError::Podman(e)),
 		}
@@ -48,15 +72,15 @@ impl Engine {
 		path: &str,
 		container: &str,
 		done: &str,
-	) -> Result<()> {
+	) -> Result<bool> {
 		match self.client.post_empty_ok(path).await {
 			Ok(()) => {
 				crate::ui::progress_line("Container", container, done);
-				Ok(())
+				Ok(true)
 			}
 			Err(e) if e.is_status(304) || e.is_status(404) || e.is_state_conflict() => {
 				tracing::debug!("{container}: {done} skipped ({e})");
-				Ok(())
+				Ok(false)
 			}
 			Err(e) => Err(ComposeError::Podman(e)),
 		}
@@ -153,6 +177,7 @@ impl Engine {
 		// Attempt every service and surface the first error (in service order) at
 		// the end rather than aborting mid-batch and leaving later services
 		// unrestarted.
+		let acted = std::sync::atomic::AtomicBool::new(false);
 		let mut first_err: Option<ComposeError> = None;
 		for level in &levels {
 			let futs = level.iter().map(|name| {
@@ -162,7 +187,7 @@ impl Engine {
 				} else {
 					"Restarted (dependency)"
 				};
-				self.restart_one_service(name, service, done)
+				self.restart_one_service(name, service, done, &acted)
 			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				first_err.get_or_insert(e);
@@ -172,6 +197,7 @@ impl Engine {
 		if let Some(e) = first_err {
 			return Err(e);
 		}
+		note_if_idle(&acted, "restart");
 		Ok(())
 	}
 
@@ -266,15 +292,17 @@ impl Engine {
 		// than a phantom stop. Report "stopped" solely for containers actually
 		// running/paused — stopping a Created/Exited one is a harmless no-op and
 		// must not claim it stopped (#876), matching docker compose.
+		let acted = std::sync::atomic::AtomicBool::new(false);
 		for level in &levels {
 			let futs = level.iter().map(|name| {
 				let grace = self.grace_period_secs(&file.services[name]);
-				self.stop_one_service(name, grace)
+				self.stop_one_service(name, grace, &acted)
 			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				return Err(e);
 			}
 		}
+		note_if_idle(&acted, "stop");
 		Ok(())
 	}
 
@@ -307,9 +335,10 @@ impl Engine {
 		if let Some(e) = first_err {
 			return Err(e);
 		}
-		if !any_live.load(std::sync::atomic::Ordering::Relaxed) {
-			crate::ui::progress_note("no containers to start (project not created)");
-		}
+		// `start`'s flag answers a narrower question than the others' — whether any
+		// container existed at all, not whether anything changed — so it can name
+		// the cause, and the extra clause rides in the verb.
+		note_if_idle(&any_live, "start (project not created)");
 		Ok(())
 	}
 
@@ -329,14 +358,16 @@ impl Engine {
 		let levels = crate::compose::resolve_levels(file)?;
 		let levels = filter_levels(file, levels, target_services)?;
 
+		let acted = std::sync::atomic::AtomicBool::new(false);
 		for level in &levels {
 			let futs = level
 				.iter()
-				.map(|name| self.kill_one_service(name, &file.services[name], signal));
+				.map(|name| self.kill_one_service(name, &file.services[name], signal, &acted));
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				return Err(e);
 			}
 		}
+		note_if_idle(&acted, "signal");
 		Ok(())
 	}
 
@@ -369,11 +400,12 @@ impl Engine {
 		levels.reverse();
 		let levels = filter_levels(file, levels, target_services)?;
 
+		let acted = std::sync::atomic::AtomicBool::new(false);
 		let mut first_err: Option<ComposeError> = None;
 		for level in &levels {
-			let futs = level
-				.iter()
-				.map(|name| self.rm_one_service(name, &file.services[name], force, remove_volumes));
+			let futs = level.iter().map(|name| {
+				self.rm_one_service(name, &file.services[name], force, remove_volumes, &acted)
+			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				first_err.get_or_insert(e);
 			}
@@ -381,6 +413,7 @@ impl Engine {
 		if let Some(e) = first_err {
 			return Err(e);
 		}
+		note_if_idle(&acted, "remove");
 		Ok(())
 	}
 
@@ -395,10 +428,11 @@ impl Engine {
 		// container is a no-op, and one state-mismatched service must not abort the
 		// batch and leave the rest in an inconsistent partial state. Services in a
 		// level are paused concurrently (#757).
+		let acted = std::sync::atomic::AtomicBool::new(false);
 		let mut first_err: Option<ComposeError> = None;
 		for level in &levels {
 			let futs = level.iter().map(|name| {
-				self.idempotent_state_service(name, &file.services[name], "pause", "Paused")
+				self.idempotent_state_service(name, &file.services[name], "pause", "Paused", &acted)
 			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				first_err.get_or_insert(e);
@@ -407,6 +441,7 @@ impl Engine {
 		if let Some(e) = first_err {
 			return Err(e);
 		}
+		note_if_idle(&acted, "pause");
 		Ok(())
 	}
 
@@ -420,10 +455,17 @@ impl Engine {
 		// Idempotent + best-effort, mirroring `pause`: unpausing a not-paused
 		// container is a no-op, and a single mismatch must not abort the batch.
 		// Services in a level are unpaused concurrently (#757).
+		let acted = std::sync::atomic::AtomicBool::new(false);
 		let mut first_err: Option<ComposeError> = None;
 		for level in &levels {
 			let futs = level.iter().map(|name| {
-				self.idempotent_state_service(name, &file.services[name], "unpause", "Unpaused")
+				self.idempotent_state_service(
+					name,
+					&file.services[name],
+					"unpause",
+					"Unpaused",
+					&acted,
+				)
 			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				first_err.get_or_insert(e);
@@ -432,6 +474,7 @@ impl Engine {
 		if let Some(e) = first_err {
 			return Err(e);
 		}
+		note_if_idle(&acted, "unpause");
 		Ok(())
 	}
 
