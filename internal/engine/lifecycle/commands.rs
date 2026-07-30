@@ -11,6 +11,39 @@ use super::targets::{stop_deadline, stop_timeout_param};
 use crate::engine::Engine;
 use crate::libpod::API_PREFIX;
 
+/// Display width of `wait`'s NAME column.
+///
+/// Fixed rather than content-sized: `wait` blocks and prints each container as
+/// it exits, so there is no complete set of rows to measure. Wide enough for a
+/// typical `<project>-<service>-<n>`; a longer name truncates the way every
+/// other capped column in the binary does.
+const WAIT_NAME_WIDTH: usize = 32;
+
+/// `wait`'s header row.
+fn wait_header() -> String {
+	format!("{:<WAIT_NAME_WIDTH$} EXIT", "NAME")
+}
+
+/// One `wait` result line: the container, then its exit code coloured by whether
+/// it is a failure.
+///
+/// The name goes through `fit_cell`, so it is escaped as well as padded — a
+/// container name is not podup's own string.
+fn wait_row(container: &str, code: i64) -> String {
+	let cell = crate::ui::fit_cell(container, WAIT_NAME_WIDTH);
+	let style = if code == 0 {
+		crate::ui::Style::new().dimmed()
+	} else {
+		crate::ui::Style::new().fg_color(Some(crate::ui::AnsiColor::Red.into()))
+	};
+	let coloured = crate::ui::stdout_colored();
+	format!(
+		"{} {}",
+		crate::ui::paint(crate::ui::identity_style(container), &cell, coloured),
+		crate::ui::paint(style, &code.to_string(), coloured)
+	)
+}
+
 /// Say so when a command finished having done nothing.
 ///
 /// `start` already did this — *"no containers to start (project not created)"* —
@@ -209,6 +242,23 @@ impl Engine {
 		file: &ComposeFile,
 		target_services: &[String],
 	) -> Result<()> {
+		self.wait_services_with_options(file, target_services, false)
+			.await
+	}
+
+	/// [`Engine::wait_services`] with `--format json`, which emits one NDJSON
+	/// object per container instead of the table.
+	///
+	/// NDJSON rather than a trailing array because `wait` blocks: a script that
+	/// only learns anything once every container has exited has been handed the
+	/// answer at the one moment it is least useful. It is also the rule `stats`
+	/// already follows for its streaming output.
+	pub async fn wait_services_with_options(
+		&self,
+		file: &ComposeFile,
+		target_services: &[String],
+		json: bool,
+	) -> Result<()> {
 		// `docker compose wait` prints each service's exit code in the order the
 		// services were given on the command line (deduplicated). Only fall back to
 		// dependency order when no services were named (the "all" case).
@@ -229,17 +279,22 @@ impl Engine {
 				.collect::<Vec<_>>()
 		};
 
+		// One line per container, which is the granularity the reference reports
+		// at — measured against docker compose v5.1.3 with a service scaled to 3
+		// replicas, it printed three lines, one per container id. The comment this
+		// replaces asserted the opposite ("a single exit code for each service"),
+		// and a bare `0` per service was built on it: with more than one container
+		// nothing said which code belonged to which.
+		//
+		// What is deliberately *not* copied is the rendering. The reference prints
+		// `container "<64-char hex id>" exited with status code 0` — an id nobody
+		// can map back to a service, the same sentence repeated on every line, and
+		// no machine path at all. Same information, said better: the container
+		// name podup already has, aligned columns, and the code coloured by
+		// whether it is a failure.
 		let mut last_nonzero = 0i64;
+		let mut printed_header = false;
 		for name in &order {
-			// One line per service, not per replica. docker compose prints a single
-			// exit code for each service it was asked to wait on, so a caller can
-			// pair its input list with the output line for line; printing per
-			// replica made a service scaled to 3 return 3 lines and silently broke
-			// that pairing. A scaled service reports the last non-zero code it saw,
-			// falling back to 0 when every replica exited cleanly — the same rule
-			// the command already used for its own exit status.
-			let mut service_code = 0i64;
-			let mut waited = false;
 			// Only wait on containers Podman actually has. The static-name fallback
 			// would POST `/wait` to a never-created predicted name and surface a raw
 			// HTTP 404; docker compose treats "nothing to wait on" as an idempotent
@@ -257,16 +312,24 @@ impl Engine {
 					.post_empty_json_unbounded::<i64>(&path)
 					.await
 					.map_err(ComposeError::Podman)?;
-				waited = true;
 				if code != 0 {
-					service_code = code;
 					last_nonzero = code;
 				}
-			}
-			// A service with no containers stays the idempotent no-op it was: it
-			// contributes no line at all, rather than a spurious 0.
-			if waited {
-				println!("{service_code}");
+				if json {
+					println!(
+						"{}",
+						serde_json::json!({ "Container": container_name, "ExitCode": code })
+					);
+				} else {
+					// The header is printed lazily, with the first result: a project
+					// where nothing was waited on stays the silent no-op it was,
+					// rather than emitting a header over an empty table.
+					if !printed_header {
+						crate::ui::print_bold_header(&wait_header());
+						printed_header = true;
+					}
+					println!("{}", wait_row(&container_name, code));
+				}
 			}
 		}
 		if last_nonzero != 0 {
@@ -490,5 +553,64 @@ impl Engine {
 			Err(e) if e.is_status(404) => Ok(false),
 			Err(e) => Err(ComposeError::Podman(e)),
 		}
+	}
+}
+
+#[cfg(test)]
+mod wait_output_tests {
+	use super::{wait_header, wait_row, WAIT_NAME_WIDTH};
+
+	/// The exit code sits in one column, header included, whatever the container
+	/// name's length. `wait` prints as each container exits, so it cannot size
+	/// columns to a set it has not finished collecting.
+	#[test]
+	fn the_exit_column_is_in_one_place() {
+		let code_col = |line: &str| {
+			let plain: String = strip_ansi(line);
+			plain.rfind(' ').map(|i| i + 1)
+		};
+		let header = wait_header();
+		let short = wait_row("a", 0);
+		let long = wait_row("project-service-name-12", 7);
+		assert_eq!(code_col(&header), code_col(&short));
+		assert_eq!(code_col(&header), code_col(&long));
+		assert_eq!(code_col(&header), Some(WAIT_NAME_WIDTH + 1));
+	}
+
+	/// A name longer than the column truncates rather than shoving the code out
+	/// of alignment.
+	#[test]
+	fn an_over_long_name_truncates() {
+		let row = strip_ansi(&wait_row(&"x".repeat(WAIT_NAME_WIDTH + 20), 0));
+		assert_eq!(row.chars().count(), WAIT_NAME_WIDTH + 2);
+	}
+
+	/// A container name is not podup's own string, so it is escaped like every
+	/// other cell in the binary.
+	#[test]
+	fn a_container_name_cannot_drive_the_terminal() {
+		// Colour is off in the test process, so any escape left in the output
+		// came from the name rather than from the styling.
+		let row = wait_row("evil\u{1b}[31m\u{7}name", 0);
+		assert!(!row.contains('\u{1b}'), "{row:?}");
+		assert!(!row.contains('\u{7}'), "{row:?}");
+		assert!(row.contains("name"), "{row:?}");
+	}
+
+	fn strip_ansi(s: &str) -> String {
+		let mut out = String::new();
+		let mut chars = s.chars();
+		while let Some(c) = chars.next() {
+			if c == '\u{1b}' {
+				for c in chars.by_ref() {
+					if c == 'm' {
+						break;
+					}
+				}
+			} else {
+				out.push(c);
+			}
+		}
+		out
 	}
 }
