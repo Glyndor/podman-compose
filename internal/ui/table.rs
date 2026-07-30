@@ -185,12 +185,6 @@ impl Table {
 					// either way, so alignment is untouched.
 					return super::paint(super::identity_style(key.unwrap_or(cell)), &padded, true);
 				}
-				if colour && Some(i) == self.identity_col && !cell.trim().is_empty() {
-					// The padding is inside the paint so the colour does not stop
-					// at the name and leave the gap bare; the codes are zero-width
-					// either way, so alignment is untouched.
-					return super::paint(super::identity_style(key.unwrap_or(cell)), &padded, true);
-				}
 				padded
 			})
 			.collect::<Vec<_>>()
