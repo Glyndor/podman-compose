@@ -4,6 +4,25 @@
 
 use super::*;
 
+/// A representative row: values wide enough that a column mis-sized by a couple
+/// of characters shows up, rather than a zeroed struct where every cell happens
+/// to be short.
+fn sample_stat() -> ContainerStat {
+	let mut network = HashMap::new();
+	network.insert("eth0".to_string(), NetStat { rx: 1024, tx: 2048 });
+	ContainerStat {
+		name: "proj-web-1".into(),
+		cpu: 12.5,
+		mem_usage: 1024 * 1024,
+		mem_limit: 60 * 1024 * 1024 * 1024,
+		mem_perc: 0.06,
+		block_in: 4096,
+		block_out: 8192,
+		pids: 3,
+		network,
+	}
+}
+
 #[test]
 fn format_bytes_scales_units() {
 	assert_eq!(format_bytes(512), "512B");
@@ -214,4 +233,62 @@ fn first_unknown_service_flags_typos() {
 		first_unknown_service(&file, &["web".into(), "bogus".into()]),
 		Some("bogus")
 	);
+}
+
+/// The header and the rows are built from one set of widths, so every label
+/// sits over its own column.
+///
+/// They were two hand-maintained layouts that nothing checked against each
+/// other, and they had drifted: measured against a representative row, `MEM %`
+/// sat one column past where its data ended and `PIDS` began exactly where its
+/// data stopped, so the label was entirely off the column it named.
+#[test]
+fn the_header_lines_up_with_the_rows() {
+	let row = format_row_with(&sample_stat(), false, false);
+	let header = header();
+	assert_eq!(
+		header.chars().count(),
+		row.chars().count(),
+		"header and row must be the same width\nH: {header:?}\nR: {row:?}"
+	);
+	// Each label ends no later than its column does, which is what "over its own
+	// column" means for a right-aligned numeric cell.
+	for label in ["CPU %", "MEM %", "PIDS"] {
+		let at = header.find(label).expect("label present");
+		assert!(
+			at + label.len() <= row.chars().count(),
+			"{label} runs past the row\nH: {header:?}\nR: {row:?}"
+		);
+	}
+}
+
+/// A right-aligned label ends where its cell ends. `PIDS` used to start there
+/// instead, which put the whole label past its data.
+#[test]
+fn the_pids_label_sits_over_the_pids_column() {
+	let header = header();
+	assert!(
+		header.trim_end().ends_with("PIDS"),
+		"PIDS is the trailing column: {header:?}"
+	);
+	let row = format_row_with(&sample_stat(), false, false);
+	assert_eq!(
+		header.rfind("PIDS").unwrap() + "PIDS".len(),
+		row.chars().count(),
+		"the label must end where the column does"
+	);
+}
+
+/// Colour has to vary with the value or it says nothing. Everything under 70%
+/// used to be the same green, so a container at 0.02% looked exactly like one
+/// at 69%.
+#[test]
+fn the_load_bands_separate_idle_from_busy() {
+	let idle = load_style(0.02);
+	let moderate = load_style(40.0);
+	let warm = load_style(60.0);
+	let hot = load_style(95.0);
+	assert_ne!(idle, moderate, "0.02% must not look like 40%");
+	assert_ne!(moderate, warm, "40% must not look like 60%");
+	assert_ne!(warm, hot, "60% must not look like 95%");
 }

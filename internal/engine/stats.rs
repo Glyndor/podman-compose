@@ -44,7 +44,8 @@ impl StatsOptions {
 
 /// Width of the table NAME column; long names are truncated to this width (with
 /// a trailing ellipsis) unless `--no-trunc` is given, so a long container name
-/// no longer overflows and shifts every following column. Matches [`HEADER`].
+/// no longer overflows and shifts every following column. The header is built
+/// from this same constant, so the two cannot drift apart.
 const NAME_WIDTH: usize = 32;
 
 /// Build the query fragment scoping a stats request to the `wanted` containers,
@@ -180,9 +181,17 @@ fn truncate_name(name: &str, no_trunc: bool) -> String {
 /// so should be the one that catches the eye.
 fn load_style(pct: f64) -> crate::ui::Style {
 	use crate::ui::AnsiColor;
-	let colour = if pct >= 90.0 {
+	// Four bands, not three, and the lowest one is dim rather than green.
+	// Everything under 70% used to be the same green, so a container at 0.02%
+	// looked exactly like one at 69% — colour that does not vary with the value
+	// carries no information, and the whole reason to read `stats` is to find
+	// the row in trouble. Idle rows now recede instead of competing.
+	if pct < 5.0 {
+		return crate::ui::Style::new().dimmed();
+	}
+	let colour = if pct >= 85.0 {
 		AnsiColor::Red
-	} else if pct >= 70.0 {
+	} else if pct >= 50.0 {
 		AnsiColor::Yellow
 	} else {
 		AnsiColor::Green
@@ -205,10 +214,14 @@ fn format_row_with(s: &ContainerStat, no_trunc: bool, colour: bool) -> String {
 
 	let name = format!("{:<NAME_WIDTH$}", truncate_name(&s.name, no_trunc));
 	let name = paint(identity_style(s.name.trim()), &name, colour);
-	let cpu = paint(load_style(s.cpu), &format!("{:>7.2}%", s.cpu), colour);
+	let cpu = paint(
+		load_style(s.cpu),
+		&format!("{:>width$.2}%", s.cpu, width = CPU_WIDTH - 1),
+		colour,
+	);
 	let mem_pct = paint(
 		load_style(s.mem_perc),
-		&format!("{:>6.2}%", s.mem_perc),
+		&format!("{:>width$.2}%", s.mem_perc, width = MEM_PCT_WIDTH - 1),
 		colour,
 	);
 	// Secondary detail: the absolute figures matter once a percentage has drawn
@@ -216,27 +229,38 @@ fn format_row_with(s: &ContainerStat, no_trunc: bool, colour: bool) -> String {
 	let mem = paint(
 		dim,
 		&format!(
-			"{:>10} / {:<10}",
+			"{:>width$} / {:<width$}",
 			format_bytes(s.mem_usage),
-			format_bytes(s.mem_limit)
+			format_bytes(s.mem_limit),
+			width = (MEM_WIDTH - 3) / 2
 		),
 		colour,
 	);
 	let net = paint(
 		dim,
-		&format!("{:>9} / {:<9}", format_bytes(rx), format_bytes(tx)),
+		&format!(
+			"{:>width$} / {:<width$}",
+			format_bytes(rx),
+			format_bytes(tx),
+			width = (NET_WIDTH - 3) / 2
+		),
 		colour,
 	);
 	let block = paint(
 		dim,
 		&format!(
-			"{:>9} / {:<9}",
+			"{:>width$} / {:<width$}",
 			format_bytes(s.block_in),
-			format_bytes(s.block_out)
+			format_bytes(s.block_out),
+			width = (BLOCK_WIDTH - 3) / 2
 		),
 		colour,
 	);
-	format!("{name} {cpu} {mem} {mem_pct} {net} {block} {:>5}", s.pids)
+	// PIDS was the only unstyled column of the six. It is secondary detail like
+	// the absolute byte figures beside it, so it takes the same dim treatment
+	// rather than a colour of its own.
+	let pids = paint(dim, &format!("{:>PIDS_WIDTH$}", s.pids), colour);
+	format!("{name} {cpu} {mem} {mem_pct} {net} {block} {pids}")
 }
 
 /// Build one `stats --format json` row with numeric values (raw bytes/percent),
@@ -258,7 +282,35 @@ fn stat_json_row(s: &ContainerStat) -> serde_json::Value {
 	})
 }
 
-const HEADER: &str = "NAME                                 CPU %       MEM USAGE / LIMIT        MEM %    NET I/O             BLOCK I/O           PIDS";
+/// Width of each column after NAME, in the order they are printed.
+///
+/// One source for the header and the rows. They used to be two hand-maintained
+/// layouts that nothing checked against each other, and they had drifted:
+/// measured against a representative row, the `MEM %` label sat one column past
+/// where its own data ended and `PIDS` started exactly where its data *stopped*,
+/// so the label was entirely off its column. Patching the constant would have
+/// fixed it until the next edit.
+const CPU_WIDTH: usize = 8;
+const MEM_WIDTH: usize = 23;
+const MEM_PCT_WIDTH: usize = 7;
+const NET_WIDTH: usize = 21;
+const BLOCK_WIDTH: usize = 21;
+const PIDS_WIDTH: usize = 5;
+
+/// The table header, built from the same widths the rows are.
+///
+/// Fixed widths rather than `ui::Table`'s content sizing, deliberately: this
+/// table repaints every second, and a column that resizes itself as the numbers
+/// change makes every row jump sideways while you are trying to read it. The
+/// shared table is right for a list printed once; a live view wants columns that
+/// stay put.
+fn header() -> String {
+	format!(
+		"{:<NAME_WIDTH$} {:>CPU_WIDTH$} {:<MEM_WIDTH$} {:>MEM_PCT_WIDTH$} \
+		 {:<NET_WIDTH$} {:<BLOCK_WIDTH$} {:>PIDS_WIDTH$}",
+		"NAME", "CPU %", "MEM USAGE / LIMIT", "MEM %", "NET I/O", "BLOCK I/O", "PIDS"
+	)
+}
 
 impl Engine {
 	/// Stream resource usage for the project's service containers (docker
@@ -522,7 +574,7 @@ fn print_frame(
 		return;
 	}
 
-	crate::ui::print_bold_header(HEADER);
+	crate::ui::print_bold_header(&header());
 	let colour = crate::ui::stdout_colored();
 	for s in &rows {
 		println!("{}", format_row_with(s, opts.no_trunc, colour));
