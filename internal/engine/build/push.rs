@@ -63,7 +63,7 @@ where
 			if quiet {
 				tracing::debug!("pushed {image}");
 			} else {
-				info!("pushed {image}");
+				crate::ui::progress_line("Image", image, "Pushed");
 			}
 			Ok(())
 		}
@@ -132,11 +132,20 @@ impl Engine {
 
 	/// Push a single image ref and drain its progress stream, surfacing a
 	/// mid-stream `error` line as a failure.
+	///
+	/// The two user-facing lines go through `ui::progress_line`, not `tracing`.
+	/// They were `info!` until #1248, and the CLI floors tracing at `warn`
+	/// everywhere except `watch` — so a successful `podup push` wrote **zero
+	/// bytes** to stdout and stderr while the image really did land in the
+	/// registry, and `--quiet` suppressed output that never appeared. Routing
+	/// through the progress layer also honours `PROGRESS_ENABLED`, which is the
+	/// switch an embedder actually controls; a tracing line is gated only by the
+	/// log floor, which it does not.
 	async fn push_image(&self, image: &str, opts: &PushOptions, quiet: bool) -> Result<()> {
 		if quiet {
 			tracing::debug!("pushing {image}");
 		} else {
-			info!("pushing {image}");
+			crate::ui::progress_line("Image", image, "Pushing");
 		}
 		let mut query = format!("destination={}", urlencoded(image));
 		if let Some(tls) = opts.tls_verify {
