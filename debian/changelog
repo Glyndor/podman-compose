@@ -39,6 +39,22 @@ podup (3.4.0) unstable; urgency=medium
     bookkeeping columns so the command line stands out; `volumes` highlights an
     external volume; `ls` gives each project name its own colour.
 
+  * `up`, `down`, `pull` and `build` show a live board on a terminal: the whole
+    resource set up front, repainted as work proceeds, with finished rows
+    scrolling up and staying. In a pipe, a file, CI, under `NO_COLOR` or with
+    `--ansi never`, the same events come out as plain append-only lines and no
+    escape sequences. Both carry the intermediate transitions (`Creating` then
+    `Created`), which no renderer emitted before — so a log now says more than
+    it used to, never less.
+
+  * `pull` reports through the progress layer and emits a matching `Pulled`. It
+    used a bare `eprintln!` that bypassed the output layer entirely, ignoring
+    the switch an embedding crate uses to silence podup, and it printed twice
+    per image on `up` while printing once on a standalone `pull`.
+
+  * `build` writes its output to stderr. It used stdout, contradicting the
+    promise that stdout stays a clean pipe.
+
   Fixed
 
   * `down` reported removing networks and volumes that never existed. On a

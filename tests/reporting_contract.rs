@@ -299,3 +299,247 @@ async fn wait_names_each_container_and_its_code() {
 		"the failing containers' code must survive: {ndjson}"
 	);
 }
+
+/// A pipe gets the events, never the animation.
+///
+/// This is the contract that protects CI logs. The live region only exists when
+/// stderr is a terminal and colour is on; anywhere else the same event model
+/// comes out as append-only lines. **Animation in a CI log is a defect** — and
+/// so is a CI log that says less than the terminal did, which is why the
+/// intermediate transitions are asserted here too. Before the board they did
+/// not exist at all: `up` reported only the finished state of each resource.
+#[tokio::test]
+async fn a_piped_up_gets_transitions_and_no_escapes() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(
+		&compose,
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n",
+	)
+	.unwrap();
+	let p = Project {
+		compose: compose.to_string_lossy().into_owned(),
+		name: format!("t{}-pipe", std::process::id()),
+		_dir: dir,
+	};
+	let stderr = p.progress(&["up", "-d"]);
+	assert!(
+		!stderr.contains('\u{1b}'),
+		"a pipe must get no escape sequences at all; got:\n{stderr:?}"
+	);
+	// Asserted per resource, not as "some line somewhere says Creating". A
+	// looser version of this passed with the container's start event deleted,
+	// because the network's own `Creating` satisfied it.
+	let has = |name: &str, verbs: &[&str]| {
+		stderr
+			.lines()
+			.any(|l| l.contains(name) && verbs.iter().any(|v| l.contains(v)))
+	};
+	let container = format!("{}-web-1", p.name);
+	assert!(
+		has(&container, &["Starting", "Creating"]),
+		"the container needs its own transition, not only its ending; got:\n{stderr}"
+	);
+	assert!(
+		has(&container, &["Started", "Created", "Running"]),
+		"and it must still get its ending; got:\n{stderr}"
+	);
+	let network = format!("{}_default", p.name);
+	assert!(
+		has(&network, &["Creating"]),
+		"the network needs one too; got:\n{stderr}"
+	);
+}
+
+/// `--ansi never` means it. The board is gated on the colour choice as well as
+/// on the terminal, because someone who asked for no escapes did not ask for a
+/// quieter kind of escape.
+#[tokio::test]
+async fn ansi_never_gets_no_board() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(&compose, "services:\n  web:\n    image: alpine:latest\n").unwrap();
+	let p = Project {
+		compose: compose.to_string_lossy().into_owned(),
+		name: format!("t{}-noansi", std::process::id()),
+		_dir: dir,
+	};
+	let stderr = p.progress(&["--ansi", "never", "up", "-d"]);
+	assert!(
+		!stderr.contains('\u{1b}'),
+		"--ansi never must emit nothing to repaint with; got:\n{stderr:?}"
+	);
+}
+
+/// The board writes to stderr only. stdout stays a clean pipe, which is what
+/// lets `run -d` keep printing its container id there and `config` keep piping
+/// into a file.
+#[tokio::test]
+async fn the_board_never_touches_stdout() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(
+		&compose,
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n",
+	)
+	.unwrap();
+	let p = Project {
+		compose: compose.to_string_lossy().into_owned(),
+		name: format!("t{}-stdout", std::process::id()),
+		_dir: dir,
+	};
+	let stdout = p.run(&["up", "-d"]);
+	assert!(
+		stdout.trim().is_empty(),
+		"up must leave stdout empty; got:\n{stdout}"
+	);
+}
+
+/// `down` gets a board too, seeded from what Podman actually has rather than
+/// from what the compose file describes — a service the file lists but that was
+/// never created would sit on the board as a row that never moves.
+#[tokio::test]
+async fn a_piped_down_gets_transitions_for_what_exists() {
+	if !podman_up().await {
+		return;
+	}
+	let p = Project::start("dwn");
+	let stderr = p.progress(&["down", "-v"]);
+	assert!(
+		!stderr.contains('\u{1b}'),
+		"a pipe must get no escape sequences; got:\n{stderr:?}"
+	);
+	let has = |name: &str, verb: &str| stderr.lines().any(|l| l.contains(name) && l.contains(verb));
+	let container = format!("{}-web-1", p.name);
+	assert!(
+		has(&container, "Stopping"),
+		"the container needs its transition; got:\n{stderr}"
+	);
+	assert!(has(&container, "Removed"), "and its ending; got:\n{stderr}");
+	let network = format!("{}_default", p.name);
+	assert!(
+		has(&network, "Removing") && has(&network, "Removed"),
+		"the network needs both; got:\n{stderr}"
+	);
+}
+
+/// `build` writes its output to stderr, leaving stdout a clean pipe.
+///
+/// It used `print!`, contradicting the documented promise that stdout stays
+/// pipeable — the one thing a caller redirecting `podup build > log` relies on,
+/// and the same promise `config` and `generate quadlet` are built around.
+#[tokio::test]
+async fn build_leaves_stdout_a_clean_pipe() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	fs::write(
+		dir.path().join("Dockerfile"),
+		"FROM alpine:latest\nRUN true\n",
+	)
+	.unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(
+		&compose,
+		"services:\n  tiny:\n    image: podup-build-probe:1\n    build:\n      context: .\n",
+	)
+	.unwrap();
+	let out = Command::new(bin())
+		.args([
+			"-f",
+			&compose.to_string_lossy(),
+			"-p",
+			&format!("t{}-bld", std::process::id()),
+			"build",
+		])
+		.output()
+		.expect("run podup build");
+	let stdout = String::from_utf8_lossy(&out.stdout);
+	assert!(
+		stdout.trim().is_empty(),
+		"build must not write to stdout; got:\n{stdout}"
+	);
+	assert!(
+		!String::from_utf8_lossy(&out.stderr).trim().is_empty(),
+		"the build output has to go somewhere, and that somewhere is stderr"
+	);
+}
+
+/// `pull` reports through the progress layer, with a matching `Pulled`.
+///
+/// It used a bare `eprintln!` — the one user-facing line in the binary that
+/// bypassed `ui` entirely, so it ignored `PROGRESS_ENABLED` and an embedder
+/// asking podup to stay silent got it anyway. There was never a `Pulled` at all,
+/// so a pull that finished looked exactly like one that hung.
+#[tokio::test]
+async fn pull_reports_both_ends() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(&compose, "services:\n  x:\n    image: alpine:latest\n").unwrap();
+	let p = Project {
+		compose: compose.to_string_lossy().into_owned(),
+		name: format!("t{}-pull", std::process::id()),
+		_dir: dir,
+	};
+	let stderr = p.progress(&["pull"]);
+	assert!(
+		stderr.contains("Pulling") && stderr.contains("Pulled"),
+		"pull must report starting and finishing; got:\n{stderr}"
+	);
+	assert_eq!(
+		stderr.matches("Pulling").count(),
+		1,
+		"one image, one Pulling; got:\n{stderr}"
+	);
+}
+
+/// One image, one `Pulling`, even on the `up` path.
+///
+/// `up` warms the image cache before the per-level walk and then pulls again
+/// inside it, and both reported — so `Pulling` appeared twice per image on `up`
+/// while a standalone `pull` printed it once. The prefetch is best-effort
+/// warming and the walk's own pull is the authoritative one, so only the second
+/// speaks.
+///
+/// `pull_policy: always` is what forces both stages to actually issue a pull for
+/// an image that is already local; with the default `missing` the prefetch would
+/// short-circuit and the duplication could not appear whether or not the control
+/// exists.
+#[tokio::test]
+async fn up_pulls_an_image_once() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(
+		&compose,
+		"services:\n  web:\n    image: alpine:latest\n    pull_policy: always\n    command: \
+		 [\"sleep\", \"infinity\"]\n",
+	)
+	.unwrap();
+	let p = Project {
+		compose: compose.to_string_lossy().into_owned(),
+		name: format!("t{}-once", std::process::id()),
+		_dir: dir,
+	};
+	let stderr = p.progress(&["up", "-d"]);
+	let pulls = stderr.matches("Pulling").count();
+	assert!(
+		pulls <= 1,
+		"one image must produce at most one Pulling on up; got {pulls} in:\n{stderr}"
+	);
+}

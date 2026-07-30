@@ -570,21 +570,49 @@ prints the same.
 
 ## Progress output
 
-Lifecycle commands report each resource they act on as a line on **stderr**, so
-stdout stays a clean pipe:
+`up`, `down`, `pull` and `build` report every resource they touch, on
+**stderr**, so stdout stays a clean pipe. What that looks like depends on where
+it is going.
+
+**On a terminal**, a live region at the tail of the output shows the whole set
+up front and repaints it as work proceeds. Finished rows scroll up and stay:
 
 ```
+[+] Running 3/6
+ ✔ Network   myapp_default  Created        0.1s
+ ⠹ Image     postgres:16    Pulling        2.9s
+ ⠹ Container myapp-db-1     Starting       2.9s
+ ⠸ Container myapp-api-1    Creating       0.4s
+ ⠿ Container myapp-web-1    Pending
+```
+
+A tail region rather than a full-screen takeover, deliberately: `up` is a
+command that finishes, and handing the screen back blank would destroy the
+record of what it did.
+
+**Anywhere else** — a pipe, a file, CI, `NO_COLOR`, `--ansi never` — the same
+events come out as plain append-only lines with no escape sequences at all:
+
+```
+ Network myapp_default  Creating
  Network myapp_default  Created
- Volume myapp_data  Created
+ Container myapp-web-1  Starting
  Container myapp-web-1  Started
 ```
 
-The name carries its identity colour and the verb its meaning colour. Only what
-actually happened is reported: re-running `up` over existing resources reports
-no creation, and `down` on a project whose networks or volumes were never
-created reports no removal. A command that acted on nothing says so —
+Both renderers see every event, so a log says *more* than it used to rather than
+less. Animation in a CI log is a defect, and so is a CI log missing what the
+terminal showed.
+
+Only what actually happened is reported: re-running `up` over existing
+resources reports no creation, and `down` on a project whose networks or volumes
+were never created reports no removal. A command that acted on nothing says so —
 `no containers to stop`, `no containers to start (project not created)` — rather
 than exiting silently, which is indistinguishable from success.
+
+The live region needs stderr to be a terminal, colour to be on, and the terminal
+size to be readable. If any of those is missing it falls back to the plain
+lines, which is also what `--ansi never` and `NO_COLOR` select.
 
 ## Diagnostics
 

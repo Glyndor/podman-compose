@@ -67,6 +67,7 @@ impl Engine {
 				subnets,
 			};
 
+			crate::ui::progress::start("Network", &network_name, "Creating");
 			match self
 				.client
 				.post_json::<_, serde_json::Value>(

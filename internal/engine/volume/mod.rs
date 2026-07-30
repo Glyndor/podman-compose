@@ -65,6 +65,7 @@ impl Engine {
 				labels,
 			};
 
+			crate::ui::progress::start("Volume", &volume_name, "Creating");
 			match self
 				.client
 				.post_json::<_, serde_json::Value>(

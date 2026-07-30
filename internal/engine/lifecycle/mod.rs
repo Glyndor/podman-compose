@@ -10,6 +10,7 @@ mod run;
 mod run_attached;
 mod scale;
 mod schedule;
+mod seed;
 mod signal;
 mod targets;
 
@@ -159,7 +160,7 @@ impl Engine {
 		no_deps: bool,
 		start: bool,
 	) -> Result<()> {
-		async {
+		let result = async {
 			// Reject any volume/network/container name Podman's regex would refuse
 			// before issuing a single create, so a bad name surfaces as a clear
 			// client-side error (not an opaque HTTP 500) with nothing created.
@@ -218,6 +219,14 @@ impl Engine {
 					}
 				}
 			}
+
+			// Seed the board before any work starts. This is the whole point of
+			// the phase: the resource set is knowable here — `levels` is already
+			// resolved above, and the networks and volumes come straight off the
+			// compose file — while every progress event in the tree fires once
+			// its work is already over. A board grown from those events would be
+			// a transcript with extra steps.
+			crate::ui::progress::begin(self.up_resources(file, &enabled, &target_set));
 
 			self.create_networks(file).await?;
 			self.create_volumes(file).await?;
@@ -279,7 +288,14 @@ impl Engine {
 
 			Ok(())
 		}
-		.await
+		.await;
+
+		// Close the board on every exit, not just the happy one: the region
+		// hides the cursor, and a `?` that returned early through the block
+		// above would otherwise leave the terminal without a caret. `end` is
+		// idempotent and a no-op when no board was opened.
+		crate::ui::progress::end();
+		result
 	}
 
 	/// Bring up a single service: honor profile/target filters, wait on its
@@ -494,6 +510,11 @@ impl Engine {
 				return Ok(());
 			}
 		}
+		crate::ui::progress::start(
+			"Container",
+			&container_name,
+			if start { "Starting" } else { "Creating" },
+		);
 		self.create_and_start(&container_name, name, service, file, start)
 			.await?;
 		crate::ui::progress_line(
@@ -529,6 +550,20 @@ impl Engine {
 		// Prefetch every project container once and group by service, instead of
 		// one container-list round-trip per service (S+1 → 1 for the level walk).
 		let live_by_service = self.list_project_containers_by_service().await?;
+
+		// Seed from the containers Podman actually has, walked in the same
+		// reversed level order the teardown below uses, so the board predicts
+		// what will happen rather than what the file describes. A service in the
+		// file that was never created must not sit on the board as a row that
+		// never moves.
+		let live_order: Vec<String> = levels
+			.iter()
+			.flatten()
+			.filter_map(|svc| live_by_service.get(svc))
+			.flatten()
+			.cloned()
+			.collect();
+		crate::ui::progress::begin(self.down_resources(file, &live_order, remove_volumes));
 
 		// Best-effort across every level/container/network/volume so one failure
 		// never leaves the rest of the teardown undone, but the first real
@@ -610,6 +645,7 @@ impl Engine {
 			// which had ever existed. The `Err(404)` arm below was unreachable
 			// for the same reason: the layer underneath had already turned the
 			// 404 into a success.
+			crate::ui::progress::start("Network", &network_name, "Removing");
 			match self.client.delete_existed(&net_path).await {
 				Ok(true) => crate::ui::progress_line("Network", &network_name, "Removed"),
 				Ok(false) => {}
@@ -650,6 +686,7 @@ impl Engine {
 				// may be reported, and a volume is the object where a false
 				// "Removed" is worst — it names data the operator believes is
 				// gone.
+				crate::ui::progress::start("Volume", &volume_name, "Removing");
 				match self.client.delete_existed(&vol_path).await {
 					Ok(true) => crate::ui::progress_line("Volume", &volume_name, "Removed"),
 					Ok(false) => {}
@@ -663,7 +700,12 @@ impl Engine {
 
 		// Internal native secrets are podup-owned (not user data), so remove
 		// them unconditionally — independent of `remove_volumes`.
-		self.remove_internal_secrets(file).await?;
+		let secrets = self.remove_internal_secrets(file).await;
+
+		// Close the board before returning, on every path: the region hides the
+		// cursor and an early `?` would leave the terminal without one.
+		crate::ui::progress::end();
+		secrets?;
 
 		if let Some(e) = first_err {
 			return Err(e);
