@@ -89,6 +89,50 @@ impl Engine {
 		}
 		out
 	}
+
+	/// Every resource a `down` pass will remove, in teardown order: containers
+	/// first (dependents before their dependencies, the inversion `down` itself
+	/// walks), then networks, then volumes.
+	///
+	/// Containers come from what Podman actually has, not from the compose file:
+	/// `down` removes what exists, and a file listing a service that was never
+	/// created would put a row on the board that never moves.
+	pub(super) fn down_resources(
+		&self,
+		file: &ComposeFile,
+		live: &[String],
+		remove_volumes: bool,
+	) -> Vec<(Kind, String)> {
+		let mut out: Vec<(Kind, String)> = live
+			.iter()
+			.map(|name| (Kind::Container, name.clone()))
+			.collect();
+		for (key, cfg) in &file.networks {
+			if cfg.as_ref().and_then(|c| c.external).unwrap_or(false) {
+				continue;
+			}
+			out.push((
+				Kind::Network,
+				resolve_network_name(key, file, &self.project),
+			));
+		}
+		// Volumes survive a `down` without `-v`, so they are not work this pass
+		// will do.
+		if remove_volumes {
+			for (key, cfg) in &file.volumes {
+				let cfg = cfg.as_ref();
+				if cfg.and_then(|c| c.external).unwrap_or(false) {
+					continue;
+				}
+				let name = cfg
+					.and_then(|c| c.name.as_deref())
+					.map(str::to_string)
+					.unwrap_or_else(|| format!("{}_{}", self.project, key));
+				out.push((Kind::Volume, name));
+			}
+		}
+		out
+	}
 }
 
 #[cfg(all(test, unix))]

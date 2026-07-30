@@ -551,6 +551,20 @@ impl Engine {
 		// one container-list round-trip per service (S+1 → 1 for the level walk).
 		let live_by_service = self.list_project_containers_by_service().await?;
 
+		// Seed from the containers Podman actually has, walked in the same
+		// reversed level order the teardown below uses, so the board predicts
+		// what will happen rather than what the file describes. A service in the
+		// file that was never created must not sit on the board as a row that
+		// never moves.
+		let live_order: Vec<String> = levels
+			.iter()
+			.flatten()
+			.filter_map(|svc| live_by_service.get(svc))
+			.flatten()
+			.cloned()
+			.collect();
+		crate::ui::progress::begin(self.down_resources(file, &live_order, remove_volumes));
+
 		// Best-effort across every level/container/network/volume so one failure
 		// never leaves the rest of the teardown undone, but the first real
 		// REMOVAL failure is remembered and returned at the end instead of being
@@ -631,6 +645,7 @@ impl Engine {
 			// which had ever existed. The `Err(404)` arm below was unreachable
 			// for the same reason: the layer underneath had already turned the
 			// 404 into a success.
+			crate::ui::progress::start("Network", &network_name, "Removing");
 			match self.client.delete_existed(&net_path).await {
 				Ok(true) => crate::ui::progress_line("Network", &network_name, "Removed"),
 				Ok(false) => {}
@@ -671,6 +686,7 @@ impl Engine {
 				// may be reported, and a volume is the object where a false
 				// "Removed" is worst — it names data the operator believes is
 				// gone.
+				crate::ui::progress::start("Volume", &volume_name, "Removing");
 				match self.client.delete_existed(&vol_path).await {
 					Ok(true) => crate::ui::progress_line("Volume", &volume_name, "Removed"),
 					Ok(false) => {}
@@ -684,7 +700,12 @@ impl Engine {
 
 		// Internal native secrets are podup-owned (not user data), so remove
 		// them unconditionally — independent of `remove_volumes`.
-		self.remove_internal_secrets(file).await?;
+		let secrets = self.remove_internal_secrets(file).await;
+
+		// Close the board before returning, on every path: the region hides the
+		// cursor and an early `?` would leave the terminal without one.
+		crate::ui::progress::end();
+		secrets?;
 
 		if let Some(e) = first_err {
 			return Err(e);

@@ -403,3 +403,31 @@ async fn the_board_never_touches_stdout() {
 		"up must leave stdout empty; got:\n{stdout}"
 	);
 }
+
+/// `down` gets a board too, seeded from what Podman actually has rather than
+/// from what the compose file describes — a service the file lists but that was
+/// never created would sit on the board as a row that never moves.
+#[tokio::test]
+async fn a_piped_down_gets_transitions_for_what_exists() {
+	if !podman_up().await {
+		return;
+	}
+	let p = Project::start("dwn");
+	let stderr = p.progress(&["down", "-v"]);
+	assert!(
+		!stderr.contains('\u{1b}'),
+		"a pipe must get no escape sequences; got:\n{stderr:?}"
+	);
+	let has = |name: &str, verb: &str| stderr.lines().any(|l| l.contains(name) && l.contains(verb));
+	let container = format!("{}-web-1", p.name);
+	assert!(
+		has(&container, "Stopping"),
+		"the container needs its transition; got:\n{stderr}"
+	);
+	assert!(has(&container, "Removed"), "and its ending; got:\n{stderr}");
+	let network = format!("{}_default", p.name);
+	assert!(
+		has(&network, "Removing") && has(&network, "Removed"),
+		"the network needs both; got:\n{stderr}"
+	);
+}

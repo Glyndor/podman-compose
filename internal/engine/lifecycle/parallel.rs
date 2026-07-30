@@ -336,6 +336,7 @@ impl Engine {
 		pre_stop: &[LifecycleHook],
 		remove_volumes: bool,
 	) -> Result<()> {
+		crate::ui::progress::start("Container", container_name, "Stopping");
 		for hook in pre_stop {
 			if let Err(e) = self.run_lifecycle_hook(container_name, hook).await {
 				tracing::debug!("pre_stop hook {container_name}: {e}");
