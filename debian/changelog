@@ -69,6 +69,11 @@ podup (3.4.0) unstable; urgency=medium
     0.02% looked exactly like one at 69%. Four bands now, with idle rows dimmed.
     `PIDS` was the only unstyled column of the six.
 
+  * Ctrl-C out of a command drawing a live region left the cursor hidden. The
+    restore ran from `Drop`, which covers a command that returns and nothing
+    else — Rust terminates on SIGINT without unwinding. `stats` is where it bit
+    hardest, since Ctrl-C is the normal way to leave it.
+
   * `down` reported removing networks and volumes that never existed. On a
     project name that had never been created it announced three removals,
     including a data volume — naming data the operator is told is gone.

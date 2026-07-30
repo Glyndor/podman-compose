@@ -74,6 +74,7 @@ impl Region {
 	/// Start a region on `target`, hiding the cursor.
 	pub fn new(target: Target) -> Self {
 		target.write(HIDE_CURSOR);
+		restore_cursor_on_interrupt(target);
 		Self { painted: 0, target }
 	}
 
@@ -108,9 +109,87 @@ impl Drop for Region {
 	}
 }
 
+/// Give the cursor back if the command is interrupted rather than returning.
+///
+/// `Drop` covers a command that ends on its own, and nothing else: Rust's
+/// default SIGINT handling terminates the process without unwinding, so
+/// Ctrl-C out of a region left the caret hidden until the user ran `reset`.
+/// Measured on a 100x30 pty before the fix — one `\e[?25l`, zero `\e[?25h`.
+///
+/// `stats` is where it bit hardest, because Ctrl-C is the *normal* way to leave
+/// it rather than an error path, but a long `up` interrupted part-way had the
+/// same hole.
+///
+/// Exits 130 (128 + SIGINT), the shell convention this binary already documents
+/// for an interrupted command. Installed per region rather than globally, so it
+/// cannot disturb the commands that handle their own interrupt — attached `up`,
+/// `exec`, `watch` — none of which open one.
+fn restore_cursor_on_interrupt(target: Target) {
+	if !claim_install() {
+		return;
+	}
+	// A tokio signal task, not a raw handler: the same shape `attach` and
+	// `watch` already use, and it runs ordinary code rather than being bound by
+	// async-signal-safety.
+	tokio::spawn(async move {
+		wait_for_interrupt().await;
+		target.write(SHOW_CURSOR);
+		std::process::exit(130);
+	});
+}
+
+/// Take the right to install the interrupt handler, once per process.
+///
+/// Two regions in one invocation — a `stats` after an `up` inside an embedding
+/// crate — must not stack handlers, since each would race to call
+/// `process::exit`. Split out of the installer so the latch is testable without
+/// spawning anything.
+fn claim_install() -> bool {
+	static INSTALLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+	!INSTALLED.swap(true, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Resolve when the process is asked to stop.
+#[cfg(unix)]
+async fn wait_for_interrupt() {
+	use tokio::signal::unix::{signal, SignalKind};
+	let mut term = match signal(SignalKind::terminate()) {
+		Ok(s) => s,
+		// Without a SIGTERM handler, Ctrl-C alone is still worth catching.
+		Err(_) => {
+			let _ = tokio::signal::ctrl_c().await;
+			return;
+		}
+	};
+	tokio::select! {
+		_ = tokio::signal::ctrl_c() => {}
+		_ = term.recv() => {}
+	}
+}
+
+/// Windows has no SIGTERM; Ctrl-C is the interrupt that matters.
+#[cfg(not(unix))]
+async fn wait_for_interrupt() {
+	let _ = tokio::signal::ctrl_c().await;
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// The interrupt handler is claimed once per process, however many regions a
+	/// run opens. Two in one invocation — a `stats` after an `up` inside an
+	/// embedding crate — must not stack handlers, since each would race to call
+	/// `process::exit`.
+	///
+	/// The only test in the crate that may call this: the latch is
+	/// process-global, so a second caller would see whatever this one left.
+	#[test]
+	fn the_interrupt_handler_is_claimed_once() {
+		assert!(claim_install(), "the first caller installs");
+		assert!(!claim_install(), "the second must not");
+		assert!(!claim_install());
+	}
 
 	/// The four sequences are what the repaint arithmetic is built on, so they
 	/// are pinned rather than left to a typo. `\x1b[3A` moves up three; `\x1b[J`
