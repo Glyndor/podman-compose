@@ -80,6 +80,9 @@ pub struct Table {
 	/// The column (if any) holding a yes/no answer where `yes` is the one worth
 	/// noticing. See [`Table::caution_col`].
 	caution_col: Option<usize>,
+	/// Columns rendered dim, so the ones left at normal weight are what the eye
+	/// lands on. See [`Table::dim_cols`].
+	dim_cols: Vec<usize>,
 	rows: Vec<Vec<String>>,
 	/// Per-row identity key, parallel to `rows`. `None` falls back to the
 	/// identity cell's own text.
@@ -96,6 +99,7 @@ impl Table {
 			status_col: None,
 			identity_col: None,
 			caution_col: None,
+			dim_cols: Vec::new(),
 			rows: Vec::new(),
 			keys: Vec::new(),
 		}
@@ -142,6 +146,18 @@ impl Table {
 		self
 	}
 
+	/// Dim the given columns, leaving the rest at normal weight.
+	///
+	/// For a table where most columns are scaffolding and one or two carry the
+	/// answer. `top` is the case: eight columns of process bookkeeping around the
+	/// command line, which is the reason anyone runs it. Dimming is not a
+	/// meaning — unlike the status and caution colours it says nothing about the
+	/// value — so it composes with them rather than competing.
+	pub fn dim_cols(mut self, cols: &[usize]) -> Self {
+		self.dim_cols = cols.to_vec();
+		self
+	}
+
 	/// Append one data row. The cell count should match the header count; missing
 	/// cells render blank and extra cells are ignored.
 	pub fn push(&mut self, cells: Vec<String>) {
@@ -168,7 +184,10 @@ impl Table {
 	/// Kept as one predicate so adding a marker is a single edit: the gate in
 	/// [`Table::print`] and the marker list cannot drift apart.
 	fn colours_any_column(&self) -> bool {
-		self.status_col.is_some() || self.identity_col.is_some() || self.caution_col.is_some()
+		self.status_col.is_some()
+			|| self.identity_col.is_some()
+			|| self.caution_col.is_some()
+			|| !self.dim_cols.is_empty()
 	}
 
 	/// Content-sized width of each column: the widest of the header and its cells,
@@ -228,6 +247,9 @@ impl Table {
 				}
 				if colour && Some(i) == self.caution_col {
 					return super::paint(caution_style(cell), &padded, true);
+				}
+				if colour && self.dim_cols.contains(&i) {
+					return super::paint(super::Style::new().dimmed(), &padded, true);
 				}
 				padded
 			})
@@ -319,6 +341,15 @@ mod tests {
 	fn a_caution_only_table_still_colours() {
 		let t = Table::new(&["NAME", "EXTERNAL"]).caution_col(1);
 		assert!(t.colours_any_column());
+	}
+
+	/// Dimming is a column property, so it reaches the gate the same way the
+	/// meaning-carrying markers do.
+	#[test]
+	fn a_dim_only_table_still_colours() {
+		let t = Table::new(&["PID", "CMD"]).dim_cols(&[0]);
+		assert!(t.colours_any_column());
+		assert!(!Table::new(&["PID", "CMD"]).colours_any_column());
 	}
 
 	/// Printable text is untouched.

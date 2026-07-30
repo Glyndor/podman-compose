@@ -556,3 +556,41 @@ fn autostart_status_renders_one_negative_one_way() {
 		 unit, so they must not be styled differently; got:\n{text}"
 	);
 }
+
+/// `top`'s process rows carry styling, and the dimming really reaches them.
+///
+/// Two header lines were styled and every process row was flat, which on a busy
+/// container is the whole output. The bookkeeping columns are now dimmed so the
+/// command line is what the eye lands on.
+///
+/// This is deliberately an end-to-end assertion rather than a unit test of the
+/// column choice. Both exist, because they fail for different reasons: the unit
+/// test catches a wrong choice, and only this one catches the choice being
+/// computed correctly and then not passed to the table — which is exactly the
+/// shape of the `logs` defect that survived every per-task review in #1247.
+#[tokio::test]
+async fn top_styles_its_process_rows() {
+	if !podman_up().await {
+		return;
+	}
+	let p = Project::start("topsty");
+	let out = Command::new(bin())
+		.args([
+			"-f", &p.compose, "-p", &p.name, "--ansi", "always", "top", "web",
+		])
+		.output()
+		.expect("run podup top");
+	let text = String::from_utf8_lossy(&out.stdout);
+	let process_rows: Vec<&str> = text
+		.lines()
+		.filter(|l| l.contains("sleep") || l.contains("root"))
+		.collect();
+	assert!(
+		!process_rows.is_empty(),
+		"expected at least one process row; got:\n{text}"
+	);
+	assert!(
+		process_rows.iter().any(|l| l.contains("\u{1b}[2m")),
+		"process rows must carry the dim styling, not just the two headers; got:\n{text}"
+	);
+}

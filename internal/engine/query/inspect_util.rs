@@ -135,50 +135,52 @@ pub(super) fn split_repo_tag(image_ref: &str) -> (String, String) {
 	}
 }
 
-/// Align a `top` table (the title row followed by process rows) into
-/// space-padded columns sized to the widest cell, returning one rendered line
-/// per input row (titles first). All but the last column are left-padded; the
-/// last is left ragged to avoid trailing whitespace.
-pub(super) fn align_top_columns(titles: &[String], processes: &[Vec<String>]) -> Vec<String> {
-	// Escaped before anything is measured. These cells hold a process `argv`
-	// read out of a container, which is attacker-controlled: without this a
-	// process can name itself with ANSI and repaint the reader's terminal. Every
-	// other table in podup goes through `fit_cell`, which sanitizes; `top`
-	// formats by hand and was the one that did not. Escaping first also keeps
-	// the width honest, since an escaped control character is wider than the
-	// byte it replaces.
-	let sanitize = |row: &[String]| -> Vec<String> {
-		row.iter().map(|c| crate::ui::sanitize_cell(c)).collect()
-	};
-	let mut rows: Vec<Vec<String>> = Vec::with_capacity(processes.len() + 1);
-	if !titles.is_empty() {
-		rows.push(sanitize(titles));
-	}
-	for p in processes {
-		rows.push(sanitize(p));
-	}
-	let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
-	let mut widths = vec![0usize; col_count];
-	for r in &rows {
-		for (i, cell) in r.iter().enumerate() {
-			widths[i] = widths[i].max(cell.chars().count());
-		}
-	}
-	rows.iter()
-		.map(|r| {
-			r.iter()
-				.enumerate()
-				.map(|(i, cell)| {
-					if i + 1 == r.len() {
-						cell.clone()
-					} else {
-						format!("{cell:<width$}", width = widths[i])
-					}
-				})
-				.collect::<Vec<_>>()
-				.join("  ")
-		})
+/// Column titles that are process bookkeeping rather than the answer.
+///
+/// Matched by title, not by index: libpod chooses the column set, so a
+/// positional list would silently dim the wrong things if that set ever
+/// changed. PID and CMD are what a reader of `top` is looking for; an
+/// unrecognised title is left alone.
+const TOP_SCAFFOLDING: [&str; 6] = ["UID", "PPID", "C", "STIME", "TTY", "TIME"];
+
+/// Which of `titles` are bookkeeping and should be dimmed.
+///
+/// Pure and separate from the table so the choice is testable: a dimming that
+/// selects nothing renders identically to no dimming at all, so without this the
+/// control could be deleted with the suite staying green.
+pub(super) fn top_dim_columns(titles: &[String]) -> Vec<usize> {
+	titles
+		.iter()
+		.enumerate()
+		.filter(|(_, t)| TOP_SCAFFOLDING.contains(&t.as_str()))
+		.map(|(i, _)| i)
 		.collect()
+}
+
+/// Build the table for one container's process list, or `None` when libpod sent
+/// no titles.
+///
+/// On `ui::Table` rather than a hand-rolled aligner: cells are escaped and
+/// columns sized in one place, so `top` stops being a third layout dialect that
+/// has to be fixed separately every time. The escaping is not incidental — these
+/// cells hold a process `argv` read out of a container, which is
+/// attacker-controlled, and a process can name itself.
+///
+/// Pure (returns the table instead of printing it) so both properties stay
+/// testable without a live container.
+pub(super) fn process_table(
+	titles: &[String],
+	processes: &[Vec<String>],
+) -> Option<crate::ui::Table> {
+	if titles.is_empty() {
+		return None;
+	}
+	let headers: Vec<&str> = titles.iter().map(String::as_str).collect();
+	let mut table = crate::ui::Table::new(&headers).dim_cols(&top_dim_columns(titles));
+	for row in processes {
+		table.push(row.clone());
+	}
+	Some(table)
 }
 
 #[cfg(test)]
@@ -191,7 +193,7 @@ mod tests {
 	fn top_escapes_control_characters_from_process_argv() {
 		let titles = vec!["PID".to_string(), "COMMAND".to_string()];
 		let processes = vec![vec!["1".to_string(), "\u{1b}[31mevil".to_string()]];
-		let out = super::align_top_columns(&titles, &processes);
+		let out = super::process_table(&titles, &processes).unwrap().render();
 		assert!(
 			!out.iter().any(|line| line.contains('\u{1b}')),
 			"no raw escape may reach the terminal: {out:?}"
@@ -203,8 +205,7 @@ mod tests {
 	}
 
 	use super::{
-		align_top_columns, dedup_preserving_order, is_running_status, parse_port_proto,
-		select_replica, split_repo_tag,
+		dedup_preserving_order, is_running_status, parse_port_proto, select_replica, split_repo_tag,
 	};
 
 	#[test]
@@ -299,19 +300,57 @@ mod tests {
 	}
 
 	#[test]
-	fn align_top_columns_pads_to_widest_cell() {
+	fn top_pads_columns_to_the_widest_cell() {
 		let titles = vec!["PID".to_string(), "CMD".to_string()];
 		let processes = vec![
 			vec!["1".to_string(), "bash".to_string()],
 			vec!["12345".to_string(), "node".to_string()],
 		];
-		let lines = align_top_columns(&titles, &processes);
+		let lines = super::process_table(&titles, &processes).unwrap().render();
 		assert_eq!(lines.len(), 3);
-		// First column is padded to the widest value ("12345" = 5 chars).
-		assert!(lines[0].starts_with("PID  "));
-		assert!(lines[1].starts_with("1      "));
+		// The invariant is that the second column starts at one offset on every
+		// line, header included — not any particular prefix. Asserting a literal
+		// `"1      "` pinned the old hand-rolled aligner's two-space join, so it
+		// failed when `top` moved onto the shared table for no reason a reader of
+		// `top` would care about.
+		let second_col = |line: &str| {
+			line.find(|c: char| !c.is_whitespace()).map(|_| {
+				let first = line.split_whitespace().next().unwrap_or("");
+				line.find(first).unwrap_or(0)
+					+ first.len() + line[line.find(first).unwrap_or(0) + first.len()..]
+					.chars()
+					.take_while(|c| *c == ' ')
+					.count()
+			})
+		};
+		assert_eq!(second_col(&lines[0]), second_col(&lines[1]));
+		assert_eq!(second_col(&lines[0]), second_col(&lines[2]));
+		// The widest cell ("12345") is what sets that offset.
+		assert_eq!(second_col(&lines[0]), Some("12345".len() + 1));
 		// No tabs in the aligned output.
 		assert!(lines.iter().all(|l| !l.contains('\t')));
+	}
+
+	/// `top` dims the bookkeeping columns so the command line is what the eye
+	/// lands on. Selected by title, so libpod reordering or renaming a column
+	/// cannot silently dim the wrong one.
+	#[test]
+	fn top_dims_the_bookkeeping_columns_only() {
+		let titles: Vec<String> = ["UID", "PID", "PPID", "C", "STIME", "TTY", "TIME", "CMD"]
+			.iter()
+			.map(|s| (*s).to_string())
+			.collect();
+		let dim = super::top_dim_columns(&titles);
+		// PID (1) and CMD (7) are the answer, everything else is scaffolding.
+		assert_eq!(dim, vec![0, 2, 3, 4, 5, 6]);
+	}
+
+	/// A title libpod might add in future is left at normal weight rather than
+	/// dimmed on a guess.
+	#[test]
+	fn top_leaves_an_unknown_column_alone() {
+		let titles = vec!["PID".to_string(), "RSS".to_string(), "CMD".to_string()];
+		assert!(super::top_dim_columns(&titles).is_empty());
 	}
 
 	#[test]

@@ -8,7 +8,7 @@ use crate::libpod::types::image::ImageInspect;
 use crate::libpod::{urlencoded, LogOutput, API_PREFIX};
 
 use super::inspect_util::{
-	align_top_columns, dedup_preserving_order, is_running_status, parse_port_proto, select_replica,
+	dedup_preserving_order, is_running_status, parse_port_proto, process_table, select_replica,
 	split_repo_tag,
 };
 use super::Engine;
@@ -90,17 +90,9 @@ impl Engine {
 						// are listed, so it carries the same identity colour it has in
 						// `ps` and `logs` rather than being merely bold.
 						crate::ui::print_identity_header(&container_name);
-						// Space-pad columns to the widest cell (header + rows) rather
-						// than tab-joining, so the table is aligned as the help promises.
 						let titles = result.titles.clone().unwrap_or_default();
 						let processes = result.processes.clone().unwrap_or_default();
-						let aligned = align_top_columns(&titles, &processes);
-						if let Some((header, rows)) = aligned.split_first() {
-							crate::ui::print_bold_header(header);
-							for row in rows {
-								println!("{row}");
-							}
-						}
+						Self::print_process_table(&titles, &processes);
 					}
 					// A not-created container (404) is tolerated; any other failure
 					// (e.g. a stopped container's HTTP 500, or an unreachable socket)
@@ -120,6 +112,23 @@ impl Engine {
 			);
 		}
 		Ok(())
+	}
+
+	/// Render one container's process list.
+	///
+	/// On `ui::Table` rather than the hand-rolled aligner it replaces: cells are
+	/// escaped and columns sized in one place, so `top` stops being a third
+	/// layout dialect that has to be fixed separately every time. The escaping
+	/// is not incidental — these cells hold a process `argv` read out of a
+	/// container, which is attacker-controlled.
+	///
+	/// The bookkeeping columns are dimmed so the command line is what the eye
+	/// lands on. Before this, `top` styled its two header lines and left every
+	/// process row flat, which on a busy container is the whole output.
+	fn print_process_table(titles: &[String], processes: &[Vec<String>]) {
+		if let Some(table) = process_table(titles, processes) {
+			table.print();
+		}
 	}
 
 	/// Print the public port for a given private port of a service container.
