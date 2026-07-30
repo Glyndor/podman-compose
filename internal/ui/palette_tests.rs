@@ -1,4 +1,4 @@
-use super::{wide_colour, WIDE_PALETTE};
+use super::{supports_wide_palette, wide_colour, WIDE_PALETTE};
 
 /// The xterm-256 index to its sRGB triple. The first 16 are the ANSI basics,
 /// then a 6x6x6 cube, then a 24-step grey ramp.
@@ -163,4 +163,34 @@ fn wide_colour_wraps_at_the_palette_size() {
 		anstyle::Ansi256Color(WIDE_PALETTE[3]).into(),
 		"the returned colour must be the palette entry, not the index"
 	);
+}
+
+/// A terminal announcing truecolor can certainly render 256 colours.
+#[test]
+fn colorterm_truecolor_gets_the_wide_palette() {
+	assert!(supports_wide_palette(Some("truecolor"), None, false));
+	assert!(supports_wide_palette(Some("24bit"), None, false));
+}
+
+/// The conventional TERM marker.
+#[test]
+fn term_256color_gets_the_wide_palette() {
+	assert!(supports_wide_palette(None, Some("xterm-256color"), false));
+	assert!(supports_wide_palette(None, Some("screen-256color"), false));
+}
+
+/// Windows commonly sets neither variable while rendering 256 colours fine.
+/// Without this tier every Windows user would fall back to six.
+#[test]
+fn windows_with_vt_enabled_gets_the_wide_palette() {
+	assert!(supports_wide_palette(None, None, true));
+}
+
+/// A terminal that announces nothing gets the six ANSI basics, which render
+/// everywhere. Guessing wider would paint escape codes into its output.
+#[test]
+fn an_unannounced_terminal_falls_back() {
+	assert!(!supports_wide_palette(None, None, false));
+	assert!(!supports_wide_palette(None, Some("vt100"), false));
+	assert!(!supports_wide_palette(Some(""), Some("dumb"), false));
 }
