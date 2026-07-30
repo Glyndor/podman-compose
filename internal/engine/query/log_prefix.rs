@@ -9,6 +9,28 @@ use std::io::Write;
 /// held in memory forever.
 const MAX_PENDING: usize = 64 * 1024;
 
+/// The identity colour for a log-prefix label.
+///
+/// Delegates to [`crate::ui::identity_style`], never `crate::ui::service_style`
+/// directly: the label reaching this module still carries its replica suffix
+/// (`web-1`, from `display_label`), and only `identity_style` strips that (and
+/// a project prefix) before resolving through the per-project colour registry
+/// `set_services` fills. Calling `service_style` on the raw label bypassed the
+/// registry entirely — that key was never in it — so every log prefix silently
+/// fell back to the per-label hash instead of the sequential colour `ps` uses.
+/// Measured on an 8-service project: `ps` gave 8 distinct colours, `logs` only
+/// 6, before this indirection existed.
+///
+/// Kept as its own function (rather than calling `identity_style` inline in
+/// [`LinePrefixer::new`]) so the routing choice is unit-testable on its own:
+/// [`LinePrefixer::new`]'s final output is gated by `stdout_colored`, which is
+/// false under the test harness (stdout is not a TTY there), so no test that
+/// only inspects a built `LinePrefixer`'s output can ever observe which style
+/// function was called.
+fn prefix_style(label: &str) -> crate::ui::Style {
+	crate::ui::identity_style(label)
+}
+
 /// Tags each complete log line with `{label} | `, the way `docker compose logs`
 /// labels multi-service output. Bytes arrive as stream frames that may split a
 /// line across frames, so a partial line is buffered until its newline arrives
@@ -39,7 +61,7 @@ impl LinePrefixer {
 		// prefix had to accept both. docker compose uses one space too.
 		let plain = format!("{label} | ");
 		let label = crate::ui::paint(
-			crate::ui::service_style(label),
+			prefix_style(label),
 			&plain,
 			allow_color && crate::ui::stdout_colored(),
 		);
@@ -94,7 +116,30 @@ impl LinePrefixer {
 
 #[cfg(test)]
 mod tests {
-	use super::LinePrefixer;
+	use super::{prefix_style, LinePrefixer};
+
+	/// The regression this guards: `new` used to call `service_style(label)`
+	/// directly on the raw, replica-suffixed label, which is never a key in the
+	/// per-project registry `identity_style` resolves against — every log
+	/// prefix silently fell back to the hash instead of the sequential colour
+	/// `ps` uses for the same container. `identity_style` strips the `-N`
+	/// replica suffix before resolving, so `prefix_style("web-1")` must land on
+	/// the exact same colour as `identity_style("web")` applied to the same
+	/// container — and, since the raw hash of the two strings differs, must
+	/// disagree with `service_style("web-1")` applied to the untouched label.
+	#[test]
+	fn prefix_style_routes_through_identity_style_not_service_style() {
+		assert_eq!(
+			prefix_style("web-1"),
+			crate::ui::identity_style("web"),
+			"the replica suffix must be stripped before resolving the colour"
+		);
+		assert_ne!(
+			prefix_style("web-1"),
+			crate::ui::service_style("web-1"),
+			"the raw, suffixed label must not be hashed directly"
+		);
+	}
 
 	/// #1082: one space before the bar. Attached `up` already used one, so the
 	/// same container was tagged two different ways by two commands in the same

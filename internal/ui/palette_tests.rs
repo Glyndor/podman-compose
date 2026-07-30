@@ -1,4 +1,4 @@
-use super::{supports_wide_palette, wide_colour, WIDE_PALETTE};
+use super::{assign, colour_for, supports_wide_palette, wide_colour, WIDE_PALETTE};
 
 /// The xterm-256 index to its sRGB triple. The first 16 are the ANSI basics,
 /// then a 6x6x6 cube, then a 24-step grey ramp.
@@ -193,4 +193,84 @@ fn an_unannounced_terminal_falls_back() {
 	assert!(!supports_wide_palette(None, None, false));
 	assert!(!supports_wide_palette(None, Some("vt100"), false));
 	assert!(!supports_wide_palette(Some(""), Some("dumb"), false));
+}
+
+/// Every service in a project gets its own colour. This is the whole point:
+/// the hash it replaces collided on a four-service project.
+#[test]
+fn services_up_to_the_palette_size_never_share_a_colour() {
+	let names: Vec<String> = (0..20).map(|i| format!("svc{i:02}")).collect();
+	let map = assign(&names);
+	let mut seen = std::collections::HashSet::new();
+	for name in &names {
+		let idx = map.get(name).copied().expect("every service is assigned");
+		assert!(seen.insert(idx), "{name} reuses a colour already given out");
+	}
+	assert_eq!(seen.len(), 20);
+}
+
+/// Past the palette size the assignment wraps rather than failing. Repeating a
+/// colour at the twenty-first service is better than running out.
+#[test]
+fn assignment_wraps_past_the_palette_size() {
+	let names: Vec<String> = (0..25).map(|i| format!("svc{i:02}")).collect();
+	let map = assign(&names);
+	assert_eq!(
+		map.len(),
+		25,
+		"every service is assigned even past the palette"
+	);
+	assert_eq!(
+		map["svc00"], map["svc20"],
+		"the twenty-first wraps onto the first"
+	);
+}
+
+/// Sorting is what makes this deterministic: the order services appear in the
+/// compose file must not change what colour they get.
+#[test]
+fn assignment_ignores_the_order_names_arrive_in() {
+	let forward: Vec<String> = ["web", "api", "db"].iter().map(|s| s.to_string()).collect();
+	let backward: Vec<String> = ["db", "api", "web"].iter().map(|s| s.to_string()).collect();
+	assert_eq!(assign(&forward), assign(&backward));
+}
+
+/// A label podup never resolved from the compose file — an orphan container,
+/// say — still gets a stable colour rather than none.
+#[test]
+fn an_unregistered_service_still_gets_a_stable_colour() {
+	let map = assign(&["web".to_string()]);
+	let a = colour_for("stranger", &map);
+	let b = colour_for("stranger", &map);
+	assert_eq!(
+		a, b,
+		"the same unknown label must always give the same colour"
+	);
+}
+
+/// `colour_for` must answer from the registry, not the hash, once a label is
+/// registered — otherwise `set_services` would be a no-op and every label
+/// would still collide exactly as before this task. `"db"` is chosen because
+/// its registered slot (1, from sorting alongside `web`/`cache`/`worker`/
+/// `queue`) provably differs from its own unregistered hash (11 against a
+/// 20-entry palette), so this cannot pass by the two coincidentally agreeing.
+#[test]
+fn colour_for_prefers_the_registered_slot_over_the_hash() {
+	let map = assign(&[
+		"web".to_string(),
+		"db".to_string(),
+		"cache".to_string(),
+		"worker".to_string(),
+		"queue".to_string(),
+	]);
+	let registered = colour_for("db", &map);
+	let unregistered = colour_for("db", &std::collections::HashMap::new());
+	assert_eq!(
+		registered, map["db"],
+		"a registered label must return its own slot"
+	);
+	assert_ne!(
+		registered, unregistered,
+		"registration must change the answer, not just agree with the hash"
+	);
 }

@@ -80,6 +80,49 @@ pub(crate) fn wide_palette_available() -> bool {
 	})
 }
 
+use std::collections::HashMap;
+
+/// Give each name its own palette slot, walking them in sorted order.
+///
+/// Sequential rather than hashed: a hash does not know how many services exist,
+/// so it collides well before the palette is full — measured on a four-service
+/// project, two came out the same colour, and over twenty colours five services
+/// still collide about 42% of the time.
+///
+/// Sorting is what keeps it deterministic. Assigning in order of appearance
+/// would repaint everything when a service moved in the compose file; sorted,
+/// the same file always renders the same and adding a service only shifts those
+/// that sort after it. Nothing is written to disk.
+pub(crate) fn assign(names: &[String]) -> HashMap<String, usize> {
+	let mut sorted: Vec<&String> = names.iter().collect();
+	sorted.sort();
+	sorted.dedup();
+	sorted
+		.into_iter()
+		.enumerate()
+		.map(|(i, name)| (name.clone(), i % WIDE_PALETTE.len()))
+		.collect()
+}
+
+/// The palette slot for `label`, falling back to a hash for a label that was
+/// never registered.
+///
+/// The fallback matters for anything podup renders but did not resolve from the
+/// compose file — an orphan container, a project listed by `ls`. A stable wrong
+/// colour reads better than no colour at all, and the hash is what guarantees
+/// the same label always lands on the same slot.
+pub(crate) fn colour_for(label: &str, map: &HashMap<String, usize>) -> usize {
+	if let Some(&index) = map.get(label) {
+		return index;
+	}
+	let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+	for b in label.bytes() {
+		h ^= u64::from(b);
+		h = h.wrapping_mul(0x0100_0000_01b3);
+	}
+	(h % WIDE_PALETTE.len() as u64) as usize
+}
+
 #[cfg(test)]
 #[path = "palette_tests.rs"]
 mod tests;
