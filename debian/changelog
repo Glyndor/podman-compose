@@ -1,5 +1,28 @@
 podup (3.4.0) unstable; urgency=medium
 
+  Incompatible changes
+
+  If a script of yours reads any of these, read this list before upgrading.
+  The library API is unchanged; every item here is command-line output.
+
+  * `podup build` writes its output to **stderr**, not stdout. `podup build >
+    build.log` now captures nothing — redirect stderr instead (`2> build.log`,
+    or `> build.log 2>&1`). stdout was documented as a clean pipe and `build`
+    was the one command contradicting it.
+
+  * `podup wait` prints one line per container — its name and exit code in
+    aligned columns — instead of a bare exit code per service. Use the new
+    `--format json` for a stable machine-readable form.
+
+  * `podup --version` prints `podup version v3.4.0`, matching `podup version`,
+    where it used to print `podup 3.4.0`. `podup version --short` still prints
+    the bare number.
+
+  * `stats`, `events` and `top` changed their table layouts: `stats`' header now
+    matches its columns, `events` gained a header and fixed column widths, and
+    `top` moved onto the shared table. Anything parsing those by byte offset
+    needs updating; `--format json` is unaffected in all three.
+
   Changed
 
   * Each service now gets its own identity colour. The palette holds twenty
