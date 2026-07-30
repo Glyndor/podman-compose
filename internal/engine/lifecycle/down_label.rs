@@ -47,7 +47,19 @@ impl Engine {
 		let grace = self.stop_timeout.unwrap_or(DEFAULT_STOP_GRACE_SECS);
 		let mut first_err: Option<crate::error::ComposeError> = None;
 
-		let containers = self.list_project_container_names(None).await?;
+		// With no compose file, the service names are not known statically — but
+		// the labelled containers we are about to tear down carry `podup.service`,
+		// so list them grouped by service instead of the flat name list, and
+		// register the result before any teardown progress line is printed.
+		// Without this every container here fell back to the per-label hash
+		// instead of the sequential identity colour `ps` and the compose-file
+		// `down` path use — the same class of defect fixed for `logs` (#1082).
+		let by_service = self.list_project_containers_by_service().await?;
+		let mut service_names: Vec<String> = by_service.keys().cloned().collect();
+		service_names.sort();
+		crate::ui::set_services(&service_names);
+
+		let containers: Vec<String> = by_service.into_values().flatten().collect();
 		let futs = containers.iter().map(|container_name| {
 			self.teardown_one_container(container_name, grace, &[], remove_volumes)
 		});
@@ -209,7 +221,10 @@ mod tests {
 	#[tokio::test]
 	#[cfg(unix)]
 	async fn down_by_label_propagates_a_real_removal_failure_after_completing_the_rest() {
-		let containers = r#"[{"Names":["/proj-web-1"]},{"Names":["/proj-db-1"]}]"#;
+		let containers = r#"[
+			{"Names":["/proj-web-1"],"Labels":{"podup.service":"web"}},
+			{"Names":["/proj-db-1"],"Labels":{"podup.service":"db"}}
+		]"#;
 		let fake = fake_podman::start(move |method, target| {
 			if method == "GET" && target.contains("/containers/json") {
 				(200, containers.to_string())

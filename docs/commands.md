@@ -22,6 +22,31 @@ These appear before the subcommand and may also come from the environment.
 | `--ansi <WHEN>` | | Colour output: `auto`, `always` or `never`. `always` forces colour even into a pipe or file. | 
 | `--env-file <PATH>` | | Env file(s) for interpolation. Repeatable; later files win. **Replaces** a project `.env` rather than adding to it — when this is given, `.env` is not read. The process environment still takes precedence over both. |
 
+**Identity colours.** Each service gets its own colour, so a name is
+recognisable across `ps`, `logs`, `images`, `stats` and the progress lines.
+Twenty colours are available, assigned in sorted order, so no two services in
+a project share one until the twenty-first. Each was picked to stay readable
+on a light terminal and a dark one alike, and to sit away from the red, green
+and yellow that carry status meaning, so a service name never reads as a
+state.
+
+The wide palette needs a terminal that announces 256-colour support through
+`COLORTERM` or `TERM` (or Windows, where virtual-terminal processing is
+enabled directly). Where it does not, podup falls back to six basic ANSI
+colours (cyan, magenta, blue and their bright variants), which render
+everywhere but cannot fully clear that bar: of the sixteen standard ANSI
+colours, only cyan and bright magenta stay readable on both a light and a dark
+background, and four of the fallback's own six fall short (magenta and blue
+against black, bright cyan against white, bright blue against black). ANSI-16
+colours have no fixed RGB — a terminal theme picks its own — so these figures,
+like the wide palette's, are relative to the reference palette this branch's
+tests pin (`internal/ui/palette_tests.rs`, the standard VGA 16-colour set),
+not a universal guarantee. The fallback stays anyway, on the view that
+distinguishing six services imperfectly beats distinguishing two well, and any
+terminal from the last decade qualifies for the wide palette instead. Both
+palettes obey `--ansi`, `NO_COLOR` and TTY detection: if colour is off,
+neither is emitted.
+
 ## Lifecycle
 
 ### `up`

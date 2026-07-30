@@ -61,20 +61,6 @@ fn systemd_states_are_coloured() {
 }
 
 #[test]
-fn service_colour_is_stable_per_name() {
-	// Same name → same index every call; different names spread across the
-	// palette (not all collapsed to one colour).
-	assert_eq!(palette_index("web"), palette_index("web"));
-	let distinct: std::collections::HashSet<usize> =
-		["web", "db", "cache", "worker", "proxy", "queue"]
-			.iter()
-			.map(|n| palette_index(n))
-			.collect();
-	assert!(distinct.len() > 1, "palette should spread service names");
-	assert!(palette_index("web") < SERVICE_PALETTE.len());
-}
-
-#[test]
 fn paint_gates_on_enabled() {
 	let plain = paint(bold(), "hi", false);
 	assert_eq!(plain, "hi");
@@ -155,4 +141,44 @@ fn an_unprefixed_label_is_keyed_on_itself() {
 		identity_style("web").render().to_string(),
 		service_style("web").render().to_string()
 	);
+}
+
+/// `set_services` is what makes `service_style` disagree with the plain hash:
+/// once a project's names are registered, sequential assignment guarantees
+/// they spread across the palette, rather than each colliding independently
+/// under the hash the way `palette_index` used to.
+#[test]
+fn set_services_makes_registered_names_distinct() {
+	set_services(&[
+		"colourreg-alpha".to_string(),
+		"colourreg-beta".to_string(),
+		"colourreg-gamma".to_string(),
+	]);
+	let a = service_style("colourreg-alpha").render().to_string();
+	let b = service_style("colourreg-beta").render().to_string();
+	let g = service_style("colourreg-gamma").render().to_string();
+	assert_ne!(a, b, "registered names must not share a colour");
+	assert_ne!(b, g, "registered names must not share a colour");
+	assert_ne!(a, g, "registered names must not share a colour");
+}
+
+/// The guard `palette_index("web") < SERVICE_PALETTE.len()` used to provide
+/// before it was deleted: `service_style`'s narrow-terminal fallback receives
+/// whatever slot `palette::assign` produced (0 through `WIDE_PALETTE.len() -
+/// 1`, since `assign` itself wraps at the wide palette's size), and must wrap
+/// that again to index the six-entry `SERVICE_PALETTE` safely.
+///
+/// Calls `slot_to_style` itself — the real narrow-branch code, not a
+/// reimplementation of its modulo — for every slot the assignment can
+/// produce, on both the wide and narrow branches. Confirmed this fails: with
+/// the `% SERVICE_PALETTE.len()` removed from `slot_to_style`'s narrow arm,
+/// this test panics with an index-out-of-bounds on slot 6 (`index out of
+/// bounds: the len is 6 but the index is 6`), then passes again once the
+/// modulo is restored.
+#[test]
+fn every_wide_palette_slot_indexes_the_narrow_palette_safely() {
+	for slot in 0..palette::WIDE_PALETTE.len() {
+		let _ = slot_to_style(slot, false);
+		let _ = slot_to_style(slot, true);
+	}
 }

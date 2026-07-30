@@ -1,3 +1,30 @@
+podup (3.4.0) unstable; urgency=medium
+
+  Changed
+
+  * Each service now gets its own identity colour. The palette holds twenty
+    colours instead of six and is assigned in sorted order rather than hashed,
+    so two services in a project no longer share a colour — measured on a
+    four-service project, two of them did. Every colour reads on a light
+    terminal and a dark one alike, and sits away from the red, green and yellow
+    that carry status meaning.
+
+  * Terminals that do not announce 256-colour support fall back to the previous
+    six colours. `--ansi`, `NO_COLOR` and TTY detection are unchanged: if colour
+    is off, none is emitted.
+
+  * `--help` no longer uses green for headings and cyan for literals. Green is
+    the healthy colour everywhere else in podup and cyan is an identity colour,
+    so the two most-read surfaces were competing for one vocabulary.
+
+  Fixed
+
+  * `podup --ansi never --help` emitted colour. Help is rendered inside the
+    argument parse, so the colour choice arrived too late for it; `--ansi` is
+    now read before parsing.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Wed, 29 Jul 2026 22:16:36 -0500
+
 podup (3.3.0) unstable; urgency=medium
 
   Changed

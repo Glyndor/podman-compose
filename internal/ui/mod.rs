@@ -17,6 +17,7 @@ pub use anstyle::{AnsiColor, Style};
 
 pub use anstream::ColorChoice;
 
+mod palette;
 mod table;
 pub use table::{fit_cell, sanitize_cell, Table};
 
@@ -88,6 +89,23 @@ pub fn set_project(name: &str) {
 	}
 }
 
+/// The service-to-colour map for this invocation, filled once the compose file
+/// has been resolved. Empty until then, which is why `colour_for` falls back to
+/// a hash rather than requiring registration.
+static SERVICES: std::sync::RwLock<Option<std::collections::HashMap<String, usize>>> =
+	std::sync::RwLock::new(None);
+
+/// Record this project's service names so each gets its own identity colour.
+///
+/// Call once per invocation, after the compose file is parsed. Without it every
+/// label falls back to the hash, which still works — it just cannot promise two
+/// services differ.
+pub fn set_services(names: &[String]) {
+	if let Ok(mut slot) = SERVICES.write() {
+		*slot = Some(palette::assign(names));
+	}
+}
+
 /// The stable identity colour for a container or service label, keyed on the
 /// label with the project prefix removed.
 ///
@@ -95,6 +113,12 @@ pub fn set_project(name: &str) {
 /// the same colour for the same container, which is what makes `ps`, `logs`,
 /// `stats` and the progress lines agree.
 pub fn identity_style(label: &str) -> Style {
+	slot_to_style(identity_slot(label), palette::wide_palette_available())
+}
+
+/// The palette slot backing [`identity_style`]. See [`service_slot`] for why
+/// this exists as its own, unrendered step.
+pub(crate) fn identity_slot(label: &str) -> usize {
 	let key = PROJECT
 		.read()
 		.ok()
@@ -104,7 +128,7 @@ pub fn identity_style(label: &str) -> Style {
 				.flatten()
 		})
 		.unwrap_or_else(|| label.to_string());
-	service_style(strip_replica_suffix(&key))
+	service_slot(strip_replica_suffix(&key))
 }
 
 /// Drop a trailing `-N` replica index, so every surface hashes the same key.
@@ -320,20 +344,55 @@ const SERVICE_PALETTE: [AnsiColor; 6] = [
 	AnsiColor::BrightBlue,
 ];
 
-/// Stable palette index for a service name — the same name always maps to the
-/// same colour (FNV-1a over the bytes, modulo the palette size).
-fn palette_index(name: &str) -> usize {
-	let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-	for b in name.bytes() {
-		h ^= u64::from(b);
-		h = h.wrapping_mul(0x0100_0000_01b3);
-	}
-	(h % SERVICE_PALETTE.len() as u64) as usize
+/// The palette slot backing [`service_style`], before it is rendered into a
+/// [`Style`] for whichever palette the terminal supports.
+///
+/// Split out so a routing regression can be asserted on the slot itself: the
+/// narrow (6-colour) fallback wraps a slot index mod 6, so two different
+/// wide-palette slots can render as the same `Style` there. A test comparing
+/// rendered `Style`s can miss exactly the collision it exists to catch on a
+/// terminal that never announces the wide palette; the slot never wraps, so
+/// it stays a real comparison on both.
+pub(crate) fn service_slot(name: &str) -> usize {
+	SERVICES
+		.read()
+		.ok()
+		.and_then(|slot| slot.as_ref().map(|map| palette::colour_for(name, map)))
+		.unwrap_or_else(|| palette::colour_for(name, &std::collections::HashMap::new()))
 }
 
 /// The stable colour for a service's aggregated-log prefix.
 pub fn service_style(name: &str) -> Style {
-	Style::new().fg_color(Some(SERVICE_PALETTE[palette_index(name)].into()))
+	slot_to_style(service_slot(name), palette::wide_palette_available())
+}
+
+/// The style for a palette slot, from whichever palette the terminal supports.
+///
+/// Split out of [`service_style`] so both branches are testable: the real
+/// decision reads a process-cached environment probe, and a test that flipped
+/// it would pass or fail on test scheduling.
+///
+/// The narrow branch takes a slot assigned against the WIDE palette's size, so
+/// it must wrap again — indexing a six-element array with a slot up to 19 is
+/// the out-of-bounds bug the old hash's `assert!` used to guard.
+fn slot_to_style(slot: usize, wide: bool) -> Style {
+	if wide {
+		Style::new().fg_color(Some(palette::wide_colour(slot)))
+	} else {
+		Style::new().fg_color(Some(SERVICE_PALETTE[slot % SERVICE_PALETTE.len()].into()))
+	}
+}
+
+/// Render a palette slot (from [`identity_slot`]/[`service_slot`]) into a
+/// [`Style`] for whichever palette the terminal supports right now.
+///
+/// The `pub(crate)` counterpart to [`identity_style`]/[`service_style`] for a
+/// caller that needs to resolve its *own* slot (e.g. the log-prefix module,
+/// which must never let its routing collapse into a raw per-label hash — see
+/// `engine::query::log_prefix::prefix_slot`) rather than one of the two
+/// label-keyed lookups here.
+pub(crate) fn style_for_slot(slot: usize) -> Style {
+	slot_to_style(slot, palette::wide_palette_available())
 }
 
 /// Whether an `Exited (N)` / `exited(N)` label reports a clean finish.
