@@ -91,7 +91,15 @@ pub(crate) fn ansi_from_argv<I: Iterator<Item = String>>(args: I) -> Option<Ansi
 #[derive(Parser)]
 #[command(
 	name = "podup",
-	version,
+	// clap renders `--version` as `{name} {version}`, so the derived default gave
+	// `podup 3.3.0` while the `version` subcommand gave `podup version v3.3.0` —
+	// two answers to the same question, and neither caller can tell which one it
+	// is going to get. Measured on docker-compose v5.1.3: `version` and
+	// `--version` are byte-identical (`Docker Compose version v5.1.3`) and only
+	// `--short` drops the `v`. Folding the word and the prefix into the version
+	// string is what makes clap emit the same line the subcommand does; the
+	// subcommand still owns `--short` and `--format json`.
+	version = concat!("version v", env!("CARGO_PKG_VERSION")),
 	about = "Run Compose projects on Podman.",
 	styles = HELP_STYLES,
 	// No subcommand prints help and exits non-zero (like docker compose), and the
