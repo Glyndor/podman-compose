@@ -2,8 +2,6 @@
 
 use std::collections::HashMap;
 
-use tracing::info;
-
 use crate::compose::types::{ComposeFile, IpamConfig, Service, ServiceNetworkConfig};
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::container::{Namespace, PerNetworkOptions};
@@ -69,6 +67,7 @@ impl Engine {
 				subnets,
 			};
 
+			crate::ui::progress::start("Network", &network_name, "Creating");
 			match self
 				.client
 				.post_json::<_, serde_json::Value>(
@@ -77,7 +76,7 @@ impl Engine {
 				)
 				.await
 			{
-				Ok(_) => info!("created network {network_name}"),
+				Ok(_) => crate::ui::progress_line("Network", &network_name, "Created"),
 				// An existing network is not an error on re-`up`; accept any
 				// already-exists conflict (network-create returns 409, but share
 				// the same predicate as volume-create for consistency).

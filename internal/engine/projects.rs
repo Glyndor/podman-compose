@@ -165,8 +165,19 @@ pub async fn list_projects_filtered(
 		return Ok(());
 	}
 
+	// `ls` was the only list whose first column carried no identity colour, so
+	// the one command whose whole job is to name projects rendered them all in
+	// the same plain text. Each project now gets its own stable colour, which is
+	// what makes a long list scannable.
+	//
+	// Not the same colour as that project's containers, and it cannot be: an
+	// identity colour is keyed on the label with the project prefix stripped, so
+	// `proj-web-1` keys on `web` while the row here keys on `proj`. What is
+	// promised is per-project stability, not cross-command agreement with the
+	// services inside it.
 	let mut table = crate::ui::Table::new(&["NAME", "STATUS"])
 		.cap(0, 48)
+		.identity_col(0)
 		.status_col(1);
 	for (name, t) in &rows {
 		table.push(vec![name.to_string(), status_label(t)]);

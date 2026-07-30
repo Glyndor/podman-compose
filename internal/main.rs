@@ -328,6 +328,12 @@ async fn run() -> podup::Result<()> {
 		// Identity colours key on the project-stripped label, so every command
 		// tints the same container the same way.
 		podup::ui::set_project(&project);
+		// Register the service names so each gets its own identity colour. The
+		// hash this replaces could not know how many services existed, so two
+		// could share one. The `down`-by-label path has no compose file to read
+		// service names from up front; it registers them itself, from the live
+		// container listing it fetches immediately before tearing down.
+		podup::ui::set_services(&file.services.keys().cloned().collect::<Vec<_>>());
 		let client = podup::podman::connect(resolve_socket(cli.socket.as_deref()).as_deref())?;
 		let engine = podup::Engine::with_base_dir(client, project, base_dir);
 		return engine
@@ -440,6 +446,7 @@ async fn run() -> podup::Result<()> {
 		// Identity colours key on the project-stripped label, so every command
 		// tints the same container the same way.
 		podup::ui::set_project(&project);
+		podup::ui::set_services(&file.services.keys().cloned().collect::<Vec<_>>());
 		// `file` is already parsed with the correct interpolation setting above.
 		let parsed = file;
 		// `--resolve-image-digests` pins each image to its registry digest, which
@@ -491,6 +498,7 @@ async fn run() -> podup::Result<()> {
 	// the progress lines all tint the same container the same way. This is the
 	// path every lifecycle command takes.
 	podup::ui::set_project(&project);
+	podup::ui::set_services(&file.services.keys().cloned().collect::<Vec<_>>());
 
 	// `generate` produces declarative artifacts from the compose file alone; it
 	// neither contacts Podman nor mutates project state.

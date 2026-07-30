@@ -22,6 +22,39 @@ These appear before the subcommand and may also come from the environment.
 | `--ansi <WHEN>` | | Colour output: `auto`, `always` or `never`. `always` forces colour even into a pipe or file. | 
 | `--env-file <PATH>` | | Env file(s) for interpolation. Repeatable; later files win. **Replaces** a project `.env` rather than adding to it — when this is given, `.env` is not read. The process environment still takes precedence over both. |
 
+**Identity colours.** Each service gets its own colour, so a name is
+recognisable across `ps`, `logs`, `images`, `stats` and the progress lines.
+Twenty colours are available, assigned in sorted order, so no two services in
+a project share one until the twenty-first. Each was picked to stay readable
+on a light terminal and a dark one alike, and to sit away from the red, green
+and yellow that carry status meaning, so a service name never reads as a
+state.
+
+The wide palette needs a terminal that announces 256-colour support through
+`COLORTERM` or `TERM` (or Windows, where virtual-terminal processing is
+enabled directly). Where it does not, podup falls back to six basic ANSI
+colours (cyan, magenta, blue and their bright variants), which render
+everywhere but cannot fully clear that bar: of the sixteen standard ANSI
+colours, only cyan and bright magenta stay readable on both a light and a dark
+background, and four of the fallback's own six fall short (magenta and blue
+against black, bright cyan against white, bright blue against black). ANSI-16
+colours have no fixed RGB — a terminal theme picks its own — so these figures,
+like the wide palette's, are relative to the reference palette this branch's
+tests pin (`internal/ui/palette_tests.rs`, the standard VGA 16-colour set),
+not a universal guarantee. The fallback stays anyway, on the view that
+distinguishing six services imperfectly beats distinguishing two well, and any
+terminal from the last decade qualifies for the wide palette instead. Both
+palettes obey `--ansi`, `NO_COLOR` and TTY detection: if colour is off,
+neither is emitted.
+
+Colour elsewhere carries meaning rather than identity, and each family is used
+for one thing only: green for something that now exists or is healthy, red for
+something gone or failed, yellow for something stopped that survives, dim for a
+default or unremarkable answer. That is why `volumes` marks an external volume
+yellow rather than green — it is not healthy or unhealthy, it is the one podup
+will not delete — and why `autostart status` reports an uninstalled unit dim
+throughout instead of colouring systemd's `not-found` red.
+
 ## Lifecycle
 
 ### `up`
@@ -160,7 +193,9 @@ View container output for the named services (or all).
 | `--no-log-prefix` | Drop the `{service} \| ` tag entirely. | off |
 
 ### `events`
-Stream Podman events for this project's containers.
+Stream Podman events for this project's containers, under a `TYPE ACTION NAME`
+header with the columns aligned to a fixed width (rows arrive over time, so
+there is no complete set to size against). `--format json` prints no header.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -178,7 +213,10 @@ when `--until` is given without `--since`. This also decides the exit code — s
 [Exit status](#exit-status).
 
 ### `top [SERVICE...]`
-Show the running processes of service containers.
+Show the running processes of service containers. Each block is headed by the
+container name in its identity colour; within the table the bookkeeping columns
+(`UID`, `PPID`, `C`, `STIME`, `TTY`, `TIME`) are dimmed so the command line
+stands out.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -186,7 +224,17 @@ Show the running processes of service containers.
 
 ### `stats [SERVICE...]`
 Live resource usage (CPU, memory, network, block I/O, PIDs) for service
-containers.
+containers. On a terminal the table repaints in place; anywhere else each frame
+is appended, so a redirected `stats` stays a file of readable frames rather than
+a file of cursor moves.
+
+CPU and memory percentages are coloured by band — dim below 5%, green to 50,
+yellow to 85, red above — so an idle container recedes and the one in trouble is
+the one that catches the eye. The absolute figures and the PID count are
+secondary detail and stay dim.
+
+`--format json` never repaints, whatever the terminal is: NDJSON while
+streaming, one pretty array with `--no-stream`.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -213,7 +261,9 @@ List images used by services.
 
 ### `volumes [SERVICE...]`
 List the project's named volumes (a trailing service list narrows it to volumes
-those services mount).
+those services mount). `EXTERNAL` is highlighted when it reads `yes`: podup
+neither creates nor deletes an external volume, so those are the ones a
+`down -v` leaves standing.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -348,8 +398,16 @@ Pause running service containers, or resume paused ones. `resume` is an alias
 for `unpause`.
 
 ### `wait [SERVICE...]`
-Block until the named service containers (default: all) stop, printing each
-container's exit code as it does.
+Block until the named service containers (default: all) stop, printing one line
+per container as it exits — the container's name and its exit code, in aligned
+columns, with a non-zero code in red. A scaled service reports each replica
+separately. The command's own exit status is the last non-zero code it saw.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--format <FORMAT>` | `table` for the aligned columns, or `json` for one NDJSON object (`Container`, `ExitCode`) per container, emitted as that container exits rather than after the last one. | table |
+
+A project with nothing to wait on prints nothing and exits 0.
 
 ### `scale <SERVICE=N>...`
 Set the number of running containers for one or more services, creating missing
@@ -392,7 +450,8 @@ Pull images for the named services, or all services if none are given.
 
 ### `push [SERVICE...]`
 Push each service's `image:` to its registry (services without an image are
-skipped). Credentials come from `podman login`.
+skipped). Credentials come from `podman login`. Each image is reported on stderr
+as it starts and finishes, leaving stdout a clean pipe.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -518,6 +577,52 @@ prints the same.
 |---|---|---|
 | `--short` | Print only the version number. | off |
 | `--format <FMT>` | `pretty` or `json`. | `pretty` |
+
+## Progress output
+
+`up`, `down`, `pull` and `build` report every resource they touch, on
+**stderr**, so stdout stays a clean pipe. What that looks like depends on where
+it is going.
+
+**On a terminal**, a live region at the tail of the output shows the whole set
+up front and repaints it as work proceeds. Finished rows scroll up and stay:
+
+```
+[+] Running 3/6
+ ✔ Network   myapp_default  Created        0.1s
+ ⠹ Image     postgres:16    Pulling        2.9s
+ ⠹ Container myapp-db-1     Starting       2.9s
+ ⠸ Container myapp-api-1    Creating       0.4s
+ ⠿ Container myapp-web-1    Pending
+```
+
+A tail region rather than a full-screen takeover, deliberately: `up` is a
+command that finishes, and handing the screen back blank would destroy the
+record of what it did.
+
+**Anywhere else** — a pipe, a file, CI, `NO_COLOR`, `--ansi never` — the same
+events come out as plain append-only lines with no escape sequences at all:
+
+```
+ Network myapp_default  Creating
+ Network myapp_default  Created
+ Container myapp-web-1  Starting
+ Container myapp-web-1  Started
+```
+
+Both renderers see every event, so a log says *more* than it used to rather than
+less. Animation in a CI log is a defect, and so is a CI log missing what the
+terminal showed.
+
+Only what actually happened is reported: re-running `up` over existing
+resources reports no creation, and `down` on a project whose networks or volumes
+were never created reports no removal. A command that acted on nothing says so —
+`no containers to stop`, `no containers to start (project not created)` — rather
+than exiting silently, which is indistinguishable from success.
+
+The live region needs stderr to be a terminal, colour to be on, and the terminal
+size to be readable. If any of those is missing it falls back to the plain
+lines, which is also what `--ansi never` and `NO_COLOR` select.
 
 ## Diagnostics
 

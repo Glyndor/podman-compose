@@ -108,6 +108,10 @@ impl Engine {
 				 Pass both to bound a window."
 			);
 		}
+		// No header on the machine path: `--format json` is what a parser reads.
+		if !json {
+			crate::ui::print_bold_header(&events_header());
+		}
 		let mut broke: Option<crate::libpod::PodmanError> = None;
 		while let Some(event) = stream.next().await {
 			match event {
@@ -195,6 +199,28 @@ fn format_event(value: &Value, json: bool) -> String {
 	format_event_line(typ, action, name, crate::ui::stdout_colored() && !json)
 }
 
+/// Display width of the `TYPE` column. `container` is the longest type libpod
+/// emits (`network`, `volume`, `image`, `secret`, `pod` are all shorter).
+const TYPE_WIDTH: usize = 9;
+
+/// Display width of the `ACTION` column. `health_status` is the longest verb
+/// seen on the feed.
+const ACTION_WIDTH: usize = 14;
+
+/// The header `events` prints once, before the first event.
+///
+/// Fixed widths, not content-sized like every other table here: rows arrive over
+/// time, so there is nothing to measure up front. `events` was the only stream
+/// with no header and no padding at all — three fields joined by single spaces,
+/// so `NAME` sat in a different column on every line and nothing named what the
+/// fields were.
+fn events_header() -> String {
+	format!(
+		"{:<TYPE_WIDTH$} {:<ACTION_WIDTH$} {}",
+		"TYPE", "ACTION", "NAME"
+	)
+}
+
 /// Join an event's three fields, tinting the two that carry meaning.
 ///
 /// A `--follow` stream is a wall of near-identical lines; `ACTION` is what
@@ -202,14 +228,29 @@ fn format_event(value: &Value, json: bool) -> String {
 /// happened to. The type (`container`, `network`) repeats on almost every line
 /// and is dimmed so it stops competing.
 fn format_event_line(typ: &str, action: &str, name: &str, colour: bool) -> String {
-	use crate::ui::{identity_style, paint, Style};
-	let typ = paint(Style::new().dimmed(), typ, colour);
-	let action = match crate::ui::action_or_status_style(action) {
-		Some(style) => paint(style, action, colour),
-		None => action.to_string(),
+	use crate::ui::{fit_cell, identity_style, paint, Style};
+	// `fit_cell` pads *and* escapes. The escaping is not incidental here: an
+	// event's actor name comes from outside podup, this line painted it raw, and
+	// every other table in the binary has run cells through `sanitize_cell` since
+	// the colour work landed. A `\x1b[` in a container name repainted the
+	// reader's terminal and desynchronised podup's own resets for every line
+	// after it.
+	let typ_cell = fit_cell(typ, TYPE_WIDTH);
+	let action_cell = fit_cell(action, ACTION_WIDTH);
+	let name_cell = fit_cell(name, 0);
+	let typ_out = paint(Style::new().dimmed(), &typ_cell, colour);
+	let action_out = match crate::ui::action_or_status_style(action) {
+		Some(style) => paint(style, &action_cell, colour),
+		None => action_cell,
 	};
-	let name = paint(identity_style(name), name, colour && !name.is_empty());
-	format!("{typ} {action} {name}").trim().to_string()
+	let name_out = paint(
+		identity_style(&name_cell),
+		&name_cell,
+		colour && !name_cell.is_empty(),
+	);
+	format!("{typ_out} {action_out} {name_out}")
+		.trim_end()
+		.to_string()
 }
 
 #[cfg(test)]
@@ -261,13 +302,15 @@ mod tests {
 			"Action": "start",
 			"Actor": { "Attributes": { "name": "web-1" } },
 		});
-		assert_eq!(format_event(&ev, false), "container start web-1");
+		// Columns are fixed-width now (#1248): `container` fills TYPE exactly,
+		// `start` is padded out to ACTION, and NAME is the trailing raw column.
+		assert_eq!(format_event(&ev, false), "container start          web-1");
 	}
 
 	#[test]
 	fn formats_libpod_native_shape() {
 		let ev = json!({ "Type": "container", "status": "die", "id": "abc123" });
-		assert_eq!(format_event(&ev, false), "container die abc123");
+		assert_eq!(format_event(&ev, false), "container die            abc123");
 	}
 
 	#[test]
@@ -286,11 +329,41 @@ mod event_colour_tests {
 	/// Without a colour sink the line is byte-identical to what it always was,
 	/// so `--json`, a pipe and the output contract are untouched.
 	#[test]
-	fn plain_output_is_unchanged() {
+	fn plain_output_carries_no_escapes() {
+		let out = format_event_line("container", "start", "proj-web-1", false);
+		assert!(!out.contains('\u{1b}'), "{out:?}");
+		assert_eq!(out, "container start          proj-web-1");
+	}
+
+	/// The three fields line up under the header, whatever their lengths, so
+	/// NAME does not move column on every line the way it used to.
+	#[test]
+	fn columns_align_under_the_header() {
+		let header = super::events_header();
+		let short = format_event_line("pod", "die", "a", false);
+		let long = format_event_line("container", "health_status", "b", false);
+		let name_col = |line: &str| line.rfind(' ').map(|i| i + 1);
 		assert_eq!(
-			format_event_line("container", "start", "proj-web-1", false),
-			"container start proj-web-1"
+			name_col(&header),
+			name_col(&short),
+			"header {header:?} vs {short:?}"
 		);
+		assert_eq!(
+			name_col(&header),
+			name_col(&long),
+			"header {header:?} vs {long:?}"
+		);
+	}
+
+	/// An actor name comes from outside podup. This line painted it raw while
+	/// every other table escaped its cells, so an escape sequence in a container
+	/// name repainted the reader's terminal.
+	#[test]
+	fn an_actor_name_cannot_drive_the_terminal() {
+		let out = format_event_line("container", "start", "evil\u{1b}[31m\u{7}name", false);
+		assert!(!out.contains('\u{1b}'), "{out:?}");
+		assert!(!out.contains('\u{7}'), "{out:?}");
+		assert!(out.contains("name"), "{out:?}");
 	}
 
 	/// The two fields that distinguish one line from the next carry colour; the

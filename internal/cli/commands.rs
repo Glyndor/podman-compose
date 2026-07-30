@@ -414,6 +414,10 @@ pub(crate) enum Commands {
 	},
 	/// Block until service containers stop, printing each exit code.
 	Wait {
+		/// Output format. `json` emits one NDJSON object per container as it
+		/// exits, rather than after every container has.
+		#[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+		format: OutputFormat,
 		/// Wait on these services (default: all).
 		services: Vec<String>,
 	},

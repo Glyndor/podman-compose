@@ -56,7 +56,7 @@ mod profiles;
 pub use profiles::{retain_active_profiles, retain_active_profiles_with_targets};
 mod projects;
 pub use projects::{list_projects, list_projects_filtered, LsOptions};
-mod query;
+pub(crate) mod query;
 mod secrets;
 mod staging;
 mod stats;

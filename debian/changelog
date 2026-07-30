@@ -1,3 +1,125 @@
+podup (3.4.0) unstable; urgency=medium
+
+  Incompatible changes
+
+  If a script of yours reads any of these, read this list before upgrading.
+  The library API is unchanged; every item here is command-line output.
+
+  * `podup build` writes its output to **stderr**, not stdout. `podup build >
+    build.log` now captures nothing — redirect stderr instead (`2> build.log`,
+    or `> build.log 2>&1`). stdout was documented as a clean pipe and `build`
+    was the one command contradicting it.
+
+  * `podup wait` prints one line per container — its name and exit code in
+    aligned columns — instead of a bare exit code per service. Use the new
+    `--format json` for a stable machine-readable form.
+
+  * `podup --version` prints `podup version v3.4.0`, matching `podup version`,
+    where it used to print `podup 3.4.0`. `podup version --short` still prints
+    the bare number.
+
+  * `stats`, `events` and `top` changed their table layouts: `stats`' header now
+    matches its columns, `events` gained a header and fixed column widths, and
+    `top` moved onto the shared table. Anything parsing those by byte offset
+    needs updating; `--format json` is unaffected in all three.
+
+  Changed
+
+  * Each service now gets its own identity colour. The palette holds twenty
+    colours instead of six and is assigned in sorted order rather than hashed,
+    so two services in a project no longer share a colour — measured on a
+    four-service project, two of them did. Every colour reads on a light
+    terminal and a dark one alike, and sits away from the red, green and yellow
+    that carry status meaning.
+
+  * Terminals that do not announce 256-colour support fall back to the previous
+    six colours. `--ansi`, `NO_COLOR` and TTY detection are unchanged: if colour
+    is off, none is emitted.
+
+  * `--help` no longer uses green for headings and cyan for literals. Green is
+    the healthy colour everywhere else in podup and cyan is an identity colour,
+    so the two most-read surfaces were competing for one vocabulary.
+
+  * `wait` prints one line per container — its name and exit code, in aligned
+    columns — instead of a bare exit code per service. A scaled service now
+    reports each replica separately, which is the granularity docker compose
+    reports at. New `--format json` emits one NDJSON object per container as
+    that container exits.
+
+  * `push` reports each image as it starts and finishes. It used to print
+    nothing at all: both of its lines sat below the log floor, so a push that
+    genuinely uploaded the image gave no sign it had done anything, and
+    `--quiet` suppressed output that never appeared.
+
+  * `up` reports the networks and volumes it creates, the way `down` has always
+    reported removing them.
+
+  * Every lifecycle command says so when it did nothing. `rm`, `stop`,
+    `restart`, `kill`, `pause` and `unpause` all exited 0 in silence on a
+    project that was never created, which reads exactly like success.
+
+  * `events` prints a header and lines its columns up; `top` dims the process
+    bookkeeping columns so the command line stands out; `volumes` highlights an
+    external volume; `ls` gives each project name its own colour.
+
+  * `up`, `down`, `pull` and `build` show a live board on a terminal: the whole
+    resource set up front, repainted as work proceeds, with finished rows
+    scrolling up and staying. In a pipe, a file, CI, under `NO_COLOR` or with
+    `--ansi never`, the same events come out as plain append-only lines and no
+    escape sequences. Both carry the intermediate transitions (`Creating` then
+    `Created`), which no renderer emitted before — so a log now says more than
+    it used to, never less.
+
+  * `pull` reports through the progress layer and emits a matching `Pulled`. It
+    used a bare `eprintln!` that bypassed the output layer entirely, ignoring
+    the switch an embedding crate uses to silence podup, and it printed twice
+    per image on `up` while printing once on a standalone `pull`.
+
+  * `build` writes its output to stderr. It used stdout, contradicting the
+    promise that stdout stays a clean pipe.
+
+  * `stats` repaints its table in place on a terminal instead of reprinting a
+    fresh frame every second. Redirected output, and `--format json` on any
+    terminal, still get plain appended frames.
+
+  Fixed
+
+  * `stats`' header had drifted off its own columns. It was a hand-written
+    constant kept separately from the row layout, and the `PIDS` label began
+    exactly where its data stopped. Both are now built from one set of widths.
+
+  * `stats` coloured everything below 70% the same green, so a container at
+    0.02% looked exactly like one at 69%. Four bands now, with idle rows dimmed.
+    `PIDS` was the only unstyled column of the six.
+
+  * Ctrl-C out of a command drawing a live region left the cursor hidden. The
+    restore ran from `Drop`, which covers a command that returns and nothing
+    else — Rust terminates on SIGINT without unwinding. `stats` is where it bit
+    hardest, since Ctrl-C is the normal way to leave it.
+
+  * `down` reported removing networks and volumes that never existed. On a
+    project name that had never been created it announced three removals,
+    including a data volume — naming data the operator is told is gone.
+
+  * `podup --version` printed `podup 3.3.0` while `podup version` printed
+    `podup version v3.4.0`, so a script probing the binary got a different
+    string depending on the spelling it used.
+
+  * `autostart status` coloured `enabled: not-found` red while `installed: no`
+    was dim, though both report the same uninstalled unit and neither is a
+    failure. A unit that is on disk while systemd cannot find it still reports
+    red — that one is a broken install.
+
+  * `events` painted an event's actor name without escaping it. Names come from
+    outside podup, so an escape sequence in one repainted the reader's terminal
+    and desynchronised podup's own colour resets for every line after it.
+
+  * `podup --ansi never --help` emitted colour. Help is rendered inside the
+    argument parse, so the colour choice arrived too late for it; `--ansi` is
+    now read before parsing.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Wed, 29 Jul 2026 22:16:36 -0500
+
 podup (3.3.0) unstable; urgency=medium
 
   Changed

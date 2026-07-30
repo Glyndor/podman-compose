@@ -50,6 +50,20 @@ pub fn sanitize_cell(s: &str) -> String {
 		.collect()
 }
 
+/// The style for a [`Table::caution_col`] cell: yellow for the answer that
+/// warrants a second look, dim for the default one, and nothing for a value that
+/// is neither.
+///
+/// Pure and taking the cell text, so the mapping is unit-testable without
+/// rendering a table or reading the process-global colour choice.
+fn caution_style(cell: &str) -> super::Style {
+	match cell.trim() {
+		"yes" => super::Style::new().fg_color(Some(super::AnsiColor::Yellow.into())),
+		"no" => super::Style::new().dimmed(),
+		_ => super::Style::new(),
+	}
+}
+
 /// A list-command table whose columns size to their content (capped, so a
 /// pathologically long cell truncates with an ellipsis rather than pushing every
 /// later column past its header). The trailing column is emitted raw.
@@ -63,6 +77,12 @@ pub struct Table {
 	/// The column (if any) carrying an identity — a service or container name —
 	/// tinted with that identity's stable colour.
 	identity_col: Option<usize>,
+	/// The column (if any) holding a yes/no answer where `yes` is the one worth
+	/// noticing. See [`Table::caution_col`].
+	caution_col: Option<usize>,
+	/// Columns rendered dim, so the ones left at normal weight are what the eye
+	/// lands on. See [`Table::dim_cols`].
+	dim_cols: Vec<usize>,
 	rows: Vec<Vec<String>>,
 	/// Per-row identity key, parallel to `rows`. `None` falls back to the
 	/// identity cell's own text.
@@ -78,6 +98,8 @@ impl Table {
 			caps: vec![None; headers.len()],
 			status_col: None,
 			identity_col: None,
+			caution_col: None,
+			dim_cols: Vec::new(),
 			rows: Vec::new(),
 			keys: Vec::new(),
 		}
@@ -110,6 +132,32 @@ impl Table {
 		self
 	}
 
+	/// Mark column `col` as a yes/no answer where `yes` is the one worth noticing:
+	/// `yes` takes the yellow band, `no` is dimmed as the unremarkable default.
+	///
+	/// Deliberately not [`Table::status_col`], which would paint `yes` green.
+	/// Green means healthy/up everywhere else in this CLI, and the column this
+	/// was written for — `volumes`' `EXTERNAL` — is not reporting health. It
+	/// reports the one volume podup will refuse to delete, so a `down -v` that
+	/// leaves something standing is explicable. That is a caution, and yellow is
+	/// already the band this CLI uses for *survives*.
+	pub fn caution_col(mut self, col: usize) -> Self {
+		self.caution_col = Some(col);
+		self
+	}
+
+	/// Dim the given columns, leaving the rest at normal weight.
+	///
+	/// For a table where most columns are scaffolding and one or two carry the
+	/// answer. `top` is the case: eight columns of process bookkeeping around the
+	/// command line, which is the reason anyone runs it. Dimming is not a
+	/// meaning — unlike the status and caution colours it says nothing about the
+	/// value — so it composes with them rather than competing.
+	pub fn dim_cols(mut self, cols: &[usize]) -> Self {
+		self.dim_cols = cols.to_vec();
+		self
+	}
+
 	/// Append one data row. The cell count should match the header count; missing
 	/// cells render blank and extra cells are ignored.
 	pub fn push(&mut self, cells: Vec<String>) {
@@ -128,6 +176,18 @@ impl Table {
 	pub fn push_keyed(&mut self, cells: Vec<String>, key: String) {
 		self.rows.push(cells);
 		self.keys.push(Some(key));
+	}
+
+	/// Whether any column marker is set, i.e. whether rendering with colour could
+	/// differ from rendering without it.
+	///
+	/// Kept as one predicate so adding a marker is a single edit: the gate in
+	/// [`Table::print`] and the marker list cannot drift apart.
+	fn colours_any_column(&self) -> bool {
+		self.status_col.is_some()
+			|| self.identity_col.is_some()
+			|| self.caution_col.is_some()
+			|| !self.dim_cols.is_empty()
 	}
 
 	/// Content-sized width of each column: the widest of the header and its cells,
@@ -185,11 +245,11 @@ impl Table {
 					// either way, so alignment is untouched.
 					return super::paint(super::identity_style(key.unwrap_or(cell)), &padded, true);
 				}
-				if colour && Some(i) == self.identity_col && !cell.trim().is_empty() {
-					// The padding is inside the paint so the colour does not stop
-					// at the name and leave the gap bare; the codes are zero-width
-					// either way, so alignment is untouched.
-					return super::paint(super::identity_style(key.unwrap_or(cell)), &padded, true);
+				if colour && Some(i) == self.caution_col {
+					return super::paint(caution_style(cell), &padded, true);
+				}
+				if colour && self.dim_cols.contains(&i) {
+					return super::paint(super::Style::new().dimmed(), &padded, true);
 				}
 				padded
 			})
@@ -215,8 +275,11 @@ impl Table {
 	pub fn print(&self) {
 		let widths = self.widths();
 		crate::ui::print_bold_header(&self.format_row(&self.headers, &widths, false));
-		let colour =
-			(self.status_col.is_some() || self.identity_col.is_some()) && super::stdout_colored();
+		// Every column marker that can tint a cell has to appear here, or a table
+		// that uses only that marker renders plain. `caution_col` was added
+		// without being listed, and it went unnoticed because its first caller —
+		// `volumes` — also sets `identity_col`, so the gate happened to be open.
+		let colour = self.colours_any_column() && super::stdout_colored();
 		for (i, row) in self.rows.iter().enumerate() {
 			let key = self.keys.get(i).and_then(Option::as_deref);
 			println!("{}", self.format_row_keyed(row, &widths, colour, key));
@@ -239,6 +302,54 @@ mod tests {
 		assert!(!out.contains('\x07'), "{out:?}");
 		assert!(!out.contains('\t'), "{out:?}");
 		assert!(out.contains("name"), "{out:?}");
+	}
+
+	/// A caution column separates its two answers, and `yes` is not the same as
+	/// `no` with a different word. Asserted as "the two styles differ" rather
+	/// than against a literal escape sequence: re-deriving the expected code from
+	/// the same constant the renderer reads would pass whether or not the
+	/// renderer consulted it.
+	#[test]
+	fn caution_style_distinguishes_yes_from_no() {
+		assert_ne!(caution_style("yes"), caution_style("no"));
+		// Padding must not change the answer — cells reach it already padded.
+		assert_eq!(caution_style("yes  "), caution_style("yes"));
+	}
+
+	/// A value that is neither answer is left alone rather than given an
+	/// arbitrary colour, matching how `status_style` treats an unknown word.
+	#[test]
+	fn caution_style_leaves_an_unknown_value_alone() {
+		assert_eq!(caution_style("maybe"), super::super::Style::new());
+	}
+
+	/// The caution column reaches the rendered row. `render` is the uncoloured
+	/// path, so this pins that the column is *declared*; the colour itself is
+	/// asserted on `caution_style` above.
+	#[test]
+	fn caution_col_survives_rendering() {
+		let mut t = Table::new(&["NAME", "EXTERNAL"]).caution_col(1);
+		t.push(vec!["theirs".into(), "yes".into()]);
+		let rows = t.render();
+		assert!(rows[1].contains("yes"), "{rows:?}");
+	}
+
+	/// A table whose only marker is `caution_col` still colours. The gate in
+	/// `print` listed `status_col` and `identity_col` only, and the first caution
+	/// caller set `identity_col` too — so the omission was invisible.
+	#[test]
+	fn a_caution_only_table_still_colours() {
+		let t = Table::new(&["NAME", "EXTERNAL"]).caution_col(1);
+		assert!(t.colours_any_column());
+	}
+
+	/// Dimming is a column property, so it reaches the gate the same way the
+	/// meaning-carrying markers do.
+	#[test]
+	fn a_dim_only_table_still_colours() {
+		let t = Table::new(&["PID", "CMD"]).dim_cols(&[0]);
+		assert!(t.colours_any_column());
+		assert!(!Table::new(&["PID", "CMD"]).colours_any_column());
 	}
 
 	/// Printable text is untouched.

@@ -104,7 +104,11 @@ impl Engine {
 				}
 				return;
 			}
-			if let Err(e) = self.pull_image(service).await {
+			// Quietly: this stage only warms the cache, and `up_one_service`'s
+			// own pull below is the authoritative one. Reporting from both is
+			// what made `Pulling` appear twice per image on `up` while a
+			// standalone `pull` printed it once.
+			if let Err(e) = self.pull_image_quietly(service).await {
 				tracing::debug!("prefetch miss for {image}: {e}");
 			}
 		});
