@@ -65,6 +65,7 @@ impl Project {
 			.expect("run podup");
 		String::from_utf8_lossy(&out.stdout).into_owned()
 	}
+
 }
 
 impl Drop for Project {
@@ -298,4 +299,51 @@ async fn push_quiet_suppresses_the_progress_lines() {
 		!stderr.contains("Pushing"),
 		"--quiet must suppress the progress line; got stderr:\n{stderr}"
 	);
+}
+
+/// `up` reports the networks and volumes it creates, the way `down` has always
+/// reported removing them.
+///
+/// It did not: measured on a four-object project, `up` created `p4_default`,
+/// `p4_extra` and `p4_data` and named none of them, while `down -v` on the same
+/// project listed all three as `Removed`. Creation went through
+/// `tracing::info!` under the CLI's `warn` floor, so the two halves of the same
+/// lifecycle disagreed about whether resources were worth mentioning.
+///
+/// Asserted on a fresh project name, because the create is idempotent: a second
+/// `up` correctly reports nothing, so a reused project would pass this whether
+/// or not the control exists.
+#[tokio::test]
+async fn up_reports_the_networks_and_volumes_it_creates() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(
+		&compose,
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    \
+		 volumes:\n      - data:/data\nvolumes:\n  data:\nnetworks:\n  extra:\n",
+	)
+	.unwrap();
+	let compose = compose.to_string_lossy().into_owned();
+	let name = format!("t{}-mk", std::process::id());
+	let out = Command::new(bin())
+		.args(["-f", &compose, "-p", &name, "up", "-d"])
+		.output()
+		.expect("run podup up");
+	let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+	let _ = Command::new(bin())
+		.args(["-f", &compose, "-p", &name, "down", "-v"])
+		.output();
+	for needle in [
+		&format!("Network {name}_default"),
+		&format!("Network {name}_extra"),
+		&format!("Volume {name}_data"),
+	] {
+		assert!(
+			stderr.contains(needle.as_str()) && stderr.contains("Created"),
+			"up must report creating {needle}; got stderr:\n{stderr}"
+		);
+	}
 }
