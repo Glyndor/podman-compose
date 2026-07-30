@@ -10,6 +10,7 @@ mod run;
 mod run_attached;
 mod scale;
 mod schedule;
+mod seed;
 mod signal;
 mod targets;
 
@@ -159,7 +160,7 @@ impl Engine {
 		no_deps: bool,
 		start: bool,
 	) -> Result<()> {
-		async {
+		let result = async {
 			// Reject any volume/network/container name Podman's regex would refuse
 			// before issuing a single create, so a bad name surfaces as a clear
 			// client-side error (not an opaque HTTP 500) with nothing created.
@@ -218,6 +219,14 @@ impl Engine {
 					}
 				}
 			}
+
+			// Seed the board before any work starts. This is the whole point of
+			// the phase: the resource set is knowable here — `levels` is already
+			// resolved above, and the networks and volumes come straight off the
+			// compose file — while every progress event in the tree fires once
+			// its work is already over. A board grown from those events would be
+			// a transcript with extra steps.
+			crate::ui::progress::begin(self.up_resources(file, &enabled, &target_set));
 
 			self.create_networks(file).await?;
 			self.create_volumes(file).await?;
@@ -279,7 +288,14 @@ impl Engine {
 
 			Ok(())
 		}
-		.await
+		.await;
+
+		// Close the board on every exit, not just the happy one: the region
+		// hides the cursor, and a `?` that returned early through the block
+		// above would otherwise leave the terminal without a caret. `end` is
+		// idempotent and a no-op when no board was opened.
+		crate::ui::progress::end();
+		result
 	}
 
 	/// Bring up a single service: honor profile/target filters, wait on its

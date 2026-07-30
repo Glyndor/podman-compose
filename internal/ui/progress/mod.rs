@@ -57,7 +57,18 @@ fn live_allowed() -> Option<usize> {
 	if !std::io::stderr().is_terminal() || !super::stderr_colored() {
 		return None;
 	}
-	crate::engine::query::terminal::window_size().map(|(cols, _)| cols as usize)
+	width_from(crate::engine::query::terminal::window_size())
+}
+
+/// The usable width from a `window_size()` answer.
+///
+/// Split out so the one thing that can silently be wrong here is testable:
+/// `window_size` returns **`(rows, cols)`**, in that order, and reading the
+/// first element as the width truncated every board line to the terminal's
+/// *height* instead. Measured on a 100x30 pty, every verb came out as `Pen…`,
+/// and nothing in the type system or the suite objected.
+fn width_from(size: Option<(u16, u16)>) -> Option<usize> {
+	size.map(|(_rows, cols)| cols as usize)
 }
 
 /// Start a board over `resources`, in the order they will be worked through.
@@ -99,25 +110,54 @@ pub fn start(kind: &str, name: &str, verb: &str) {
 	let Some(kind) = Kind::from_noun(kind) else {
 		return;
 	};
-	let handled = {
+	let sink = {
 		let Ok(mut slot) = SESSION.lock() else {
 			return;
 		};
 		match slot.as_mut() {
 			Some(session) => {
 				session.board.start(kind, name, verb, Instant::now());
-				true
+				if session.region.is_some() {
+					Sink::Live
+				} else {
+					Sink::Plain
+				}
 			}
-			None => false,
+			None => Sink::None,
 		}
 	};
-	if handled {
-		repaint();
-	} else if super::progress_enabled() {
-		// No board: still emit the transition, so a plain sink says as much as a
-		// live one. This is the "more information than today" half of the
-		// contract, and it must not depend on a board being open.
-		super::progress_line(kind.noun(), name, verb);
+	emit(sink, kind, name, verb);
+}
+
+/// Which renderer a just-recorded event belongs to.
+enum Sink {
+	/// A region is open; the event shows up on the next repaint.
+	Live,
+	/// A board is open but not on a terminal, so the event is a line.
+	Plain,
+	/// No board at all.
+	None,
+}
+
+/// Hand a recorded event to whichever renderer owns it.
+///
+/// The plain sink writes the same line the tree has always written, through
+/// [`super::write_progress_line`] rather than `progress_line` — going back
+/// through the routing that sent the event here would be a loop, and it is what
+/// made a piped `up` print nothing at all the first time this was wired up: the
+/// board swallowed every line and no renderer put one back.
+fn emit(sink: Sink, kind: Kind, name: &str, verb: &str) {
+	match sink {
+		Sink::Live => repaint(),
+		Sink::Plain => super::write_progress_line(kind.noun(), name, verb),
+		// No board open, but the caller still asked to report a transition, so
+		// the line is still owed — this is the "a pipe says more than it used
+		// to, never less" half of the contract.
+		Sink::None => {
+			if super::progress_enabled() {
+				super::write_progress_line(kind.noun(), name, verb);
+			}
+		}
 	}
 }
 
@@ -128,22 +168,29 @@ pub(super) fn finish(kind: &str, name: &str, verb: &str) -> bool {
 	let Some(kind) = Kind::from_noun(kind) else {
 		return false;
 	};
-	let handled = {
+	let sink = {
 		let Ok(mut slot) = SESSION.lock() else {
 			return false;
 		};
 		match slot.as_mut() {
 			Some(session) => {
 				session.board.finish(kind, name, verb, Instant::now());
-				true
+				if session.region.is_some() {
+					Sink::Live
+				} else {
+					Sink::Plain
+				}
 			}
-			None => false,
+			None => Sink::None,
 		}
 	};
-	if handled {
-		repaint();
+	// `Sink::None` means no board took it, so the caller prints its own line as
+	// it always has. The other two mean the event is accounted for here.
+	if matches!(sink, Sink::None) {
+		return false;
 	}
-	handled
+	emit(sink, kind, name, verb);
+	true
 }
 
 /// Close the board: stop the ticker, draw the finished state, restore the
@@ -203,5 +250,18 @@ fn spawn_ticker() {
 	});
 	if let Ok(mut slot) = TICKER.lock() {
 		*slot = Some(handle);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::width_from;
+
+	/// `window_size` answers `(rows, cols)`. Getting this backwards is invisible
+	/// on a square-ish terminal and mangles every line on a normal one.
+	#[test]
+	fn the_width_is_the_columns_not_the_rows() {
+		assert_eq!(width_from(Some((30, 100))), Some(100));
+		assert_eq!(width_from(None), None);
 	}
 }

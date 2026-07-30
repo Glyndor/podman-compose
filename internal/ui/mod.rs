@@ -172,7 +172,6 @@ pub fn progress_enabled() -> bool {
 /// …), tinted green on a colour sink. A no-op unless [`set_progress`] enabled
 /// progress output, so stdout consumers and machine output are never polluted.
 pub fn progress_line(kind: &str, name: &str, action: &str) {
-	use std::io::Write;
 	if !progress_enabled() {
 		return;
 	}
@@ -183,6 +182,17 @@ pub fn progress_line(kind: &str, name: &str, action: &str) {
 	if progress::finish(kind, name, action) {
 		return;
 	}
+	write_progress_line(kind, name, action);
+}
+
+/// Write one progress line to stderr, with no board routing.
+///
+/// Split out of [`progress_line`] because the plain sink has to emit exactly
+/// this and cannot go back through the routing that sent it here — that would
+/// be a loop. It is also the reason the two sinks cannot drift: there is one
+/// line format, used by both.
+pub(crate) fn write_progress_line(kind: &str, name: &str, action: &str) {
+	use std::io::Write;
 	let verb = action_style(action);
 	let ident = identity_style(name);
 	// anstream::stderr strips the ANSI codes itself when colour is off.
