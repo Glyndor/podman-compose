@@ -289,10 +289,10 @@ pub fn print_labelled_with(label: &str, value: &str, good: Option<bool>) {
 /// not a failure.
 ///
 /// `autostart status` needed it: with no unit file on disk, systemd's
-/// `is-enabled` answers `not-found`, which [`status_style`] reads as an error
-/// and paints red — while the `installed: no` line directly above it, saying the
-/// same thing about the same unit, was dim. Two colours for one fact, and the
-/// alarming one belonged to the case where nothing is wrong.
+/// `is-enabled` answers `not-found`, which the status vocabulary reads as an
+/// error and paints red — while the `installed: no` line directly above it says
+/// the same thing about the same unit and was dim. Two colours for one fact, and
+/// the alarming one belonged to the case where nothing is wrong.
 ///
 /// Separate from [`print_labelled_with`] rather than a third state added to its
 /// `Option<bool>`: `ui` is public API and podup is 1.0.0, so the existing
