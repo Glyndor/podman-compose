@@ -456,3 +456,38 @@ async fn lifecycle_commands_stay_quiet_when_they_did_act() {
 		);
 	}
 }
+
+/// `ls` tints the project name, and two different projects get two different
+/// colours. It was the only list command whose first column was bare.
+///
+/// The assertion is on *distinctness*, not on a particular escape sequence: a
+/// test that re-derived the expected code from the same palette constant the
+/// renderer reads would pass whether or not the renderer consulted it.
+#[tokio::test]
+async fn ls_tints_each_project_name() {
+	if !podman_up().await {
+		return;
+	}
+	let a = Project::start("lsa");
+	let b = Project::start("lsb");
+	let out = Command::new(bin())
+		.args(["-f", &a.compose, "--ansi", "always", "ls"])
+		.output()
+		.expect("run podup ls");
+	let text = String::from_utf8_lossy(&out.stdout);
+	let colour_of = |name: &str| -> Option<String> {
+		text.lines()
+			.find(|l| l.contains(name))
+			.and_then(|l| l.split_once(&format!("m{name}")))
+			.map(|(head, _)| head.rsplit('\u{1b}').next().unwrap_or("").to_string())
+	};
+	let (ca, cb) = (colour_of(&a.name), colour_of(&b.name));
+	assert!(
+		ca.is_some() && cb.is_some(),
+		"both project names must carry a colour; got:\n{text}"
+	);
+	assert_ne!(
+		ca, cb,
+		"two projects must not share one colour, or the column says nothing:\n{text}"
+	);
+}
