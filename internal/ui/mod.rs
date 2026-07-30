@@ -285,6 +285,32 @@ pub fn print_labelled_with(label: &str, value: &str, good: Option<bool>) {
 	);
 }
 
+/// [`print_labelled`] with the value dimmed, for an answer that is negative but
+/// not a failure.
+///
+/// `autostart status` needed it: with no unit file on disk, systemd's
+/// `is-enabled` answers `not-found`, which the status vocabulary reads as an
+/// error and paints red — while the `installed: no` line directly above it says
+/// the same thing about the same unit and was dim. Two colours for one fact, and
+/// the alarming one belonged to the case where nothing is wrong.
+///
+/// Separate from [`print_labelled_with`] rather than a third state added to its
+/// `Option<bool>`: `ui` is public API and podup is 1.0.0, so the existing
+/// signature may not move.
+pub fn print_labelled_neutral(label: &str, value: &str) {
+	use std::io::Write;
+	let dim = Style::new().dimmed();
+	let padded = format!("{label}:");
+	let _ = writeln!(
+		anstream::stdout(),
+		"{}{padded:<11}{} {}{value}{}",
+		dim.render(),
+		dim.render_reset(),
+		dim.render(),
+		dim.render_reset()
+	);
+}
+
 /// Bold — table headers and emphasis.
 pub fn bold() -> Style {
 	Style::new().bold()

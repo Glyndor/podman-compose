@@ -7,8 +7,6 @@
 
 use std::collections::HashMap;
 
-use tracing::info;
-
 use crate::compose::types::ComposeFile;
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::volume::VolumeCreateOptions;
@@ -75,7 +73,7 @@ impl Engine {
 				)
 				.await
 			{
-				Ok(_) => info!("created volume {volume_name}"),
+				Ok(_) => crate::ui::progress_line("Volume", &volume_name, "Created"),
 				// Podman's libpod volume-create returns 500 (not 409) for an
 				// existing name; treat an already-exists conflict as success so a
 				// re-`up` over an existing named volume stays idempotent.

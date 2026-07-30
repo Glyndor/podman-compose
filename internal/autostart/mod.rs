@@ -451,8 +451,21 @@ pub fn status<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<()> {
 	if let Some(mode) = r.unit_mode {
 		row("mode", &format!("{:04o}", mode & 0o7777));
 	}
-	row("active", &r.is_active);
-	row("enabled", &r.is_enabled);
+	// With no unit file on disk, systemd's answers to both questions are the same
+	// negative the `installed: no` line above already gave, and neither is a
+	// failure — but `is-enabled` returns the word `not-found`, which the status
+	// vocabulary reads as an error and paints red. So an uninstalled project
+	// reported one dim `no` and one red `not-found` about the same unit.
+	//
+	// A unit that *is* on disk while systemd still cannot find it stays red: that
+	// is a genuinely broken install, and the two cases must not look alike.
+	if r.unit_exists {
+		row("active", &r.is_active);
+		row("enabled", &r.is_enabled);
+	} else {
+		crate::ui::print_labelled_neutral("active", &r.is_active);
+		crate::ui::print_labelled_neutral("enabled", &r.is_enabled);
+	}
 	row("linger", if r.linger { "enabled" } else { "disabled" });
 	// Prose, not a state word, so the meaning is stated rather than inferred.
 	crate::ui::print_labelled_with(

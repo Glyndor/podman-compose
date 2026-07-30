@@ -111,9 +111,11 @@ pub(super) async fn dispatch_rest(
 			sig_proxy: _,
 			detach_keys: _,
 		} => engine.attach_with_index(file, &service, index).await?,
-		Commands::Wait { services } => {
+		Commands::Wait { format, services } => {
 			let file = &profile_filtered(file, profile, &services);
-			engine.wait_services(file, &services).await?
+			engine
+				.wait_services_with_options(file, &services, matches!(format, OutputFormat::Json))
+				.await?
 		}
 		Commands::Commit {
 			service,

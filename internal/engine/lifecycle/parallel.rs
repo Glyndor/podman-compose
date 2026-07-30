@@ -131,9 +131,15 @@ pub(super) fn restart_service_set(
 impl Engine {
 	/// Stop a single service's live containers (only those actually running), as
 	/// one unit of work in a concurrent level. See [`Engine::stop`].
-	pub(super) async fn stop_one_service(&self, service_name: &str, grace: i32) -> Result<()> {
+	pub(super) async fn stop_one_service(
+		&self,
+		service_name: &str,
+		grace: i32,
+		acted: &std::sync::atomic::AtomicBool,
+	) -> Result<()> {
 		for container in self.live_service_containers(service_name).await? {
 			if super::scale::state_is_active(&container.state) {
+				acted.store(true, std::sync::atomic::Ordering::Relaxed);
 				self.stop_container(&container.name, grace).await?;
 			} else {
 				tracing::debug!(
@@ -183,6 +189,7 @@ impl Engine {
 		service_name: &str,
 		service: &Service,
 		done: &str,
+		acted: &std::sync::atomic::AtomicBool,
 	) -> Result<()> {
 		let grace = self.grace_period_secs(service);
 		let mut first_err: Option<ComposeError> = None;
@@ -194,11 +201,15 @@ impl Engine {
 				urlencoded(&container_name),
 				stop_timeout_param(grace),
 			);
-			if let Err(e) = self
+			match self
 				.run_lifecycle_op(&restart_path, &container_name, done)
 				.await
 			{
-				first_err.get_or_insert(e);
+				Ok(true) => acted.store(true, std::sync::atomic::Ordering::Relaxed),
+				Ok(false) => {}
+				Err(e) => {
+					first_err.get_or_insert(e);
+				}
 			}
 		}
 		first_err.map_or(Ok(()), Err)
@@ -210,6 +221,7 @@ impl Engine {
 		service_name: &str,
 		service: &Service,
 		signal: &str,
+		acted: &std::sync::atomic::AtomicBool,
 	) -> Result<()> {
 		let mut first_err: Option<ComposeError> = None;
 		for container_name in self.live_replica_names(service_name, service).await? {
@@ -218,11 +230,15 @@ impl Engine {
 				urlencoded(&container_name),
 				urlencoded(signal),
 			);
-			if let Err(e) = self
+			match self
 				.run_lifecycle_op(&path, &container_name, "Killed")
 				.await
 			{
-				first_err.get_or_insert(e);
+				Ok(true) => acted.store(true, std::sync::atomic::Ordering::Relaxed),
+				Ok(false) => {}
+				Err(e) => {
+					first_err.get_or_insert(e);
+				}
 			}
 		}
 		first_err.map_or(Ok(()), Err)
@@ -235,6 +251,7 @@ impl Engine {
 		service: &Service,
 		force: bool,
 		remove_volumes: bool,
+		acted: &std::sync::atomic::AtomicBool,
 	) -> Result<()> {
 		let mut first_err: Option<ComposeError> = None;
 		for container_name in self.live_replica_names(service_name, service).await? {
@@ -247,7 +264,10 @@ impl Engine {
 				// Only report a removal that actually happened — a phantom
 				// (never-created) container 404s and must not be logged as
 				// "removed".
-				Ok(true) => crate::ui::progress_line("Container", &container_name, "Removed"),
+				Ok(true) => {
+					acted.store(true, std::sync::atomic::Ordering::Relaxed);
+					crate::ui::progress_line("Container", &container_name, "Removed");
+				}
 				Ok(false) => {}
 				// Without `--force`, a running container 409s. docker compose rm
 				// skips running containers rather than aborting, so warn and keep
@@ -273,6 +293,7 @@ impl Engine {
 		service: &Service,
 		endpoint: &str,
 		done: &str,
+		acted: &std::sync::atomic::AtomicBool,
 	) -> Result<()> {
 		let mut first_err: Option<ComposeError> = None;
 		for container_name in self.live_replica_names(service_name, service).await? {
@@ -280,11 +301,15 @@ impl Engine {
 				"{API_PREFIX}/containers/{}/{endpoint}",
 				urlencoded(&container_name),
 			);
-			if let Err(e) = self
+			match self
 				.run_idempotent_state_op(&path, &container_name, done)
 				.await
 			{
-				first_err.get_or_insert(e);
+				Ok(true) => acted.store(true, std::sync::atomic::Ordering::Relaxed),
+				Ok(false) => {}
+				Err(e) => {
+					first_err.get_or_insert(e);
+				}
 			}
 		}
 		first_err.map_or(Ok(()), Err)

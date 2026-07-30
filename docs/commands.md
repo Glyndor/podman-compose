@@ -47,6 +47,14 @@ terminal from the last decade qualifies for the wide palette instead. Both
 palettes obey `--ansi`, `NO_COLOR` and TTY detection: if colour is off,
 neither is emitted.
 
+Colour elsewhere carries meaning rather than identity, and each family is used
+for one thing only: green for something that now exists or is healthy, red for
+something gone or failed, yellow for something stopped that survives, dim for a
+default or unremarkable answer. That is why `volumes` marks an external volume
+yellow rather than green — it is not healthy or unhealthy, it is the one podup
+will not delete — and why `autostart status` reports an uninstalled unit dim
+throughout instead of colouring systemd's `not-found` red.
+
 ## Lifecycle
 
 ### `up`
@@ -185,7 +193,9 @@ View container output for the named services (or all).
 | `--no-log-prefix` | Drop the `{service} \| ` tag entirely. | off |
 
 ### `events`
-Stream Podman events for this project's containers.
+Stream Podman events for this project's containers, under a `TYPE ACTION NAME`
+header with the columns aligned to a fixed width (rows arrive over time, so
+there is no complete set to size against). `--format json` prints no header.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -203,7 +213,10 @@ when `--until` is given without `--since`. This also decides the exit code — s
 [Exit status](#exit-status).
 
 ### `top [SERVICE...]`
-Show the running processes of service containers.
+Show the running processes of service containers. Each block is headed by the
+container name in its identity colour; within the table the bookkeeping columns
+(`UID`, `PPID`, `C`, `STIME`, `TTY`, `TIME`) are dimmed so the command line
+stands out.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -238,7 +251,9 @@ List images used by services.
 
 ### `volumes [SERVICE...]`
 List the project's named volumes (a trailing service list narrows it to volumes
-those services mount).
+those services mount). `EXTERNAL` is highlighted when it reads `yes`: podup
+neither creates nor deletes an external volume, so those are the ones a
+`down -v` leaves standing.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -373,8 +388,16 @@ Pause running service containers, or resume paused ones. `resume` is an alias
 for `unpause`.
 
 ### `wait [SERVICE...]`
-Block until the named service containers (default: all) stop, printing each
-container's exit code as it does.
+Block until the named service containers (default: all) stop, printing one line
+per container as it exits — the container's name and its exit code, in aligned
+columns, with a non-zero code in red. A scaled service reports each replica
+separately. The command's own exit status is the last non-zero code it saw.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--format <FORMAT>` | `table` for the aligned columns, or `json` for one NDJSON object (`Container`, `ExitCode`) per container, emitted as that container exits rather than after the last one. | table |
+
+A project with nothing to wait on prints nothing and exits 0.
 
 ### `scale <SERVICE=N>...`
 Set the number of running containers for one or more services, creating missing
@@ -417,7 +440,8 @@ Pull images for the named services, or all services if none are given.
 
 ### `push [SERVICE...]`
 Push each service's `image:` to its registry (services without an image are
-skipped). Credentials come from `podman login`.
+skipped). Credentials come from `podman login`. Each image is reported on stderr
+as it starts and finishes, leaving stdout a clean pipe.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -543,6 +567,24 @@ prints the same.
 |---|---|---|
 | `--short` | Print only the version number. | off |
 | `--format <FMT>` | `pretty` or `json`. | `pretty` |
+
+## Progress output
+
+Lifecycle commands report each resource they act on as a line on **stderr**, so
+stdout stays a clean pipe:
+
+```
+ Network myapp_default  Created
+ Volume myapp_data  Created
+ Container myapp-web-1  Started
+```
+
+The name carries its identity colour and the verb its meaning colour. Only what
+actually happened is reported: re-running `up` over existing resources reports
+no creation, and `down` on a project whose networks or volumes were never
+created reports no removal. A command that acted on nothing says so —
+`no containers to stop`, `no containers to start (project not created)` — rather
+than exiting silently, which is indistinguishable from success.
 
 ## Diagnostics
 

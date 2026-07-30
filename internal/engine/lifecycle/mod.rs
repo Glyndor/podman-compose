@@ -601,9 +601,18 @@ impl Engine {
 				"{API_PREFIX}/networks/{}",
 				crate::libpod::urlencoded(&network_name),
 			);
-			match self.client.delete_ok(&net_path).await {
-				Ok(_) => crate::ui::progress_line("Network", &network_name, "Removed"),
-				Err(e) if e.is_status(404) => {}
+			// `delete_existed`, not `delete_ok`: this loop walks the networks the
+			// compose file *declares*, which is not the same set as the networks
+			// that exist. `delete_ok` throws away the boolean that tells the two
+			// apart, so every 404 arrived here as `Ok(())` and was announced as a
+			// removal — measured on a project that had never been created,
+			// `down -v` reported removing two networks and a volume, none of
+			// which had ever existed. The `Err(404)` arm below was unreachable
+			// for the same reason: the layer underneath had already turned the
+			// 404 into a success.
+			match self.client.delete_existed(&net_path).await {
+				Ok(true) => crate::ui::progress_line("Network", &network_name, "Removed"),
+				Ok(false) => {}
 				Err(e) => {
 					tracing::warn!("could not remove network {network_name}: {e}");
 					first_err.get_or_insert(crate::error::ComposeError::Podman(e));
@@ -637,9 +646,13 @@ impl Engine {
 					"{API_PREFIX}/volumes/{}",
 					crate::libpod::urlencoded(&volume_name),
 				);
-				match self.client.delete_ok(&vol_path).await {
-					Ok(_) => crate::ui::progress_line("Volume", &volume_name, "Removed"),
-					Err(e) if e.is_status(404) => {}
+				// See the network loop above: only a delete that found something
+				// may be reported, and a volume is the object where a false
+				// "Removed" is worst — it names data the operator believes is
+				// gone.
+				match self.client.delete_existed(&vol_path).await {
+					Ok(true) => crate::ui::progress_line("Volume", &volume_name, "Removed"),
+					Ok(false) => {}
 					Err(e) => {
 						tracing::warn!("could not remove volume {volume_name}: {e}");
 						first_err.get_or_insert(crate::error::ComposeError::Podman(e));

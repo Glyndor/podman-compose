@@ -10,7 +10,7 @@ fn run(args: &[&str]) -> std::process::Output {
 	Command::new(bin()).args(args).output().unwrap()
 }
 #[tokio::test]
-async fn cli_wait_prints_exit_code() {
+async fn cli_wait_names_the_container_and_its_exit_code() {
 	if super::podman().await.is_none() {
 		return;
 	}
@@ -27,11 +27,15 @@ async fn cli_wait_prints_exit_code() {
 	run(&["-f", c, "-p", &proj, "up", "-d"]);
 	let out = run(&["-f", c, "-p", &proj, "wait", "job"]);
 	assert!(out.status.success(), "wait failed: {:?}", out.stderr);
+	// One line per container, naming it (#1248). This used to assert a line
+	// that was exactly `"0"` — a bare code with nothing saying whose it was,
+	// which is what the change replaced.
+	let stdout = String::from_utf8_lossy(&out.stdout);
 	assert!(
-		String::from_utf8_lossy(&out.stdout)
+		stdout
 			.lines()
-			.any(|l| l.trim() == "0"),
-		"wait must print the exit code 0"
+			.any(|l| l.contains(&format!("{proj}-job-1")) && l.trim().ends_with('0')),
+		"wait must name the container and its exit code; got:\n{stdout}"
 	);
 	run(&["-f", c, "-p", &proj, "down"]);
 }
