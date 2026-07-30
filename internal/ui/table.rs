@@ -162,6 +162,15 @@ impl Table {
 		self.keys.push(Some(key));
 	}
 
+	/// Whether any column marker is set, i.e. whether rendering with colour could
+	/// differ from rendering without it.
+	///
+	/// Kept as one predicate so adding a marker is a single edit: the gate in
+	/// [`Table::print`] and the marker list cannot drift apart.
+	fn colours_any_column(&self) -> bool {
+		self.status_col.is_some() || self.identity_col.is_some() || self.caution_col.is_some()
+	}
+
 	/// Content-sized width of each column: the widest of the header and its cells,
 	/// bounded by the column cap (but never below the header width).
 	fn widths(&self) -> Vec<usize> {
@@ -244,8 +253,11 @@ impl Table {
 	pub fn print(&self) {
 		let widths = self.widths();
 		crate::ui::print_bold_header(&self.format_row(&self.headers, &widths, false));
-		let colour =
-			(self.status_col.is_some() || self.identity_col.is_some()) && super::stdout_colored();
+		// Every column marker that can tint a cell has to appear here, or a table
+		// that uses only that marker renders plain. `caution_col` was added
+		// without being listed, and it went unnoticed because its first caller —
+		// `volumes` — also sets `identity_col`, so the gate happened to be open.
+		let colour = self.colours_any_column() && super::stdout_colored();
 		for (i, row) in self.rows.iter().enumerate() {
 			let key = self.keys.get(i).and_then(Option::as_deref);
 			println!("{}", self.format_row_keyed(row, &widths, colour, key));
@@ -298,6 +310,15 @@ mod tests {
 		t.push(vec!["theirs".into(), "yes".into()]);
 		let rows = t.render();
 		assert!(rows[1].contains("yes"), "{rows:?}");
+	}
+
+	/// A table whose only marker is `caution_col` still colours. The gate in
+	/// `print` listed `status_col` and `identity_col` only, and the first caution
+	/// caller set `identity_col` too — so the omission was invisible.
+	#[test]
+	fn a_caution_only_table_still_colours() {
+		let t = Table::new(&["NAME", "EXTERNAL"]).caution_col(1);
+		assert!(t.colours_any_column());
 	}
 
 	/// Printable text is untouched.
