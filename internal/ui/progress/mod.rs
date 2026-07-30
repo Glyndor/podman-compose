@@ -19,6 +19,7 @@ mod live;
 mod row;
 
 pub use board::{Board, Kind, Row, State};
+pub use live::{Region, Target};
 
 /// How often the region repaints while nothing is happening, so the spinner
 /// turns during a long pull instead of looking like a hang. The same cadence
@@ -90,7 +91,7 @@ pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
 		.max()
 		.unwrap_or(0)
 		.clamp(12, 40);
-	let region = live_allowed().map(|_| live::Region::new());
+	let region = live_allowed().map(|_| live::Region::new(live::Target::Stderr));
 	let live = region.is_some();
 	if let Ok(mut slot) = SESSION.lock() {
 		*slot = Some(Session {

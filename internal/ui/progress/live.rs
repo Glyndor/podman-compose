@@ -41,18 +41,40 @@ fn cursor_up(n: usize) -> String {
 /// erased on the next call. That is what lets the board and `stats` share it —
 /// they disagree about everything except needing a block of text repainted in
 /// place.
+/// Which stream a region draws on.
+///
+/// Not always stderr. The lifecycle board goes there so stdout stays a clean
+/// pipe, but `stats` *is* its output — its table is the thing a user redirects —
+/// so its region belongs on stdout. Getting this wrong would put cursor moves in
+/// one stream and the content in the other.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+	Stdout,
+	Stderr,
+}
+
+impl Target {
+	fn write(self, text: &str) {
+		let mut out: Box<dyn Write> = match self {
+			Target::Stdout => Box::new(std::io::stdout()),
+			Target::Stderr => Box::new(std::io::stderr()),
+		};
+		let _ = out.write_all(text.as_bytes());
+		let _ = out.flush();
+	}
+}
+
 pub struct Region {
 	/// Rows painted by the previous repaint, to be walked back over.
 	painted: usize,
+	target: Target,
 }
 
 impl Region {
-	/// Start a region, hiding the cursor.
-	pub fn new() -> Self {
-		let mut err = std::io::stderr();
-		let _ = err.write_all(HIDE_CURSOR.as_bytes());
-		let _ = err.flush();
-		Self { painted: 0 }
+	/// Start a region on `target`, hiding the cursor.
+	pub fn new(target: Target) -> Self {
+		target.write(HIDE_CURSOR);
+		Self { painted: 0, target }
 	}
 
 	/// Walk back over the previous region, emit `scrollback` as permanent
@@ -76,18 +98,13 @@ impl Region {
 			out.push('\n');
 		}
 		self.painted = live.len();
-
-		let mut err = std::io::stderr();
-		let _ = err.write_all(out.as_bytes());
-		let _ = err.flush();
+		self.target.write(&out);
 	}
 }
 
 impl Drop for Region {
 	fn drop(&mut self) {
-		let mut err = std::io::stderr();
-		let _ = err.write_all(SHOW_CURSOR.as_bytes());
-		let _ = err.flush();
+		self.target.write(SHOW_CURSOR);
 	}
 }
 
