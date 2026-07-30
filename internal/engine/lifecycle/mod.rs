@@ -510,6 +510,11 @@ impl Engine {
 				return Ok(());
 			}
 		}
+		crate::ui::progress::start(
+			"Container",
+			&container_name,
+			if start { "Starting" } else { "Creating" },
+		);
 		self.create_and_start(&container_name, name, service, file, start)
 			.await?;
 		crate::ui::progress_line(
