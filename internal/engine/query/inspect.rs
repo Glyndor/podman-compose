@@ -69,8 +69,14 @@ impl Engine {
 
 		let mut json_rows: Vec<serde_json::Value> = Vec::new();
 		for name in &names {
-			let service = &file.services[name];
-			for container_name in self.live_replica_names(name, service).await? {
+			// Only running containers are asked for their process list, so a
+			// stopped replica is skipped before the call rather than after it
+			// fails: `/top` answers a non-running container with an HTTP 500, and
+			// the rule below — that a non-404 must surface — is deliberate and
+			// stays. Measured against `docker compose top` v5.1.3 on the same
+			// Podman socket: it omits a stopped service, prints the rest and exits
+			// 0 (#1250).
+			for container_name in self.running_replica_names(name).await? {
 				let path = format!(
 					"{API_PREFIX}/containers/{}/top",
 					urlencoded(&container_name),
@@ -94,10 +100,11 @@ impl Engine {
 						let processes = result.processes.clone().unwrap_or_default();
 						Self::print_process_table(&titles, &processes);
 					}
-					// A not-created container (404) is tolerated; any other failure
-					// (e.g. a stopped container's HTTP 500, or an unreachable socket)
-					// is a real error that must surface with a non-zero exit instead
-					// of being swallowed into a warning.
+					// A container removed between the listing above and this call
+					// (404) is tolerated; any other failure — an unreachable socket,
+					// a container that died in that same window — is a real error
+					// that must surface with a non-zero exit instead of being
+					// swallowed into a warning.
 					Err(e) if e.is_status(404) => {
 						tracing::debug!("top {container_name}: {e}")
 					}

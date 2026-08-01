@@ -31,20 +31,18 @@
 //!
 //! The pure compose→plan mapping lives in [`plan`].
 
+mod create;
 mod plan;
+mod remove;
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use crate::compose::types::{ComposeFile, Service};
-use crate::error::{ComposeError, Result};
+use crate::error::Result;
 use crate::libpod::types::container::Secret;
-use crate::libpod::{urlencoded, API_PREFIX};
 
-use plan::{
-	check_secret_size, collect_native_plans, host_file_secret_mode, is_podup_created_source,
-	scoped_name, Payload,
-};
+use plan::{collect_native_plans, host_file_secret_mode, Payload};
 
 use super::Engine;
 
@@ -92,204 +90,6 @@ impl Engine {
 		}
 		Ok(secrets)
 	}
-
-	/// Create the union of the `content:`/`environment:`/`file:` secrets and
-	/// configs declared across *all* services in the project, once, before the
-	/// per-level start loop — mirroring how [`Engine::create_networks`] and
-	/// [`Engine::create_volumes`] pre-create their resources.
-	///
-	/// Doing this up front fixes the race in which two services in the same
-	/// dependency level (started concurrently) both ran the non-atomic
-	/// delete-then-create for the same project-scoped secret name, so one could
-	/// delete the secret the other had just created. The same scoped name is
-	/// created exactly once here (later services share it), and each created
-	/// secret carries the `podup.project=<proj>` label so the label-guarded
-	/// teardown on `down` still only removes secrets podup owns.
-	pub(super) async fn create_project_secrets(&self, file: &ComposeFile) -> Result<()> {
-		for (name, payload) in collect_payload_union(&self.project, file, &self.base_dir)? {
-			let bytes = match payload {
-				Payload::Inline(bytes) => bytes,
-				// Read here rather than in the planner, which stays free of I/O so
-				// the compose→plan mapping remains unit-testable. The cap is the
-				// same bounded read the compose-adjacent files get; Podman's own
-				// 512 kB secret limit is enforced right after, in `create_secret`.
-				Payload::File(path) => crate::filesystem::read_capped(&path).map_err(|e| {
-					ComposeError::Unsupported(format!(
-						"secret/config source {} could not be read: {e}",
-						path.display()
-					))
-				})?,
-			};
-			self.create_secret(&name, &bytes).await?;
-		}
-		Ok(())
-	}
-
-	/// Create a Podman-native secret named `name` holding `payload`, labelled
-	/// `podup.project=<proj>` so it can be cleaned up on `down`. The payload size
-	/// is checked up front to turn Podman's opaque 500 into a clear message.
-	///
-	/// Idempotent across re-`up`s: rather than `replace=true` (which some Podman
-	/// 5.x builds reject when the secret does not yet exist — the internal delete
-	/// fails with "no secret data with ID"), the existing secret of this name is
-	/// removed first (a 404 is fine) and then created fresh.
-	async fn create_secret(&self, name: &str, payload: &[u8]) -> Result<()> {
-		check_secret_size(name, payload.len())?;
-		// Guard the delete-then-create: if a secret of this name already exists and
-		// is not labelled as ours, refuse rather than clobber a foreign secret.
-		// Our own secret (or a 404) is replaced fresh, keeping re-`up` idempotent.
-		let inspect = format!("{API_PREFIX}/secrets/{}/json", urlencoded(name));
-		match self.client.get_json::<serde_json::Value>(&inspect).await {
-			Ok(info) => {
-				let owned = info
-					.get("Spec")
-					.and_then(|spec| spec.get("Labels"))
-					.and_then(|labels| labels.get("podup.project"))
-					.and_then(|v| v.as_str())
-					== Some(self.project.as_str());
-				if !owned {
-					return Err(ComposeError::Unsupported(format!(
-						"a secret named '{name}' already exists and is not labelled \
-						 podup.project={} — refusing to overwrite a secret podup did \
-						 not create",
-						self.project
-					)));
-				}
-			}
-			Err(e) if e.is_status(404) => {}
-			Err(e) => return Err(ComposeError::Podman(e)),
-		}
-		let delete_path = format!("{API_PREFIX}/secrets/{}", urlencoded(name));
-		self.client
-			.delete_ok(&delete_path)
-			.await
-			.map_err(ComposeError::Podman)?;
-		let labels = serde_json::json!({ "podup.project": self.project }).to_string();
-		let path = format!(
-			"{API_PREFIX}/secrets/create?name={}&labels={}",
-			urlencoded(name),
-			urlencoded(&labels),
-		);
-		// The response is `{"ID": "..."}`; we don't need the id, only success.
-		self.client
-			.post_bytes_json::<serde_json::Value>(
-				&path,
-				bytes::Bytes::copy_from_slice(payload),
-				"application/octet-stream",
-			)
-			.await
-			.map(|_| ())
-			.map_err(ComposeError::Podman)
-	}
-
-	/// Remove the project-scoped native secrets created on `up` for the
-	/// `content:`/`environment:`/`file:` secrets and configs, mirroring the volume
-	/// and network teardown on `down`. `external:` references own no podup-created
-	/// secret and are left untouched; a missing secret is ignored (`delete_ok`
-	/// swallows a 404). Best-effort: a delete failure is logged, not fatal, so the
-	/// rest of teardown proceeds.
-	pub(super) async fn remove_internal_secrets(&self, file: &ComposeFile) -> Result<()> {
-		for (name, def) in &file.secrets {
-			if is_podup_created_source(
-				def.external,
-				def.content.as_deref(),
-				def.environment.as_deref(),
-				def.file.as_deref(),
-			) {
-				self.delete_secret(&scoped_name(&self.project, "secret", name))
-					.await;
-			}
-		}
-		for (name, def) in &file.configs {
-			if is_podup_created_source(
-				def.external,
-				def.content.as_deref(),
-				def.environment.as_deref(),
-				def.file.as_deref(),
-			) {
-				self.delete_secret(&scoped_name(&self.project, "config", name))
-					.await;
-			}
-		}
-		// Catch orphans: a secret podup created on a previous `up` whose compose key
-		// was since renamed/removed (or a `down` run without the original file) is
-		// not reached by the loops above. Sweep every secret carrying this project's
-		// label and remove it, so no podup-created secret is left behind.
-		for name in self.list_project_secret_names().await {
-			self.delete_secret(&name).await;
-		}
-		Ok(())
-	}
-
-	/// Names of all native secrets labelled `podup.project=<proj>` — the secrets
-	/// podup created for this project. libpod's `/secrets/json` rejects a `label`
-	/// filter (HTTP 500 `invalid filter "label"`), so the full list is fetched and
-	/// filtered client-side by the `podup.project` label. Best-effort: a list
-	/// failure yields an empty set so teardown still proceeds via the
-	/// compose-driven deletes above.
-	async fn list_project_secret_names(&self) -> Vec<String> {
-		let path = format!("{API_PREFIX}/secrets/json");
-		match self.client.get_json::<Vec<serde_json::Value>>(&path).await {
-			Ok(list) => list
-				.iter()
-				.filter_map(|s| {
-					let spec = s.get("Spec")?;
-					let owned = spec
-						.get("Labels")
-						.and_then(|l| l.get("podup.project"))
-						.and_then(|v| v.as_str())
-						== Some(self.project.as_str());
-					if owned {
-						spec.get("Name")
-							.and_then(|n| n.as_str())
-							.map(str::to_string)
-					} else {
-						None
-					}
-				})
-				.collect(),
-			Err(e) => {
-				tracing::debug!("could not list project secrets for orphan cleanup: {e}");
-				Vec::new()
-			}
-		}
-	}
-
-	/// Delete a project-scoped secret, but only after confirming it carries our
-	/// `podup.project=<proj>` label — so a same-named secret the user created by
-	/// hand (and which podup never created) is never destroyed on `down`. A
-	/// missing secret (404) is a no-op.
-	async fn delete_secret(&self, name: &str) {
-		let inspect = format!("{API_PREFIX}/secrets/{}/json", urlencoded(name));
-		match self.client.get_json::<serde_json::Value>(&inspect).await {
-			Ok(info) => {
-				let owned = info
-					.get("Spec")
-					.and_then(|spec| spec.get("Labels"))
-					.and_then(|labels| labels.get("podup.project"))
-					.and_then(|v| v.as_str())
-					== Some(self.project.as_str());
-				if !owned {
-					tracing::warn!(
-						"secret {name} is not labelled podup.project={} — \
-						 leaving it untouched (not created by podup)",
-						self.project
-					);
-					return;
-				}
-			}
-			Err(e) if e.is_status(404) => return,
-			Err(e) => {
-				tracing::warn!("could not inspect secret {name} before removal: {e}");
-				return;
-			}
-		}
-		let path = format!("{API_PREFIX}/secrets/{}", urlencoded(name));
-		match self.client.delete_ok(&path).await {
-			Ok(()) => tracing::info!("removed secret {name}"),
-			Err(e) => tracing::warn!("could not remove secret {name}: {e}"),
-		}
-	}
 }
 
 /// Collect the project's podup-created secret/config payloads, deduplicated by
@@ -314,6 +114,33 @@ fn collect_payload_union(
 		}
 	}
 	Ok(payloads)
+}
+
+/// Helpers the `create` and `remove` test modules share.
+#[cfg(test)]
+pub(super) mod tests_support {
+	use super::*;
+	#[cfg(unix)]
+	use crate::engine::fake_podman;
+
+	/// A compose file with `n` `content:` secrets named `s1..sn`, all on one
+	/// service — the shape the union deduplicates and then fans out over.
+	#[cfg(unix)]
+	pub(in crate::engine::secrets) fn file_with_content_secrets(n: usize) -> ComposeFile {
+		let refs: String = (1..=n).map(|i| format!("      - s{i}\n")).collect();
+		let defs: String = (1..=n)
+			.map(|i| format!("  s{i}: {{content: \"v{i}\"}}\n"))
+			.collect();
+		crate::compose::parse_str(&format!(
+			"services:\n  app:\n    image: alpine\n    secrets:\n{refs}secrets:\n{defs}"
+		))
+		.expect("fixture compose file should parse")
+	}
+
+	#[cfg(unix)]
+	pub(in crate::engine::secrets) fn engine_on(fake: &fake_podman::FakePodman) -> Engine {
+		Engine::with_base_dir(fake.client(), "proj".to_string(), std::env::temp_dir())
+	}
 }
 
 #[cfg(test)]

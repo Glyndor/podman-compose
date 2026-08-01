@@ -363,6 +363,28 @@ impl Engine {
 			live
 		})
 	}
+
+	/// The names of a service's containers that are actually **running**, in the
+	/// same ascending `-1, -2, -3, ...` order as [`Self::live_replica_names`].
+	///
+	/// For the query commands that only mean anything against a live process
+	/// (`top`), where a stopped replica has to be skipped rather than asked: the
+	/// libpod endpoints answer a non-running container with an HTTP 500, which
+	/// callers must not have to tell apart from a real failure by parsing its
+	/// message. Unlike [`Self::live_replica_names`] there is no fallback to
+	/// statically-derived names — a service that was never created has nothing
+	/// running, so it yields an empty vec instead of a phantom name.
+	pub(crate) async fn running_replica_names(&self, service_name: &str) -> Result<Vec<String>> {
+		let mut running: Vec<String> = self
+			.live_service_containers(service_name)
+			.await?
+			.into_iter()
+			.filter(|c| c.state.eq_ignore_ascii_case("running"))
+			.map(|c| c.name)
+			.collect();
+		sort_replica_names(&mut running);
+		Ok(running)
+	}
 }
 
 #[cfg(test)]
@@ -474,6 +496,70 @@ mod tests {
 				"proj-web-2".to_string(),
 				"proj-web-3".to_string(),
 			]
+		);
+	}
+
+	/// #1250: `top` aborted on a project with a stopped service because it asked
+	/// every container that exists for its process list, and libpod answers a
+	/// non-running one with an HTTP 500. The exited replica must be dropped
+	/// before the call, and the survivors must keep the ascending order every
+	/// other by-service command produces — so this asserts both, on a listing
+	/// that is shuffled and mixed-state at once.
+	#[tokio::test]
+	#[cfg(unix)]
+	async fn running_replica_names_drops_non_running_and_keeps_ascending_order() {
+		let containers = r#"[
+			{"Names":["/proj-web-3"],"State":"running"},
+			{"Names":["/proj-web-4"],"State":"created"},
+			{"Names":["/proj-web-1"],"State":"running"},
+			{"Names":["/proj-web-5"],"State":"paused"},
+			{"Names":["/proj-web-2"],"State":"exited"}
+		]"#;
+		let fake = fake_podman::start(move |method, target| {
+			if method == "GET" && target.contains("/containers/json") {
+				(200, containers.to_string())
+			} else {
+				(404, r#"{"message":"not found"}"#.to_string())
+			}
+		});
+		let e = engine_with(fake.client(), "proj");
+
+		let names = e
+			.running_replica_names("web")
+			.await
+			.expect("running_replica_names should succeed");
+
+		assert_eq!(
+			names,
+			vec!["proj-web-1".to_string(), "proj-web-3".to_string()],
+			"only the running replicas, in ascending order"
+		);
+	}
+
+	/// The sibling half of the rule above: a service that exists in the compose
+	/// file but was never created has nothing running, so `top` must render
+	/// nothing for it rather than fall back to a statically-derived name and
+	/// then have to swallow the 404 that name earns.
+	#[tokio::test]
+	#[cfg(unix)]
+	async fn running_replica_names_does_not_fall_back_to_static_names() {
+		let fake = fake_podman::start(|method, target| {
+			if method == "GET" && target.contains("/containers/json") {
+				(200, "[]".to_string())
+			} else {
+				(404, r#"{"message":"not found"}"#.to_string())
+			}
+		});
+		let e = engine_with(fake.client(), "proj");
+
+		let names = e
+			.running_replica_names("web")
+			.await
+			.expect("running_replica_names should succeed");
+
+		assert!(
+			names.is_empty(),
+			"a never-created service yields no names, got {names:?}"
 		);
 	}
 
