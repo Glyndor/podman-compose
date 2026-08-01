@@ -24,7 +24,7 @@ use super::targets::{stop_deadline, stop_timeout_param};
 /// concurrently. Services within a dependency level have no ordering between
 /// them, so they run in parallel; the cap keeps a very wide compose file from
 /// opening an unbounded number of simultaneous libpod connections at once.
-pub(super) const MAX_LIFECYCLE_CONCURRENCY: usize = 16;
+pub(in crate::engine) const MAX_LIFECYCLE_CONCURRENCY: usize = 16;
 
 /// Run a batch of independent per-service futures concurrently, bounded by
 /// [`MAX_LIFECYCLE_CONCURRENCY`], and return their outputs in the *input*
@@ -34,6 +34,14 @@ pub(super) const MAX_LIFECYCLE_CONCURRENCY: usize = 16;
 /// (`Result<()>`, reduced via [`first_error`]) and a best-effort one that
 /// never fails (`()`, e.g. the image-prefetch stage) share this one bounded
 /// dispatcher.
+///
+/// Not reachable from every stage that wants a fan-out: this is built on
+/// `buffer_unordered`, whose `FuturesUnordered` is `Send` only if its future is
+/// `Send` for *every* lifetime. A caller whose futures borrow `&self` therefore
+/// acquires a higher-ranked bound that propagates out to its own callers, which
+/// is why the secret pre-creation stage (#1219) chunks `join_all` against
+/// [`MAX_LIFECYCLE_CONCURRENCY`] instead of calling this. The cap is shared; the
+/// dispatcher is not.
 pub(super) async fn join_bounded<F, T>(futs: impl IntoIterator<Item = F>) -> Vec<T>
 where
 	F: std::future::Future<Output = T>,
@@ -55,7 +63,7 @@ where
 /// Reduce a level's per-service results to the first error in service order, so
 /// one failing service is still reported clearly while the rest of the level is
 /// allowed to complete.
-pub(super) fn first_error(results: Vec<Result<()>>) -> Option<ComposeError> {
+pub(in crate::engine) fn first_error(results: Vec<Result<()>>) -> Option<ComposeError> {
 	results.into_iter().find_map(Result::err)
 }
 
