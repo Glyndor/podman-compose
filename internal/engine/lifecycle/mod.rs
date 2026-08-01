@@ -3,7 +3,11 @@
 mod commands;
 mod down_label;
 mod images;
-mod parallel;
+// Visible within the engine, not beyond it: the secret pre-creation stage
+// (#1219) fans out against the same `MAX_LIFECYCLE_CONCURRENCY` ceiling rather
+// than growing a second concurrency limit that could silently drift from this
+// one.
+pub(in crate::engine) mod parallel;
 mod prefetch;
 mod readiness;
 mod run;
