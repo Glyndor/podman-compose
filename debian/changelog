@@ -1,3 +1,28 @@
+podup (3.4.1) unstable; urgency=medium
+
+  Fixed
+
+  * `podup top` no longer aborts when a service has already stopped. A project
+    where anything has run to completion — a `migrate` that exits once is the
+    everyday shape — used to lose the services `top` had not reached yet and
+    exit non-zero. It now skips the stopped container and carries on, matching
+    `docker compose top`, which was measured against the same Podman socket.
+
+  Performance
+
+  * Creating a project's secrets makes fewer round trips. A secret that does not
+    exist is no longer deleted before it is created, and the per-secret work now
+    runs concurrently rather than in series. Measured on a six-secret project, a
+    cold `up` drops from 25 API requests to 19.
+
+  * Tearing them down makes fewer still. `down` asked Podman for each secret's
+    ownership label individually and then fetched the whole labelled list anyway;
+    it now takes the list first and uses it. Measured on the same project,
+    `down -v` drops from 18 requests to 12. A secret podup did not create is
+    still never removed.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sat, 01 Aug 2026 15:25:21 -0500
+
 podup (3.4.0) unstable; urgency=medium
 
   Incompatible changes
