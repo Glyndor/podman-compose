@@ -42,49 +42,64 @@ Each row carries **one unit**, picked from the largest value in that row and
 applied to every tool in it, so the tools in a row stay directly comparable.
 `bench/results/raw.csv` and `summary.json` keep every figure in seconds.
 
-Measured on podup **3.2.1** installed from apt — the same binary a user gets,
-not a local build — against podman-compose 1.3.0 and docker-compose 5.1.3 on
-rootless Podman 5.4.2, 16 cores, with the tools pinned to cores 2-9. The host
-was otherwise idle this time, unlike the 3.2.0 run.
+Measured on podup **3.4.1** built from the release tag, against
+podman-compose 1.5.0 and docker-compose 5.1.3 on rootless Podman 5.7.0, 16
+cores, CPU governor pinned to `performance`, tools pinned to cores 2-9, host
+otherwise idle with no virtual machines running. 1044 timed runs, none failed.
 
-**Do not read this table against the 3.2.0 one as a release comparison.** Two
-things changed between them, the instrument and the version, so a difference
-cannot be attributed to either. Compare releases by running them head to head,
-as described below.
+**Do not read this table against the 3.2.1 one as a release comparison.** Three
+things changed between the two runs, not one: podup 3.2.1 to 3.4.1, Podman 5.4.2
+to 5.7.0, and podman-compose 1.3.0 to 1.5.0. A difference cannot be attributed to
+any one of them.
+
+What can be said is bounded by the component that did **not** change.
+`docker-compose` is 5.1.3 in both runs, and its median moved **+1.0%** across the
+29 comparable rows, so the environment is comparable between them. Against that
+reference podup moved **+0.8%** — flat, which is the useful result: 3.4.1 landed
+two concurrency changes on the hot path of `up`, and a reader is entitled to ask
+whether they cost anything. podman-compose moved +10.4%, but its own version
+changed too, so that figure is confounded and is not evidence about the engine.
+
+Two rows deserve a caveat rather than a reading. `multi-healthcheck up` moved
+about +55% for podup and +68% for podman-compose; it is gated on a
+`depends_on: service_healthy` poll, so it measures healthcheck interval
+granularity more than tool speed. And `running-ops ps` at 8.7 ms sits close
+enough to process-spawn cost that a few tenths of a millisecond read as double
+digits in percent.
 
 ## Wall-clock (lower is better)
 
 | scenario | op | podman-compose | podup | docker-compose |
 |---|---|---|---|---|
-| single | up | 389.9 ms (p95 416.0, sd 8.8) | 96.0 ms (p95 99.1, sd 3.6) | 119.7 ms (p95 128.2, sd 6.1) |
-| single | down | 384.5 ms (p95 407.2, sd 11.3) | 134.0 ms (p95 152.1, sd 11.0) | 174.3 ms (p95 271.8, sd 34.5) |
-| multi-healthcheck | up | 609.9 ms (p95 647.7, sd 16.3) | 231.4 ms (p95 411.0, sd 84.1) | 769.4 ms (p95 818.0, sd 41.9) |
-| multi-healthcheck | down | 507.7 ms (p95 549.8, sd 18.5) | 242.0 ms (p95 315.4, sd 30.9) | 322.1 ms (p95 441.8, sd 51.9) |
-| deep-chain | up | 1.220 s (p95 1.553, sd 0.122) | 0.393 s (p95 0.448, sd 0.021) | 0.872 s (p95 0.904, sd 0.017) |
-| deep-chain | down | 0.738 s (p95 1.082, sd 0.146) | 0.395 s (p95 0.412, sd 0.009) | 0.400 s (p95 0.454, sd 0.027) |
-| wide-level | up | 6.978 s (p95 7.035, sd 0.054) | 1.098 s (p95 1.144, sd 0.023) | 1.611 s (p95 1.871, sd 0.112) |
-| wide-level | down | 4.505 s (p95 4.932, sd 0.405) | 1.794 s (p95 2.224, sd 0.196) | 2.440 s (p95 3.356, sd 0.501) |
-| scale | up | 393.9 ms (p95 452.2, sd 23.1) | 197.5 ms (p95 212.0, sd 10.3) | 400.1 ms (p95 413.7, sd 9.9) |
-| scale | down | 398.4 ms (p95 448.9, sd 21.8) | 269.9 ms (p95 312.0, sd 17.3) | 295.3 ms (p95 362.4, sd 23.0) |
-| network-ipam | up | 545.5 ms (p95 557.9, sd 7.2) | 113.6 ms (p95 125.4, sd 6.0) | 142.2 ms (p95 154.7, sd 8.3) |
-| network-ipam | down | 470.3 ms (p95 478.3, sd 6.1) | 182.4 ms (p95 424.2, sd 96.5) | 194.5 ms (p95 220.4, sd 12.5) |
-| volume-heavy | up | 879.2 ms (p95 973.8, sd 33.1) | 108.9 ms (p95 117.9, sd 6.6) | 131.0 ms (p95 140.7, sd 5.8) |
-| volume-heavy | down | 565.8 ms (p95 584.0, sd 9.8) | 148.1 ms (p95 169.6, sd 9.2) | 200.9 ms (p95 223.0, sd 12.0) |
-| secrets | up | 425.4 ms (p95 465.4, sd 13.8) | 104.0 ms (p95 116.1, sd 5.4) | 122.3 ms (p95 140.2, sd 7.4) |
-| secrets | down | 408.9 ms (p95 417.2, sd 9.3) | 140.0 ms (p95 162.1, sd 11.1) | 161.7 ms (p95 202.3, sd 15.6) |
-| warm-restart | warm up | 343.1 ms (p95 396.7, sd 20.0) | 36.7 ms (p95 44.4, sd 4.0) | 50.6 ms (p95 59.8, sd 4.1) |
-| many-services | up | 2.214 s (p95 2.300, sd 0.048) | 0.391 s (p95 0.424, sd 0.015) | 0.499 s (p95 0.530, sd 0.014) |
-| many-services | down | 1.370 s (p95 1.445, sd 0.065) | 0.551 s (p95 0.610, sd 0.049) | 0.593 s (p95 0.665, sd 0.072) |
-| running-ops | ps | 125.2 ms (p95 139.8, sd 5.1) | 7.1 ms (p95 8.3, sd 0.5) | 24.0 ms (p95 35.2, sd 3.5) |
-| running-ops | logs | 142.8 ms (p95 165.8, sd 8.9) | 20.1 ms (p95 23.0, sd 1.8) | 37.6 ms (p95 44.2, sd 3.3) |
-| running-ops | exec | 196.8 ms (p95 239.5, sd 14.3) | 60.8 ms (p95 72.6, sd 5.3) | 75.1 ms (p95 79.2, sd 3.8) |
-| running-ops | restart | 287.0 ms (p95 317.7, sd 10.9) | 166.8 ms (p95 177.9, sd 7.4) | 177.5 ms (p95 200.8, sd 8.7) |
-| wide-running-ops | ps | 133.6 ms (p95 148.0, sd 6.2) | 11.1 ms (p95 11.7, sd 0.3) | 40.1 ms (p95 58.5, sd 6.1) |
-| wide-running-ops | logs | 150.1 ms (p95 164.0, sd 6.6) | 19.8 ms (p95 21.4, sd 1.1) | 37.4 ms (p95 59.2, sd 6.8) |
-| wide-running-ops | exec | 198.3 ms (p95 208.0, sd 5.3) | 62.9 ms (p95 70.4, sd 5.0) | 77.4 ms (p95 91.2, sd 5.8) |
-| wide-running-ops | restart | 245.4 ms (p95 261.1, sd 12.5) | 117.6 ms (p95 128.0, sd 6.3) | 147.4 ms (p95 168.0, sd 9.8) |
-| config-heavy | config | 117.5 ms (p95 126.4, sd 4.5) | 9.0 ms (p95 9.4, sd 0.2) | 46.3 ms (p95 47.7, sd 1.0) |
-| build | build | 352.7 ms (p95 379.9, sd 15.8) | 215.0 ms (p95 235.9, sd 8.8) | 286.0 ms (p95 322.3, sd 13.9) |
+| single | up | 477.5 ms (p95 540.2, sd 24.8) | 99.5 ms (p95 109.9, sd 5.6) | 125.6 ms (p95 132.2, sd 5.6) |
+| single | down | 453.3 ms (p95 483.6, sd 15.5) | 138.7 ms (p95 164.9, sd 11.1) | 157.9 ms (p95 170.8, sd 7.7) |
+| multi-healthcheck | up | 1.023 s (p95 1.076, sd 0.024) | 0.359 s (p95 0.388, sd 0.070) | 0.716 s (p95 0.733, sd 0.010) |
+| multi-healthcheck | down | 594.1 ms (p95 668.2, sd 43.3) | 254.0 ms (p95 309.4, sd 25.8) | 279.7 ms (p95 309.0, sd 16.0) |
+| deep-chain | up | 1.839 s (p95 1.963, sd 0.077) | 0.334 s (p95 0.360, sd 0.014) | 0.870 s (p95 0.887, sd 0.014) |
+| deep-chain | down | 0.847 s (p95 1.056, sd 0.094) | 0.390 s (p95 0.418, sd 0.009) | 0.404 s (p95 0.429, sd 0.017) |
+| wide-level | up | 9.672 s (p95 9.967, sd 0.125) | 1.130 s (p95 1.253, sd 0.048) | 1.571 s (p95 1.746, sd 0.065) |
+| wide-level | down | 4.771 s (p95 5.319, sd 0.194) | 1.636 s (p95 1.899, sd 0.144) | 2.169 s (p95 2.874, sd 0.293) |
+| scale | up | 470.6 ms (p95 513.4, sd 21.1) | 194.5 ms (p95 212.7, sd 10.1) | 402.2 ms (p95 424.9, sd 13.9) |
+| scale | down | 382.6 ms (p95 403.9, sd 11.7) | 270.9 ms (p95 319.1, sd 22.3) | 285.1 ms (p95 348.7, sd 22.0) |
+| network-ipam | up | 716.5 ms (p95 747.6, sd 24.2) | 114.9 ms (p95 135.9, sd 6.9) | 150.7 ms (p95 154.4, sd 3.2) |
+| network-ipam | down | 569.6 ms (p95 602.8, sd 32.3) | 172.8 ms (p95 203.2, sd 15.0) | 202.6 ms (p95 226.1, sd 13.0) |
+| volume-heavy | up | 0.993 s (p95 1.087, sd 0.034) | 0.107 s (p95 0.111, sd 0.004) | 0.139 s (p95 0.183, sd 0.014) |
+| volume-heavy | down | 624.8 ms (p95 647.1, sd 12.8) | 144.3 ms (p95 169.3, sd 13.5) | 197.0 ms (p95 227.8, sd 9.8) |
+| secrets | up | 542.2 ms (p95 576.6, sd 19.6) | 104.8 ms (p95 113.3, sd 5.4) | 132.2 ms (p95 164.8, sd 11.1) |
+| secrets | down | 463.5 ms (p95 514.2, sd 20.9) | 144.2 ms (p95 167.0, sd 14.6) | 164.7 ms (p95 178.0, sd 8.5) |
+| warm-restart | warm up | 226.9 ms (p95 254.4, sd 13.2) | 37.9 ms (p95 47.4, sd 4.6) | 63.1 ms (p95 99.9, sd 14.0) |
+| many-services | up | 2.925 s (p95 3.090, sd 0.091) | 0.390 s (p95 0.416, sd 0.017) | 0.511 s (p95 0.577, sd 0.023) |
+| many-services | down | 1.511 s (p95 1.616, sd 0.040) | 0.552 s (p95 0.693, sd 0.068) | 0.559 s (p95 0.655, sd 0.060) |
+| running-ops | ps | 122.6 ms (p95 134.7, sd 5.1) | 8.7 ms (p95 9.3, sd 0.5) | 24.8 ms (p95 49.6, sd 7.6) |
+| running-ops | logs | 139.9 ms (p95 147.9, sd 3.5) | 22.4 ms (p95 28.3, sd 2.8) | 37.7 ms (p95 53.7, sd 5.1) |
+| running-ops | exec | 184.9 ms (p95 192.9, sd 3.4) | 60.0 ms (p95 69.0, sd 3.8) | 72.6 ms (p95 84.1, sd 4.5) |
+| running-ops | restart | 273.7 ms (p95 309.3, sd 15.7) | 147.2 ms (p95 165.5, sd 8.0) | 181.7 ms (p95 198.9, sd 10.6) |
+| wide-running-ops | ps | 131.8 ms (p95 139.1, sd 4.1) | 12.3 ms (p95 13.8, sd 0.8) | 42.9 ms (p95 85.8, sd 13.1) |
+| wide-running-ops | logs | 142.4 ms (p95 156.9, sd 5.4) | 22.5 ms (p95 27.7, sd 2.0) | 41.9 ms (p95 74.2, sd 10.9) |
+| wide-running-ops | exec | 191.2 ms (p95 199.6, sd 3.8) | 63.3 ms (p95 75.1, sd 5.1) | 71.9 ms (p95 81.4, sd 4.2) |
+| wide-running-ops | restart | 242.5 ms (p95 258.7, sd 10.9) | 114.8 ms (p95 133.8, sd 8.4) | 147.9 ms (p95 165.0, sd 9.7) |
+| config-heavy | config | 108.1 ms (p95 114.0, sd 2.4) | 9.4 ms (p95 9.8, sd 0.2) | 48.8 ms (p95 53.8, sd 3.3) |
+| build | build | 377.9 ms (p95 407.1, sd 16.6) | 239.2 ms (p95 260.2, sd 9.6) | 318.1 ms (p95 441.6, sd 45.0) |
 
 ## Memory + CPU per command (peak RSS / CPU time, median)
 
@@ -96,35 +111,35 @@ Go binary talking to a socket, like podup.
 
 | scenario | op | podman-compose | podup | docker-compose |
 |---|---|---|---|---|
-| single | up | 53.2 MiB / 431.7 ms | 7.7 MiB / 5.5 ms | 28.7 MiB / 29.4 ms |
-| single | down | 50.7 MiB / 361.6 ms | 7.5 MiB / 5.5 ms | 28.6 MiB / 27.5 ms |
-| multi-healthcheck | up | 53.8 MiB / 631.3 ms | 7.7 MiB / 6.9 ms | 29.4 MiB / 43.4 ms |
-| multi-healthcheck | down | 50.8 MiB / 475.3 ms | 7.5 MiB / 5.9 ms | 28.5 MiB / 35.9 ms |
-| deep-chain | up | 54.0 MiB / 1.237 s | 7.8 MiB / 0.009 s | 29.1 MiB / 0.039 s |
-| deep-chain | down | 51.1 MiB / 820.4 ms | 7.6 MiB / 7.2 ms | 28.5 MiB / 33.0 ms |
-| wide-level | up | 54.3 MiB / 6.782 s | 8.5 MiB / 0.033 s | 33.6 MiB / 0.093 s |
-| wide-level | down | 51.6 MiB / 5.279 s | 7.8 MiB / 0.021 s | 30.2 MiB / 0.068 s |
-| scale | up | 53.3 MiB / 432.4 ms | 7.9 MiB / 7.4 ms | 29.6 MiB / 36.1 ms |
-| scale | down | 50.9 MiB / 366.8 ms | 7.4 MiB / 6.8 ms | 28.6 MiB / 30.3 ms |
-| network-ipam | up | 53.6 MiB / 581.1 ms | 7.8 MiB / 6.2 ms | 29.2 MiB / 31.0 ms |
-| network-ipam | down | 50.8 MiB / 465.3 ms | 7.5 MiB / 5.9 ms | 28.6 MiB / 27.8 ms |
-| volume-heavy | up | 53.5 MiB / 1.047 s | 7.7 MiB / 0.006 s | 28.9 MiB / 0.032 s |
-| volume-heavy | down | 51.0 MiB / 564.1 ms | 7.4 MiB / 6.3 ms | 29.1 MiB / 32.1 ms |
-| secrets | up | 53.1 MiB / 438.0 ms | 7.7 MiB / 8.0 ms | 28.8 MiB / 31.9 ms |
-| secrets | down | 50.7 MiB / 364.9 ms | 7.6 MiB / 6.6 ms | 28.6 MiB / 28.8 ms |
-| warm-restart | warm up | 51.6 MiB / 423.2 ms | 7.8 MiB / 6.2 ms | 29.2 MiB / 31.3 ms |
-| many-services | up | 53.9 MiB / 2.201 s | 7.9 MiB / 0.012 s | 30.1 MiB / 0.049 s |
-| many-services | down | 50.8 MiB / 1.713 s | 7.7 MiB / 0.009 s | 28.8 MiB / 0.039 s |
-| running-ops | ps | 49.6 MiB / 142.3 ms | 7.3 MiB / 4.2 ms | 28.7 MiB / 24.3 ms |
-| running-ops | logs | 67.5 MiB / 143.7 ms | 7.4 MiB / 4.4 ms | 28.2 MiB / 26.5 ms |
-| running-ops | exec | 48.9 MiB / 152.0 ms | 7.7 MiB / 4.7 ms | 26.8 MiB / 17.8 ms |
-| running-ops | restart | 49.3 MiB / 191.1 ms | 7.5 MiB / 4.6 ms | 28.4 MiB / 26.0 ms |
-| wide-running-ops | ps | 50.6 MiB / 154.0 ms | 7.3 MiB / 4.7 ms | 29.2 MiB / 38.0 ms |
-| wide-running-ops | logs | 67.6 MiB / 148.6 ms | 7.5 MiB / 4.6 ms | 28.6 MiB / 30.7 ms |
-| wide-running-ops | exec | 48.9 MiB / 153.0 ms | 7.5 MiB / 5.0 ms | 26.8 MiB / 18.4 ms |
-| wide-running-ops | restart | 49.5 MiB / 190.5 ms | 7.4 MiB / 4.8 ms | 28.6 MiB / 33.0 ms |
-| config-heavy | config | 37.6 MiB / 120.5 ms | 7.4 MiB / 7.8 ms | 29.0 MiB / 60.8 ms |
-| build | build | 62.8 MiB / 386.4 ms | 7.6 MiB / 5.6 ms | 29.4 MiB / 29.8 ms |
+| single | up | 52.9 MiB / 469.7 ms | 8.1 MiB / 6.0 ms | 29.8 MiB / 30.4 ms |
+| single | down | 51.4 MiB / 393.1 ms | 7.9 MiB / 5.9 ms | 29.3 MiB / 26.5 ms |
+| multi-healthcheck | up | 52.8 MiB / 698.0 ms | 8.2 MiB / 6.9 ms | 30.1 MiB / 32.5 ms |
+| multi-healthcheck | down | 51.7 MiB / 509.5 ms | 7.9 MiB / 6.2 ms | 29.4 MiB / 27.7 ms |
+| deep-chain | up | 53.1 MiB / 1.386 s | 8.2 MiB / 0.008 s | 30.0 MiB / 0.037 s |
+| deep-chain | down | 51.8 MiB / 866.4 ms | 7.9 MiB / 7.5 ms | 29.5 MiB / 31.4 ms |
+| wide-level | up | 53.9 MiB / 7.659 s | 8.6 MiB / 0.025 s | 34.5 MiB / 0.092 s |
+| wide-level | down | 52.0 MiB / 5.541 s | 8.1 MiB / 0.020 s | 31.2 MiB / 0.067 s |
+| scale | up | 52.6 MiB / 503.4 ms | 8.1 MiB / 7.5 ms | 29.7 MiB / 36.7 ms |
+| scale | down | 51.4 MiB / 384.5 ms | 7.7 MiB / 6.8 ms | 29.7 MiB / 31.8 ms |
+| network-ipam | up | 53.0 MiB / 648.5 ms | 8.2 MiB / 6.2 ms | 30.0 MiB / 31.7 ms |
+| network-ipam | down | 51.5 MiB / 506.3 ms | 7.9 MiB / 6.2 ms | 29.6 MiB / 28.4 ms |
+| volume-heavy | up | 52.8 MiB / 1.155 s | 8.2 MiB / 0.006 s | 29.9 MiB / 0.033 s |
+| volume-heavy | down | 51.6 MiB / 617.8 ms | 8.0 MiB / 6.6 ms | 30.2 MiB / 31.6 ms |
+| secrets | up | 52.6 MiB / 477.6 ms | 8.2 MiB / 7.3 ms | 29.6 MiB / 32.8 ms |
+| secrets | down | 51.6 MiB / 394.1 ms | 7.9 MiB / 6.3 ms | 29.4 MiB / 28.2 ms |
+| warm-restart | warm up | 50.0 MiB / 261.9 ms | 8.1 MiB / 5.8 ms | 30.0 MiB / 33.8 ms |
+| many-services | up | 53.7 MiB / 2.368 s | 8.3 MiB / 0.011 s | 31.0 MiB / 0.049 s |
+| many-services | down | 51.9 MiB / 1.705 s | 7.9 MiB / 0.009 s | 29.9 MiB / 0.039 s |
+| running-ops | ps | 50.4 MiB / 140.4 ms | 7.8 MiB / 4.1 ms | 29.8 MiB / 24.9 ms |
+| running-ops | logs | 68.6 MiB / 140.1 ms | 7.9 MiB / 4.3 ms | 29.3 MiB / 25.6 ms |
+| running-ops | exec | 48.7 MiB / 139.2 ms | 7.9 MiB / 4.9 ms | 27.8 MiB / 17.8 ms |
+| running-ops | restart | 49.4 MiB / 181.7 ms | 8.0 MiB / 4.6 ms | 29.5 MiB / 25.8 ms |
+| wide-running-ops | ps | 51.3 MiB / 150.1 ms | 7.7 MiB / 4.6 ms | 30.3 MiB / 39.7 ms |
+| wide-running-ops | logs | 68.5 MiB / 144.3 ms | 8.0 MiB / 4.6 ms | 29.6 MiB / 30.6 ms |
+| wide-running-ops | exec | 48.8 MiB / 145.1 ms | 8.0 MiB / 5.2 ms | 27.9 MiB / 18.0 ms |
+| wide-running-ops | restart | 49.6 MiB / 182.0 ms | 8.0 MiB / 5.0 ms | 29.6 MiB / 30.9 ms |
+| config-heavy | config | 34.9 MiB / 110.3 ms | 7.9 MiB / 7.6 ms | 30.4 MiB / 61.3 ms |
+| build | build | 65.5 MiB / 410.5 ms | 8.1 MiB / 6.0 ms | 30.5 MiB / 29.3 ms |
 
 ## Reading these numbers honestly
 
