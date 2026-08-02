@@ -72,6 +72,40 @@ fn bin() -> &'static str {
 	env!("CARGO_BIN_EXE_podup")
 }
 
+/// Poll until reading `path` inside `container` yields exactly `expect` once
+/// trimmed, or `secs` elapse. Returns whether it matched.
+///
+/// Reading state back out of the container is how these tests observe an effect
+/// that a command's return value cannot show. The usual shape is an entrypoint
+/// that appends a line on every start, which makes the file a container-scoped
+/// count of how many times the process ran. `/proc/uptime` looks like the
+/// obvious alternative and is not one: it is not namespaced, so it reports the
+/// host's.
+///
+/// The comparison is exact rather than a substring, so "started twice" cannot be
+/// satisfied by a container that started three times.
+async fn poll_container_file(
+	engine: &Engine,
+	container: &str,
+	path: &str,
+	expect: &str,
+	secs: u64,
+) -> bool {
+	let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
+	while tokio::time::Instant::now() < deadline {
+		if let Ok(out) = engine
+			.test_exec_capture(container, vec!["cat".into(), path.into()])
+			.await
+		{
+			if out.trim() == expect {
+				return true;
+			}
+		}
+		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+	}
+	false
+}
+
 // ---------------------------------------------------------------------------
 // Test groups (see engine_integration/*.rs)
 // ---------------------------------------------------------------------------
