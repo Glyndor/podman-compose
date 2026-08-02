@@ -19,9 +19,30 @@ async fn pause_and_unpause() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let cname = format!("{proj}-web-1");
+	// A paused container refuses new exec sessions: Podman answers "can only
+	// create exec sessions on running containers". That refusal is the observable
+	// difference between a pause that happened and one that returned Ok having
+	// done nothing, which is all this test used to check.
+	let before = engine.test_exec_capture(&cname, vec!["true".into()]).await;
 	engine.pause(&file, &[]).await.unwrap();
+	let while_paused = engine.test_exec_capture(&cname, vec!["true".into()]).await;
 	engine.unpause(&file, &[]).await.unwrap();
+	let after = engine.test_exec_capture(&cname, vec!["true".into()]).await;
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		before.is_ok(),
+		"the container did not accept an exec before being paused: {before:?}"
+	);
+	assert!(
+		while_paused.is_err(),
+		"pause returned success but the container still accepted an exec"
+	);
+	assert!(
+		after.is_ok(),
+		"unpause did not return the container to running: {after:?}"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -239,14 +260,38 @@ async fn restart_scaled_service_all_replicas() {
 	let proj = proj("rsr");
 	let engine = Engine::new(client, proj.clone());
 	let file = parse_str(
-		"services:\n  worker:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    deploy:\n      replicas: 2\n",
+		"services:\n  worker:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"echo start >> /starts; sleep infinity\"]\n    deploy:\n      replicas: 2\n",
 	)
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
-	// Both replicas must be reachable for restart to succeed.
+	let one = format!("{proj}-worker-1");
+	let two = format!("{proj}-worker-2");
+	// Wait for BOTH replicas to have written their first line before restarting.
+	// Waiting on only one of them is a race: the other can still be starting when
+	// the restart fires, and then it ends up with one line instead of two and the
+	// check below fails for a reason that has nothing to do with restart. It
+	// passed alone and failed under the load of the whole file, which is the
+	// shape that makes this kind of fixture bug look like flakiness.
+	let started_one = poll_container_file(&engine, &one, "/starts", "start", 30).await;
+	let started_two = poll_container_file(&engine, &two, "/starts", "start", 30).await;
+
+	// Both replicas must be reachable for restart to succeed. "All replicas" is
+	// the claim, and restarting only the first satisfied the old version.
 	engine.restart(&file, Some("worker")).await.unwrap();
+	let first_restarted = poll_container_file(&engine, &one, "/starts", "start\nstart", 60).await;
+	let second_restarted = poll_container_file(&engine, &two, "/starts", "start\nstart", 60).await;
+
 	engine.down(&file).await.unwrap();
+	assert!(
+		started_one && started_two,
+		"a replica never wrote its first start line (one: {started_one}, two: {started_two})"
+	);
+	assert!(first_restarted, "the first replica did not restart");
+	assert!(
+		second_restarted,
+		"restart stopped at the first replica and left the second running"
+	);
 }
 
 #[tokio::test]
@@ -338,16 +383,48 @@ async fn exec_scaled_service_targets_first_replica() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	// Leave a mark instead of echoing, and read it from BOTH replicas. "targets
+	// the first replica" has two halves, and an exec that hit replica 2 — or one
+	// that somehow hit both — returned Ok just as happily as the right one.
 	engine
 		.exec_with_options(
 			&file,
 			"worker",
-			vec!["echo".to_string(), "ok".to_string()],
+			vec![
+				"sh".to_string(),
+				"-c".to_string(),
+				"echo reached > /which".to_string(),
+			],
 			podup::ExecOptions::default(),
 		)
 		.await
 		.unwrap();
+	let first = engine
+		.test_exec_capture(
+			&format!("{proj}-worker-1"),
+			vec!["cat".into(), "/which".into()],
+		)
+		.await
+		.unwrap_or_default();
+	let second = engine
+		.test_exec_capture(
+			&format!("{proj}-worker-2"),
+			vec!["cat".into(), "/which".into()],
+		)
+		.await
+		.unwrap_or_default();
 	engine.down(&file).await.unwrap();
+
+	assert_eq!(
+		first.trim(),
+		"reached",
+		"exec on a scaled service did not run in the first replica"
+	);
+	assert_ne!(
+		second.trim(),
+		"reached",
+		"exec on a scaled service ran in the second replica too"
+	);
 }
 
 #[tokio::test]
