@@ -105,14 +105,27 @@ async fn wait_completed_polling() {
 	};
 	let proj = proj("wcp");
 	let engine = Engine::new(client, proj.clone());
-	// init sleeps 1.5s before exiting; first poll sees it running (L73-75 covered)
-	let file = parse_str(
-		"services:\n  init:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"sleep 1.5; exit 0\"]\n  app:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    depends_on:\n      init:\n        condition: service_completed_successfully\n",
-	)
-	.unwrap();
+	// init takes a while before exiting, so the first poll sees it running and the
+	// polling loop is exercised rather than short-circuited. The delay has to beat
+	// the cost of creating app's container, or `up` would appear ordered even with
+	// the wait removed — the reason 2s was not enough in
+	// resources_health::depends_on_service_completed.
+	// The bind uses an absolute path, so no base_dir is needed.
+	let dir = tempfile::tempdir().unwrap();
+	let yaml = format!(
+		"services:\n  init:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"sleep 12; echo init-done > /out/order; exit 0\"]\n    volumes:\n      - {out}:/out:z\n  app:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"cat /out/order > /out/app-saw 2>/dev/null; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    depends_on:\n      init:\n        condition: service_completed_successfully\n",
+		out = dir.path().display()
+	);
+	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	let saw = poll_host_file(dir.path().join("app-saw"), "init-done", 30).await;
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		saw,
+		"app started before init completed, so the polling wait was not honoured"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +198,44 @@ async fn service_with_expose_proto_and_ulimits() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let cname = format!("{proj}-web-1");
+	// Both keys are silently droppable: a container with neither still starts, and
+	// `up` returns Ok either way. The ulimits are readable from inside the
+	// container; `expose` is container config, so read it out of band.
+	let limits = engine
+		.test_exec_capture(
+			&cname,
+			vec!["sh".into(), "-c".into(), "ulimit -Sn; ulimit -Hn".into()],
+		)
+		.await
+		.unwrap_or_default();
+	let exposed = String::from_utf8_lossy(
+		&std::process::Command::new("podman")
+			.args([
+				"inspect",
+				&cname,
+				"--format",
+				"{{json .Config.ExposedPorts}}",
+			])
+			.output()
+			.expect("podman inspect")
+			.stdout,
+	)
+	.trim()
+	.to_string();
 	engine.down(&file).await.unwrap();
+
+	assert_eq!(
+		limits.trim(),
+		"1024\n2048",
+		"the soft and hard nofile limits did not reach the container"
+	);
+	// The `/tcp` suffix is the point: `expose: "8080/tcp"` takes the raw-string
+	// branch, and a parser that dropped the protocol would still produce a port.
+	assert!(
+		exposed.contains("8080/tcp"),
+		"expose did not reach the container config with its protocol: {exposed:?}"
+	);
 }
 
 #[tokio::test]
@@ -527,7 +577,33 @@ fn service_healthy_image_inherited_healthcheck() {
 		);
 		let file = parse_str(&yaml).unwrap();
 
+		// The point is that db has NO healthcheck in the compose file — it inherits
+		// one from the image's HEALTHCHECK line, and web's service_healthy gate has
+		// to honour it. Two things can go wrong invisibly: the inherited check is
+		// ignored (web starts immediately, gate skipped) or it is never satisfied
+		// (up hangs to the deadline). Bounding the time catches the second; the
+		// containers being up catches the first collapsing into a silent no-op.
+		let started = std::time::Instant::now();
 		engine.up(&file).await.unwrap();
+		let elapsed = started.elapsed();
+		let mut names = engine
+			.test_project_container_names()
+			.await
+			.unwrap_or_default();
+		names.sort();
 		engine.down(&file).await.unwrap();
+		let _ = std::process::Command::new("podman")
+			.args(["rmi", "-f", &image_tag])
+			.status();
+
+		assert!(
+			elapsed < std::time::Duration::from_secs(60),
+			"up took {elapsed:?} — an image-inherited healthcheck must be reachable, not waited on to the deadline"
+		);
+		assert_eq!(
+			names,
+			vec![format!("{proj}-db-1"), format!("{proj}-web-1")],
+			"web did not come up behind a healthcheck inherited from the image"
+		);
 	});
 }
