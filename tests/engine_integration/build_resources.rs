@@ -106,7 +106,46 @@ async fn service_with_expose_deploy_labels_annotations_tmpfs() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let cname = format!("{proj}-web-1");
+	// The tmpfs has to be a real tmpfs at that path, not a directory that happens
+	// to exist. /proc/mounts is inside the container and needs no seam.
+	let mounts = engine
+		.test_exec_capture(
+			&cname,
+			vec!["grep".into(), " /tmp/cache ".into(), "/proc/mounts".into()],
+		)
+		.await
+		.unwrap_or_default();
+	// The comment above makes a falsifiable claim about deploy.labels, so check it
+	// rather than leave it as prose. Labels and annotations are container config,
+	// which the library does not return, so read them the way the CLI tests do.
+	let inspect = |fmt: &str| {
+		String::from_utf8_lossy(
+			&std::process::Command::new("podman")
+				.args(["inspect", &cname, "--format", fmt])
+				.output()
+				.expect("podman inspect")
+				.stdout,
+		)
+		.trim()
+		.to_string()
+	};
+	let deploy_label = inspect("{{index .Config.Labels \"com.example.env\"}}");
+	let annotation = inspect("{{index .Config.Annotations \"com.example.note\"}}");
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		mounts.contains("tmpfs /tmp/cache tmpfs"),
+		"the long-form tmpfs volume did not mount a tmpfs at /tmp/cache: {mounts:?}"
+	);
+	assert_eq!(
+		deploy_label, "",
+		"deploy.labels reached the container; the Compose Specification puts them on the service only"
+	);
+	assert_eq!(
+		annotation, "value",
+		"the annotation did not reach the container"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +170,30 @@ async fn named_volume_with_driver_opts() {
 	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	// The driver_opts bind the volume to this temp directory, so a file written
+	// at /cache in the container has to appear on the host here. Without the opts
+	// taking effect the container would still get a working /cache — an ordinary
+	// local volume — and `up` would return Ok either way, which is exactly what
+	// this test used to check.
+	engine
+		.test_exec_capture(
+			&format!("{proj}-web-1"),
+			vec![
+				"sh".into(),
+				"-c".into(),
+				"echo bound > /cache/marker".into(),
+			],
+		)
+		.await
+		.unwrap();
+	let on_host = fs::read_to_string(dir.path().join("marker")).unwrap_or_default();
 	engine.down_with_options(&file, true).await.unwrap();
+
+	assert_eq!(
+		on_host.trim(),
+		"bound",
+		"driver_opts did not bind the volume to the host directory"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -145,10 +207,14 @@ async fn build_with_target_stage() {
 		None => return,
 	};
 	let dir = tempfile::tempdir().unwrap();
-	// Multi-stage Dockerfile — build with target: base covers build.rs L77
+	// Multi-stage Dockerfile — build with target: base covers build.rs L77.
+	// Each stage leaves its name on disk, so which one was built is readable from
+	// inside the container. With `RUN echo` alone both stages produce an image
+	// that looks the same from outside, and a build that ignored `target:`
+	// entirely would have passed.
 	fs::write(
 		dir.path().join("Dockerfile"),
-		b"FROM alpine:latest AS base\nRUN echo base-stage\nFROM base AS final\nRUN echo final-stage\n",
+		b"FROM alpine:latest AS base\nRUN echo base-stage > /stage\nFROM base AS final\nRUN echo final-stage > /stage\n",
 	)
 	.unwrap();
 
@@ -161,7 +227,23 @@ async fn build_with_target_stage() {
 	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	let stage = engine
+		.test_exec_capture(
+			&format!("{proj}-app-1"),
+			vec!["cat".into(), "/stage".into()],
+		)
+		.await
+		.unwrap_or_default();
 	engine.down(&file).await.unwrap();
+	let _ = std::process::Command::new("podman")
+		.args(["rmi", "-f", &image_tag])
+		.status();
+
+	assert_eq!(
+		stage.trim(),
+		"base-stage",
+		"build stopped at the wrong stage: target: base must not run the final stage"
+	);
 }
 
 #[tokio::test]
@@ -486,9 +568,21 @@ async fn remove_orphans_removes_container() {
 	)
 	.unwrap();
 	engine.remove_orphans(&file_svc2).await.unwrap();
+	let survivors = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
 
 	// cleanup (svc1 already removed; down() on either file is a no-op for missing containers)
 	let _ = engine.down(&file_svc1).await;
+
+	// The sibling test in lifecycle.rs pins that a sweep with no orphan present
+	// removes nothing. This one is the other direction, and until now neither
+	// looked: a sweep that removed nothing at all satisfied both.
+	assert!(
+		!survivors.iter().any(|n| n.contains("-svc1-")),
+		"the orphaned svc1 container survived the sweep: {survivors:?}"
+	);
 }
 
 // ---------------------------------------------------------------------------
