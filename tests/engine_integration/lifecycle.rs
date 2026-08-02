@@ -69,21 +69,44 @@ async fn up_no_recreate_skips_running() {
 		.await
 		.unwrap();
 
-	// Second up with no_recreate: already running → skip
+	// The second up carries a CHANGED config, which is the only shape that tests
+	// the flag. With the config unchanged, a plain up skips the recreate on its
+	// own because the config hash matches, so no_recreate and the hash produce
+	// the same container and no assertion can separate them: a mutation that
+	// ignored no_recreate entirely left the earlier version of this test green.
+	let changed = parse_str(
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"120\"]\n",
+	)
+	.unwrap();
 	engine
-		.up_with_options(&file, false, &[], &[], true, false, false)
+		.up_with_options(&changed, false, &[], &[], true, false, false)
 		.await
 		.unwrap();
-	let survived = engine
+	let with_flag = engine
 		.test_exec_capture(&cname, vec!["cat".into(), "/marker".into()])
 		.await
 		.unwrap_or_default();
-	engine.down(&file).await.unwrap();
+
+	// Control, in the sense the testing standard asks for: the same changed
+	// config without the flag must recreate. Without this, "the marker survived"
+	// could just mean podup never noticed the config had changed, and the test
+	// would pass while proving nothing about no_recreate.
+	engine.up(&changed).await.unwrap();
+	let without_flag = engine
+		.test_exec_capture(&cname, vec!["cat".into(), "/marker".into()])
+		.await
+		.unwrap_or_default();
+	engine.down(&changed).await.unwrap();
 
 	assert_eq!(
-		survived.trim(),
+		with_flag.trim(),
 		"first-container",
-		"no_recreate replaced the running container instead of skipping it"
+		"no_recreate recreated the container even though the flag was set"
+	);
+	assert_ne!(
+		without_flag.trim(),
+		"first-container",
+		"the changed config did not recreate without the flag, so the fixture cannot prove the flag did anything"
 	);
 }
 
