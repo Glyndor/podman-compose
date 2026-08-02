@@ -323,12 +323,35 @@ fn build_with_env_arg() {
 			let engine = Engine::with_base_dir(client, proj.clone(), dir.path().to_path_buf());
 			let image_tag = format!("podup-test-bea-{}:latest", std::process::id());
 			let yaml = format!(
-				"services:\n  app:\n    build:\n      context: .\n      dockerfile_inline: |\n        FROM alpine:latest\n        ARG FROM_ENV\n        RUN echo env=$FROM_ENV\n      args:\n        FROM_ENV:\n    image: {image_tag}\n    command: [\"sleep\", \"infinity\"]\n"
+				"services:\n  app:\n    build:\n      context: .\n      dockerfile_inline: |\n        FROM alpine:latest\n        ARG FROM_ENV\n        RUN echo $$FROM_ENV > /from-env\n      args:\n        FROM_ENV:\n    image: {image_tag}\n    command: [\"sleep\", \"infinity\"]\n"
 			);
 			let file = parse_str(&yaml).unwrap();
 
 			engine.up(&file).await.unwrap();
+			// Same two traps as the build-arg tests in build_images.rs, and this one
+			// is the sharper case. A valueless `args: FROM_ENV:` entry is supposed to
+			// take its value from the environment, and the single-dollar form the old
+			// version used made compose substitute FROM_ENV in the YAML instead — so
+			// the value arrived by a completely different route than the one under
+			// test, and the ARG never mattered. `RUN echo` then left nothing to
+			// contradict it.
+			let baked = engine
+				.test_exec_capture(
+					&format!("{proj}-app-1"),
+					vec!["cat".into(), "/from-env".into()],
+				)
+				.await
+				.unwrap_or_default();
 			engine.down(&file).await.unwrap();
+			let _ = std::process::Command::new("podman")
+				.args(["rmi", "-f", &image_tag])
+				.status();
+
+			assert_eq!(
+				baked.trim(),
+				"test-value",
+				"a valueless build arg did not pick up the environment variable"
+			);
 		});
 	});
 }
@@ -357,7 +380,38 @@ async fn label_file_labels_applied() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	// Both labels from the file have to reach the container. Labels are container
+	// config, which the library does not return, so read them out of band — the
+	// same way the sibling tests read annotations. Reading both catches a loader
+	// that stops after the first line.
+	let inspect = |key: &str| {
+		String::from_utf8_lossy(
+			&std::process::Command::new("podman")
+				.args([
+					"inspect",
+					&format!("{proj}-web-1"),
+					"--format",
+					&format!("{{{{index .Config.Labels \"{key}\"}}}}"),
+				])
+				.output()
+				.expect("podman inspect")
+				.stdout,
+		)
+		.trim()
+		.to_string()
+	};
+	let role = inspect("com.example.role");
+	let env = inspect("com.example.env");
 	engine.down(&file).await.unwrap();
+
+	assert_eq!(
+		role, "web",
+		"the first label_file entry did not reach the container"
+	);
+	assert_eq!(
+		env, "test",
+		"the second label_file entry did not reach the container"
+	);
 }
 
 // ---------------------------------------------------------------------------
