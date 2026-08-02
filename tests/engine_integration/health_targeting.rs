@@ -52,7 +52,20 @@ fn active_profiles_via_env() {
 				.up_with_options(&file, false, &[], &[], false, false, false)
 				.await
 				.unwrap();
+			let mut names = engine
+				.test_project_container_names()
+				.await
+				.unwrap_or_default();
+			names.sort();
 			engine.down(&file).await.unwrap();
+
+			// COMPOSE_PROFILES=prod must not enable the "debug" profile. Reading it
+			// and then starting everything anyway returned Ok just as happily.
+			assert_eq!(
+				names,
+				vec![format!("{proj}-web-1")],
+				"COMPOSE_PROFILES=prod started the debug-profiled service"
+			);
 		});
 	});
 }
@@ -237,7 +250,18 @@ async fn target_services_skips_non_dep() {
 		.up_with_options(&file, false, &[], &["web".to_string()], false, false, false)
 		.await
 		.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	assert_eq!(
+		names,
+		vec![format!("{proj}-web-1")],
+		"targeting web started extra as well, which nothing depends on"
+	);
 }
 
 #[tokio::test]
@@ -260,7 +284,24 @@ async fn dep_on_profile_filtered_service() {
 		.up_with_options(&file, false, &[], &[], false, false, false)
 		.await
 		.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	// This pins what podup does today, which is not what the comment above it
+	// claimed and not what the reference does. Measured 2026-08-02: podup starts
+	// BOTH, while docker compose v5.1.3 refuses the project outright with
+	// `service "web" depends on undefined service "db": invalid compose project`.
+	// Filed as #1276; the assertion changes with the fix. Asserting the divergence
+	// is worth more than asserting nothing, which is where this test was.
+	assert_eq!(
+		names,
+		vec![format!("{proj}-db-1"), format!("{proj}-web-1")],
+		"the profile-gated dependency behaviour changed; see #1276 before editing this"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +384,21 @@ async fn optional_dep_not_in_file() {
 		.up_with_options(&file, false, &[], &["web".to_string()], false, false, false)
 		.await
 		.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	// web has to actually come up. An optional dependency that is not in the file
+	// must be skipped, not turned into a container and not made to block the
+	// service that named it.
+	assert_eq!(
+		names,
+		vec![format!("{proj}-web-1")],
+		"an optional dependency missing from the file did not resolve to exactly web"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -377,7 +432,20 @@ async fn target_services_duplicate_entry() {
 		)
 		.await
 		.unwrap();
+	let names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
 	engine.down(&file).await.unwrap();
+
+	// One container, not two. The deduplication is the whole point of the test,
+	// and a second pass over the same service would have shown up here rather
+	// than in the return value.
+	assert_eq!(
+		names,
+		vec![format!("{proj}-web-1")],
+		"naming the same service twice did not resolve to a single container"
+	);
 }
 
 // ---------------------------------------------------------------------------
