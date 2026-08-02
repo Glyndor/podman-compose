@@ -18,9 +18,17 @@ These appear before the subcommand and may also come from the environment.
 | `-p, --project <NAME>` | `COMPOSE_PROJECT_NAME` | Project name, prefixing container/network/volume names. When unset: the top-level `name:`, then the sanitized project-directory basename. |
 | `--socket <PATH>` | `PODMAN_SOCKET` | Podman socket path; overrides auto-detection. |
 | `--profile <NAMES>` | `COMPOSE_PROFILES` | Active profiles, comma-separated. |
+
 | `--project-directory <PATH>` | | Base directory for relative paths (env_file, build context, bind mounts, config/secret sources). Defaults to the compose file's directory. |
 | `--ansi <WHEN>` | | Colour output: `auto`, `always` or `never`. `always` forces colour even into a pipe or file. | 
 | `--env-file <PATH>` | | Env file(s) for interpolation. Repeatable; later files win. **Replaces** a project `.env` rather than adding to it — when this is given, `.env` is not read. The process environment still takes precedence over both. |
+
+**Profiles activate their dependencies.** A service left out by profile
+filtering is still started when a service that *is* running declares
+`depends_on` on it, transitively — so a retained service never points at a
+dropped one. docker compose rejects that file instead. Give the dependant the
+same profile if you want neither to start. See
+[docker-migration.md](docker-migration.md#a-depends_on-target-behind-an-inactive-profile).
 
 **Identity colours.** Each service gets its own colour, so a name is
 recognisable across `ps`, `logs`, `images`, `stats` and the progress lines.
