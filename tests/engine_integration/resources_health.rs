@@ -256,14 +256,35 @@ async fn post_start_and_pre_stop_hooks_run() {
 		None => return,
 	};
 	let proj = proj("hks");
+	let dir = tempfile::tempdir().unwrap();
 	let engine = Engine::new(client, proj.clone());
-	let file = parse_str(
-		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    post_start:\n      - command: [\"echo\", \"started\"]\n    pre_stop:\n      - command: [\"echo\", \"stopping\"]\n",
-	)
-	.unwrap();
+	// The hooks used to `echo` into a stream nothing reads, so a hook that never
+	// ran looked the same as one that did. They append to a bind-mounted host
+	// directory instead, which is also the only way to observe `pre_stop`: it
+	// fires while the container is going away, so there is nothing left to exec
+	// into afterwards. The `z` relabel is required on an SELinux-enforcing host
+	// (the lane is Fedora); without it the container is denied the write.
+	let yaml = format!(
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    volumes:\n      - {out}:/out:z\n    post_start:\n      - command: [\"sh\", \"-c\", \"echo post-start >> /out/hooks\"]\n    pre_stop:\n      - command: [\"sh\", \"-c\", \"echo pre-stop >> /out/hooks\"]\n",
+		out = dir.path().display()
+	);
+	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	let after_up = fs::read_to_string(dir.path().join("hooks")).unwrap_or_default();
 	engine.down(&file).await.unwrap();
+	let after_down = fs::read_to_string(dir.path().join("hooks")).unwrap_or_default();
+
+	assert_eq!(
+		after_up.trim(),
+		"post-start",
+		"post_start did not run, or ran more than once"
+	);
+	assert_eq!(
+		after_down.trim(),
+		"post-start\npre-stop",
+		"pre_stop did not run on down"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -277,15 +298,33 @@ async fn depends_on_service_healthy() {
 		None => return,
 	};
 	let proj = proj("hlt");
+	let dir = tempfile::tempdir().unwrap();
 	let engine = Engine::new(client, proj.clone());
-	// db has a healthcheck (CMD true), web waits for it to be healthy
-	let file = parse_str(
-		"services:\n  db:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    healthcheck:\n      test: [\"CMD\", \"true\"]\n      interval: 1s\n      timeout: 1s\n      retries: 5\n      start_period: 0s\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    depends_on:\n      db:\n        condition: service_healthy\n",
-	)
-	.unwrap();
+	// `CMD true` is healthy from the first probe, so it cannot show whether web
+	// waited. db's healthcheck now depends on work db does after a delay, and
+	// web's first act is to read what db left, so web starting early finds
+	// nothing.
+	//
+	// Two constraints pull against each other here. The delay has to exceed the
+	// time it takes to create web's container, or the mutation that empties the
+	// readiness map still leaves this green (see depends_on_service_completed).
+	// And `retries` has to outlast that same delay, or db is declared unhealthy
+	// before it writes and `up` fails before any assertion runs — which is what
+	// 12s against 10 retries at a 1s interval did.
+	let yaml = format!(
+		"services:\n  db:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"sleep 12; echo db-ready > /out/ready; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    healthcheck:\n      test: [\"CMD\", \"test\", \"-f\", \"/out/ready\"]\n      interval: 1s\n      timeout: 2s\n      retries: 30\n      start_period: 0s\n  web:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"cat /out/ready > /out/web-saw 2>/dev/null; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    depends_on:\n      db:\n        condition: service_healthy\n",
+		out = dir.path().display()
+	);
+	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	let saw = poll_host_file(dir.path().join("web-saw"), "db-ready", 30).await;
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		saw,
+		"web started before db reported healthy, so service_healthy was not waited on"
+	);
 }
 
 #[tokio::test]
@@ -315,15 +354,34 @@ async fn depends_on_service_completed() {
 		None => return,
 	};
 	let proj = proj("cmp");
+	let dir = tempfile::tempdir().unwrap();
 	let engine = Engine::new(client, proj.clone());
-	// init exits 0 quickly; app waits for it to complete
-	let file = parse_str(
-		"services:\n  init:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"exit 0\"]\n  app:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    depends_on:\n      init:\n        condition: service_completed_successfully\n",
-	)
-	.unwrap();
+	// Ordering is the contract, and `up` returning Ok says nothing about it. init
+	// takes a while and then leaves a file; app's first act is to read that file.
+	//
+	// The delay has to beat the cost of creating app's container, not just be
+	// non-zero. `up` starts services in dependency levels, so init is launched
+	// before app whether or not the readiness wait happens — the wait only adds
+	// "and has finished". With a 2s delay the mutation that empties the readiness
+	// map left this test green, because creating app took longer than that on its
+	// own.
+	// If app were started before init completed, the read finds nothing and the
+	// marker below stays empty — which is exactly what a dropped dependency wait
+	// looks like from outside.
+	let yaml = format!(
+		"services:\n  init:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"sleep 12; echo init-done > /out/order; exit 0\"]\n    volumes:\n      - {out}:/out:z\n  app:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"cat /out/order > /out/app-saw 2>/dev/null; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    depends_on:\n      init:\n        condition: service_completed_successfully\n",
+		out = dir.path().display()
+	);
+	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	let saw = poll_host_file(dir.path().join("app-saw"), "init-done", 30).await;
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		saw,
+		"app started before init had completed, so service_completed_successfully was not waited on"
+	);
 }
 
 // Regression: a dependency scaled to >1 has no base-named container, only
