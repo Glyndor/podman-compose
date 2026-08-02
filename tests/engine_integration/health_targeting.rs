@@ -322,14 +322,17 @@ async fn dep_on_profile_filtered_service() {
 	};
 	let proj = proj("dpf");
 	let engine = Engine::new(client, proj.clone());
-	// "db" has profile "debug" → not active → dep wait skipped (lifecycle.rs L73)
-	// "web" depends on "db" but db is profile-filtered so its dep wait is skipped
+	// podup ACTIVATES a profile-filtered service when a service that is running
+	// depends on it, transitively, so a retained service never points at a dropped
+	// one. The rationale is in internal/engine/profiles.rs. This comment used to
+	// say the opposite — that db is skipped and its dep wait skipped with it —
+	// which is what a deliberate design looks like when nothing pins it: the next
+	// reader believes the comment over the code.
 	let file = parse_str(
 		"services:\n  db:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    profiles: [\"debug\"]\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    depends_on:\n      - db\n",
 	)
 	.unwrap();
 
-	// No active profiles → db is skipped; web still runs but skips db's dep wait
 	engine
 		.up_with_options(&file, false, &[], &[], false, false, false)
 		.await
@@ -341,16 +344,26 @@ async fn dep_on_profile_filtered_service() {
 	names.sort();
 	engine.down(&file).await.unwrap();
 
-	// This pins what podup does today, which is not what the comment above it
-	// claimed and not what the reference does. Measured 2026-08-02: podup starts
-	// BOTH, while docker compose v5.1.3 refuses the project outright with
-	// `service "web" depends on undefined service "db": invalid compose project`.
-	// Filed as #1276; the assertion changes with the fix. Asserting the divergence
-	// is worth more than asserting nothing, which is where this test was.
+	// This is a DELIBERATE divergence from docker compose, pinned here so it
+	// cannot be reverted by accident. Measured 2026-08-02 against docker-compose
+	// v5.1.3 on the same Podman socket: it refuses the project with
+	// `service "web" depends on undefined service "db"` — a misleading message,
+	// since db is defined and filtered, not undefined.
+	//
+	// podup is not departing from a standard. The Compose Specification says only
+	// that a profiled service starts "if the profile is activated" and is silent
+	// on a dependency whose profile is inactive; Docker's own documentation makes
+	// it a requirement on the author (same profile, started separately, or
+	// unprofiled) rather than a rule the spec imposes. So the reference errors on
+	// a situation that is satisfiable, and podup resolves it.
+	//
+	// If you are here because this looks wrong: read #1276 and
+	// docs/docker-migration.md first. Changing it is a behaviour change and a
+	// breaking one, not a bug fix.
 	assert_eq!(
 		names,
 		vec![format!("{proj}-db-1"), format!("{proj}-web-1")],
-		"the profile-gated dependency behaviour changed; see #1276 before editing this"
+		"the profile-gated dependency was not activated; this divergence is deliberate, see #1276"
 	);
 }
 
