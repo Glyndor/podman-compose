@@ -126,6 +126,8 @@ mod health_targeting;
 mod include_extends;
 #[path = "engine_integration/lifecycle.rs"]
 mod lifecycle;
+#[path = "engine_integration/lifecycle_query.rs"]
+mod lifecycle_query;
 #[path = "engine_integration/niche.rs"]
 mod niche;
 #[path = "engine_integration/resources_health.rs"]
