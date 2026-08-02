@@ -90,6 +90,17 @@ async fn cli_push_to_unreachable_registry_errors() {
 		])
 		.output()
 		.unwrap();
+	// Which failure, not just that one happened. A non-zero exit is satisfied by
+	// a missing compose file or an unreachable Podman, neither of which reaches
+	// the registry. #1076 is the reason this matters: a failed pull used to be
+	// reported as success, and push shares that in-band-error shape — a test that
+	// only reads the exit code cannot tell a real registry failure from podup
+	// falling over before it tried.
+	let err = String::from_utf8_lossy(&push.stderr);
+	assert!(
+		err.contains("localhost:1/podup-nope"),
+		"the failure did not name the image it could not push: {err:?}"
+	);
 	assert!(
 		!push.status.success(),
 		"push to an unreachable registry must fail"

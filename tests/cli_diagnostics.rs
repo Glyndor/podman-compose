@@ -213,6 +213,14 @@ fn create_rejects_no_recreate_with_force_recreate() {
 		!output.status.success(),
 		"conflicting recreate flags must be rejected"
 	);
+	// Which rejection, not just that one happened. A non-zero exit here is
+	// satisfied by any failure — a missing compose file, an unreachable Podman,
+	// a panic — none of which exercise the flag conflict this test is named for.
+	let err = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		err.contains("--no-recreate") && err.contains("--force-recreate"),
+		"the rejection did not name the two conflicting flags: {err:?}"
+	);
 }
 
 #[test]
