@@ -48,11 +48,41 @@ async fn watch_sync_file_to_container() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let cname = format!("{proj}-web-1");
 	engine
-		.test_sync_to_container(&format!("{proj}-web-1"), &src_file, "/tmp/app.txt")
+		.test_sync_to_container(&cname, &src_file, "/tmp/app.txt")
 		.await
 		.unwrap();
+	let first = engine
+		.test_exec_capture(&cname, vec!["cat".into(), "/tmp/app.txt".into()])
+		.await
+		.unwrap_or_default();
+
+	// Sync the same path again with different bytes. A watch rule fires on every
+	// change to the path it covers, so a second copy over an existing file is the
+	// ordinary case rather than an edge one, and it is the half a first-copy-only
+	// assertion cannot see.
+	fs::write(&src_file, b"changed content").unwrap();
+	engine
+		.test_sync_to_container(&cname, &src_file, "/tmp/app.txt")
+		.await
+		.unwrap();
+	let second = engine
+		.test_exec_capture(&cname, vec!["cat".into(), "/tmp/app.txt".into()])
+		.await
+		.unwrap_or_default();
+
 	engine.down(&file).await.unwrap();
+	assert_eq!(
+		first.trim(),
+		"initial content",
+		"sync returned success but the file never reached the container"
+	);
+	assert_eq!(
+		second.trim(),
+		"changed content",
+		"the second sync returned success and left the first copy in place"
+	);
 }
 
 #[tokio::test]
@@ -63,17 +93,40 @@ async fn watch_restart_container() {
 	};
 	let proj = proj("wrs");
 	let engine = Engine::new(client, proj.clone());
+	// One line appended per start, on the container's own filesystem, which
+	// survives a restart. That makes the line count a container-scoped record of
+	// how many times the process started. See the note in
+	// watch_sync_and_restart_does_both for why /proc/uptime is not an option.
 	let file = parse_str(
-		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n",
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"echo start >> /starts; sleep infinity\"]\n",
 	)
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
-	engine
-		.test_watch_restart(&format!("{proj}-web-1"))
+	let cname = format!("{proj}-web-1");
+	// Pin the fixture before acting. A counter that had not written its first
+	// line yet, or that wrote more than one, would make the check below fail for
+	// a reason that has nothing to do with restart.
+	let started = poll_synced(&engine, &cname, "/starts", "start", 30).await;
+	let before = engine
+		.test_exec_capture(&cname, vec!["cat".into(), "/starts".into()])
 		.await
-		.unwrap();
+		.unwrap_or_default();
+
+	engine.test_watch_restart(&cname).await.unwrap();
+	let restarted = poll_synced(&engine, &cname, "/starts", "start\nstart", 60).await;
+
 	engine.down(&file).await.unwrap();
+	assert!(started, "the container never wrote its first start line");
+	assert_eq!(
+		before.trim(),
+		"start",
+		"the fixture wrote more than one start line before the restart"
+	);
+	assert!(
+		restarted,
+		"restart returned success but the container process never started again"
+	);
 }
 
 #[tokio::test]
@@ -90,14 +143,34 @@ async fn watch_exec_in_container() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let cname = format!("{proj}-web-1");
+	// Write a marker to the container's filesystem instead of echoing to a stream
+	// nobody reads: the action drains the exec's output and discards it, so an
+	// echo leaves nothing an assertion can reach.
 	engine
 		.test_watch_exec(
-			&format!("{proj}-web-1"),
-			vec!["echo".to_string(), "from-watch-exec".to_string()],
+			&cname,
+			vec![
+				"sh".to_string(),
+				"-c".to_string(),
+				"echo from-watch-exec >> /exec-ran".to_string(),
+			],
 		)
 		.await
 		.unwrap();
+	let out = engine
+		.test_exec_capture(&cname, vec!["cat".into(), "/exec-ran".into()])
+		.await
+		.unwrap_or_default();
+
 	engine.down(&file).await.unwrap();
+	// Exactly one line, so the action ran the command once and ran it in the
+	// container rather than on the host.
+	assert_eq!(
+		out.trim(),
+		"from-watch-exec",
+		"the watch exec action did not run the command inside the container"
+	);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
