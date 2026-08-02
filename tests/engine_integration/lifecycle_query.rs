@@ -8,6 +8,11 @@ use super::*;
 // Query
 // ---------------------------------------------------------------------------
 
+/// `Engine::ps` returns `Result<()>` and writes the table to stdout, so at this
+/// level the only thing to assert is that listing a running project does not
+/// error. What it prints is checked where it is reachable, in
+/// `cli_lifecycle::cli_ps_subcommand`, which reads the container name and the
+/// STATUS column — the column #590 left empty for every container.
 #[tokio::test]
 async fn ps_shows_running_container() {
 	let client = match podman().await {
@@ -26,6 +31,10 @@ async fn ps_shows_running_container() {
 	engine.down(&file).await.unwrap();
 }
 
+/// Same shape as `ps`: `Engine::logs` streams to stdout and returns
+/// `Result<()>`. The output contract — the container's own line, carrying the
+/// `service |` prefix that #594 dropped — is asserted in
+/// `cli_lifecycle::cli_logs_subcommand`.
 #[tokio::test]
 async fn logs_from_named_service() {
 	let client = match podman().await {
@@ -44,6 +53,8 @@ async fn logs_from_named_service() {
 	engine.down(&file).await.unwrap();
 }
 
+/// The all-services variant of the above, and unassertable here for the same
+/// reason. Kept because it exercises the no-target branch of the same call.
 #[tokio::test]
 async fn logs_all_services() {
 	let client = match podman().await {
@@ -258,6 +269,12 @@ async fn exec_nonexistent_user_fails_fast() {
 	engine.down(&file).await.unwrap();
 }
 
+/// `Engine::pull` reports progress on stderr and returns `Result<()>`. Asserting
+/// that the image is present afterwards would prove nothing: `alpine:latest` is
+/// already local in every environment this suite runs in, so the assertion would
+/// hold with the pull removed entirely. Removing it first would make the test
+/// depend on the network, which the testing standard rules out. What `pull`
+/// reports is asserted in `cli_lifecycle::cli_pull_subcommand`.
 #[tokio::test]
 async fn pull_images() {
 	let client = match podman().await {
@@ -355,8 +372,26 @@ async fn attach_logs_empty_attach_returns() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
-	engine.attach_logs(&file).await.unwrap();
+	// "Returns immediately" is the claim, and it is the one thing here that can be
+	// checked without reading the stream: attaching to a service marked
+	// `attach: false` would follow the container's output and never come back, so
+	// the test would hang rather than fail. A bound turns that into a red.
+	let started = tokio::time::Instant::now();
+	let attached = tokio::time::timeout(
+		std::time::Duration::from_secs(10),
+		engine.attach_logs(&file),
+	)
+	.await;
+	let elapsed = started.elapsed();
 	engine.down(&file).await.unwrap();
+
+	let attached =
+		attached.expect("attach_logs did not return within 10s on an attach: false service");
+	attached.unwrap();
+	assert!(
+		elapsed < std::time::Duration::from_secs(5),
+		"attach_logs took {elapsed:?} on a service with attach: false; it has no targets and must not wait"
+	);
 }
 
 // ---------------------------------------------------------------------------

@@ -160,6 +160,26 @@ async fn down_with_remove_volumes() {
 
 	engine.up(&file).await.unwrap();
 	engine.down_with_options(&file, true).await.unwrap();
+	// `down --volumes` has to take the volume with it. Whether it exists is not
+	// something the library returns, so read it the way the sibling tests read
+	// container config: out of band, through the podman CLI.
+	let volumes = String::from_utf8_lossy(
+		&std::process::Command::new("podman")
+			.args(["volume", "ls", "--format", "{{.Name}}"])
+			.output()
+			.expect("podman volume ls")
+			.stdout,
+	)
+	.to_string();
+
+	// Match on the project prefix, not the declared name. podup namespaces a
+	// declared volume as `{project}_{name}`, so an equality check against
+	// `{proj}-data` can never match and the assertion would hold whatever `down`
+	// did — which is how the first version of this line survived its mutation.
+	assert!(
+		!volumes.lines().any(|v| v.contains(proj.as_str())),
+		"down --volumes left a volume belonging to the project behind: {volumes:?}"
+	);
 }
 
 #[tokio::test]
