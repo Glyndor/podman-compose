@@ -163,6 +163,8 @@ mod cli_commands;
 mod cli_flags;
 #[path = "engine_integration/cli_lifecycle.rs"]
 mod cli_lifecycle;
+#[path = "engine_integration/cli_output.rs"]
+mod cli_output;
 #[path = "engine_integration/create_ls.rs"]
 mod create_ls;
 #[path = "engine_integration/lifecycle_output.rs"]
