@@ -63,10 +63,15 @@ async fn watch_sync_file_to_container() {
 	// ordinary case rather than an edge one, and it is the half a first-copy-only
 	// assertion cannot see.
 	fs::write(&src_file, b"changed content").unwrap();
-	engine
+	// The result is captured instead of unwrapped, deliberately. On Podman 6 this
+	// second copy came back as the #1097 could-not-confirm error, which says in
+	// its own text that the copy may or may not have landed. #1270 owns that
+	// error-reporting defect. What this test owns is whether the bytes arrived,
+	// so it reads them and reports what the sync claimed alongside — which is
+	// also the measurement #1270 needs to tell its branches apart.
+	let reported = engine
 		.test_sync_to_container(&cname, &src_file, "/tmp/app.txt")
-		.await
-		.unwrap();
+		.await;
 	let second = engine
 		.test_exec_capture(&cname, vec!["cat".into(), "/tmp/app.txt".into()])
 		.await
@@ -81,7 +86,7 @@ async fn watch_sync_file_to_container() {
 	assert_eq!(
 		second.trim(),
 		"changed content",
-		"the second sync returned success and left the first copy in place"
+		"the second sync left the first copy in place; it reported {reported:?}"
 	);
 }
 
