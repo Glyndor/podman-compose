@@ -267,7 +267,14 @@ async fn restart_scaled_service_all_replicas() {
 	engine.up(&file).await.unwrap();
 	let one = format!("{proj}-worker-1");
 	let two = format!("{proj}-worker-2");
-	let started = poll_container_file(&engine, &two, "/starts", "start", 30).await;
+	// Wait for BOTH replicas to have written their first line before restarting.
+	// Waiting on only one of them is a race: the other can still be starting when
+	// the restart fires, and then it ends up with one line instead of two and the
+	// check below fails for a reason that has nothing to do with restart. It
+	// passed alone and failed under the load of the whole file, which is the
+	// shape that makes this kind of fixture bug look like flakiness.
+	let started_one = poll_container_file(&engine, &one, "/starts", "start", 30).await;
+	let started_two = poll_container_file(&engine, &two, "/starts", "start", 30).await;
 
 	// Both replicas must be reachable for restart to succeed. "All replicas" is
 	// the claim, and restarting only the first satisfied the old version.
@@ -277,8 +284,8 @@ async fn restart_scaled_service_all_replicas() {
 
 	engine.down(&file).await.unwrap();
 	assert!(
-		started,
-		"the second replica never wrote its first start line"
+		started_one && started_two,
+		"a replica never wrote its first start line (one: {started_one}, two: {started_two})"
 	);
 	assert!(first_restarted, "the first replica did not restart");
 	assert!(
