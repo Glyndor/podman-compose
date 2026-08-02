@@ -235,6 +235,13 @@ fn missing_subcommand_exits_non_zero() {
 		.output()
 		.expect("run podup with no args");
 	assert!(!none.status.success(), "no args must exit non-zero");
+	// Exiting non-zero with nothing on stderr would satisfy the check above and
+	// leave the user with no idea what to type. clap prints usage; assert it.
+	let none_err = String::from_utf8_lossy(&none.stderr);
+	assert!(
+		none_err.contains("Usage: podup"),
+		"running with no arguments printed no usage: {none_err:?}"
+	);
 	let gen = Command::new(bin())
 		.arg("generate")
 		.output()
@@ -242,6 +249,21 @@ fn missing_subcommand_exits_non_zero() {
 	assert!(
 		!gen.status.success(),
 		"generate with no subcommand must exit non-zero"
+	);
+	// Measured 2026-08-02: a subcommand group invoked with no subcommand prints
+	// the ROOT usage, not the group's. `podup generate --help` does render
+	// `Usage: podup generate [OPTIONS] <COMMAND>` and lists `quadlet`, but bare
+	// `podup generate` renders `Usage: podup [OPTIONS] <COMMAND>` and lists every
+	// top-level command instead. `podup autostart` behaves the same way.
+	//
+	// So this asserts what it does, which is still better than asserting only the
+	// exit code: a non-zero exit with an empty stderr would pass that and leave
+	// the user nothing to read. Tightening it to the group's own usage is a
+	// behaviour change, not a test change.
+	let gen_err = String::from_utf8_lossy(&gen.stderr);
+	assert!(
+		gen_err.contains("Usage: podup"),
+		"generate with no subcommand printed no usage at all: {gen_err:?}"
 	);
 }
 
