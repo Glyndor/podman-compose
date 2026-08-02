@@ -189,6 +189,54 @@ services:
         mac_address: "02:42:ac:11:00:02"
 ```
 
+## Accepted, and podup is more permissive
+
+### A `depends_on` target behind an inactive profile
+
+A service can declare `profiles:` so it stays out of a default `up`. If another
+service that *is* being started declares `depends_on` on it, the two
+declarations contradict each other: one says keep it out, the other says it is
+required.
+
+docker compose refuses the project:
+
+```
+service "web" depends on undefined service "db": invalid compose project
+```
+
+podup **starts the dependency**, and every service transitively reached that
+way, so a service that is kept never points at one that was dropped.
+
+```yaml
+services:
+  db:
+    image: postgres:18-alpine
+    profiles: ["debug"]      # not started by a plain `up`...
+  web:
+    image: nginx:alpine
+    depends_on:
+      - db                   # ...but web needs it, so podup starts it
+```
+
+Both forms of `depends_on` behave this way, short and long. When **both**
+services carry the profile, podup agrees with docker compose and starts neither
+— the profile is doing its job and nothing contradicts it.
+
+**The Compose Specification does not decide this.** It says only that a service
+with `profiles` "is only started if the profile is activated", and says nothing
+about a dependency whose profile is inactive. Docker's own documentation treats
+it as something the author must fix — the dependency has to be "in the same
+profile, started separately, or not assigned to any profile" — so its rejection
+is an implementation choice in a case the specification leaves open, not a rule
+podup is breaking.
+
+**What this means for you.** A compose file relying on this runs under podup and
+is rejected by docker compose, so it is not portable back. If you want the
+dependency to stay out, or you need the file to work under both tools, give the
+dependant the same profile; then neither starts, everywhere. Note also that
+docker compose's message is misleading — `db` is not undefined, it is defined
+and filtered.
+
 ## Accepted but has no effect
 
 These fields parse cleanly so existing compose files validate, but podup cannot
