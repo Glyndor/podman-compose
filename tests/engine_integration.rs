@@ -112,6 +112,8 @@ async fn poll_container_file(
 
 #[path = "engine_integration/autostart_quadlet.rs"]
 mod autostart_quadlet;
+#[path = "engine_integration/build_images.rs"]
+mod build_images;
 #[path = "engine_integration/build_resources.rs"]
 mod build_resources;
 #[path = "engine_integration/commands_networking.rs"]
