@@ -164,12 +164,19 @@ async fn named_volume_with_driver_opts() {
 	// driver_opts covers volume.rs L55 (Some(driver_opts) branch)
 	// Use a bind-mount volume pointing to the temp dir (fast, rootless-safe)
 	let yaml = format!(
-		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    volumes:\n      - {proj}-cache:/cache\nvolumes:\n  {proj}-cache:\n    driver: local\n    driver_opts:\n      type: none\n      o: bind\n      device: {path}\n",
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    volumes:\n      - {proj}-cache:/cache:z\nvolumes:\n  {proj}-cache:\n    driver: local\n    driver_opts:\n      type: none\n      o: bind\n      device: {path}\n",
 		path = dir.path().display()
 	);
 	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	// The `:z` relabel is not optional. This volume binds a host directory, and
+	// on an SELinux-enforcing host the container is denied the write without it —
+	// which is what reddened the Podman 5 leg of pull request #1278 while passing
+	// on my machine, where SELinux is not enabled. The same trap is recorded in
+	// .github/podman-known-failures-5 for run_flags::engine_run_applies_volume_
+	// publish_and_interactive.
+	//
 	// The driver_opts bind the volume to this temp directory, so a file written
 	// at /cache in the container has to appear on the host here. Without the opts
 	// taking effect the container would still get a working /cache — an ordinary
