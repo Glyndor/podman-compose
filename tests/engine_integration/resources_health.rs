@@ -343,8 +343,30 @@ async fn depends_on_service_healthy_with_default_timeout() {
 	)
 	.unwrap();
 
+	// The comment above states the failure mode exactly: without the compose-spec
+	// default, Podman treats a missing Timeout as 0s, every probe fails "exceeded
+	// timeout of 0s", db never reports healthy and this `up` hangs until the
+	// health deadline. A hang is not something a bare `.unwrap()` can report, so
+	// bound it.
+	let started = std::time::Instant::now();
 	engine.up(&file).await.unwrap();
+	let elapsed = started.elapsed();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		elapsed < std::time::Duration::from_secs(45),
+		"up took {elapsed:?} — a healthcheck with no explicit timeout must get the spec default, not 0s"
+	);
+	assert_eq!(
+		names,
+		vec![format!("{proj}-db-1"), format!("{proj}-web-1")],
+		"web did not come up behind a healthcheck that omits timeout and retries"
+	);
 }
 
 #[tokio::test]
@@ -401,7 +423,31 @@ async fn depends_on_scaled_service_completed() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	// The comment above names the regression precisely: a scaled dependency has no
+	// container under the base name, so a readiness wait aimed at `init` rather
+	// than `init-1` 404s and aborts `up`.
+	//
+	// Measured: aiming the wait at the base name reddens this test at
+	// `up().unwrap()`, not here — so the bare unwrap already covered that
+	// regression. What the assertion adds is that both replicas exist and app
+	// came up with them, which the unwrap could not distinguish from a run where
+	// app was silently skipped. Precision, not new falsifiability.
+	assert_eq!(
+		names,
+		vec![
+			format!("{proj}-app-1"),
+			format!("{proj}-init-1"),
+			format!("{proj}-init-2"),
+		],
+		"a scaled completed-successfully dependency did not resolve to both replicas plus the dependant"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -495,14 +541,39 @@ async fn depends_on_healthy_no_healthcheck_skips_wait() {
 	)
 	.unwrap();
 
+	// "Skips the wait" is the claim, and the way it fails is by NOT skipping:
+	// waiting on a container that has no healthcheck can only end in the timeout,
+	// so the test would take the full health deadline and then error rather than
+	// fail. A bound turns that into an assertion.
+	let started = std::time::Instant::now();
 	engine.up(&file).await.unwrap();
+	let elapsed = started.elapsed();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		elapsed < std::time::Duration::from_secs(30),
+		"up took {elapsed:?} — a service_healthy dependency with no healthcheck must be skipped, not waited on"
+	);
+	assert_eq!(
+		names,
+		vec![format!("{proj}-backend-1"), format!("{proj}-frontend-1")],
+		"the dependant did not come up despite the healthcheck-less dependency being skipped"
+	);
 }
 
 // ---------------------------------------------------------------------------
 // PS with port bindings
 // ---------------------------------------------------------------------------
 
+/// `Engine::ps` prints and returns `Result<()>`, so the port column it exists to
+/// render is not reachable from here. `cli_ps_subcommand` asserts the table, and
+/// `stats_flags::cli_port_prints_the_published_binding` asserts the binding
+/// itself. Kept because it drives the with-ports branch of the same call.
 #[tokio::test]
 async fn ps_with_port_bindings() {
 	let client = match podman().await {
@@ -525,6 +596,11 @@ async fn ps_with_port_bindings() {
 // Query: attach_logs streaming and logs stderr
 // ---------------------------------------------------------------------------
 
+/// `attach_logs` streams to stdout, so what it carries cannot be read from the
+/// library. Unlike `attach_logs_empty_attach_returns`, which asserts a bound
+/// because "returns immediately" is checkable without the stream, there is
+/// nothing here to bound — this one names the content. No CLI test covers
+/// attached output either, so the claim in the name is unverified.
 #[tokio::test]
 async fn attach_logs_streams_container_output() {
 	let client = match podman().await {
@@ -545,6 +621,10 @@ async fn attach_logs_streams_container_output() {
 	let _ = engine.down(&file).await;
 }
 
+/// Same: `logs` prints, and whether a container's stderr is interleaved into it
+/// is a property of the output. `cli_logs_subcommand` asserts stdout content and
+/// the service prefix, but drives a service that writes only to stdout — so the
+/// stderr path this test is named for is asserted nowhere.
 #[tokio::test]
 async fn logs_with_stderr_output() {
 	let client = match podman().await {
