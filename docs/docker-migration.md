@@ -222,11 +222,20 @@ Both forms of `depends_on` behave this way, short and long. When **both**
 services carry the profile, podup agrees with docker compose and starts neither
 — the profile is doing its job and nothing contradicts it.
 
+**The Compose Specification does not decide this.** It says only that a service
+with `profiles` "is only started if the profile is activated", and says nothing
+about a dependency whose profile is inactive. Docker's own documentation treats
+it as something the author must fix — the dependency has to be "in the same
+profile, started separately, or not assigned to any profile" — so its rejection
+is an implementation choice in a case the specification leaves open, not a rule
+podup is breaking.
+
 **What this means for you.** A compose file relying on this runs under podup and
 is rejected by docker compose, so it is not portable back. If you want the
-dependency to stay out, give the dependant the same profile; then neither
-starts, in both tools. Note also that docker compose's message is misleading —
-`db` is not undefined, it is defined and filtered.
+dependency to stay out, or you need the file to work under both tools, give the
+dependant the same profile; then neither starts, everywhere. Note also that
+docker compose's message is misleading — `db` is not undefined, it is defined
+and filtered.
 
 ## Accepted but has no effect
 
