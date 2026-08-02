@@ -84,6 +84,22 @@ fn bin() -> &'static str {
 ///
 /// The comparison is exact rather than a substring, so "started twice" cannot be
 /// satisfied by a container that started three times.
+/// Poll until a file on the HOST reads exactly `expect` once trimmed, or `secs`
+/// elapse. The host side of [`poll_container_file`], for the tests that observe
+/// ordering through a bind mount shared by two containers.
+async fn poll_host_file(path: std::path::PathBuf, expect: &str, secs: u64) -> bool {
+	let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
+	while tokio::time::Instant::now() < deadline {
+		if let Ok(out) = std::fs::read_to_string(&path) {
+			if out.trim() == expect {
+				return true;
+			}
+		}
+		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+	}
+	false
+}
+
 async fn poll_container_file(
 	engine: &Engine,
 	container: &str,
