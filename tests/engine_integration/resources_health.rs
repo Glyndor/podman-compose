@@ -18,7 +18,45 @@ async fn named_volume_created_on_up() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let cname = format!("{proj}-web-1");
+	// Write into the mount, then force a recreate. A named volume outlives the
+	// container that mounted it, so the file has to still be there afterwards. If
+	// /data were ordinary container filesystem, the recreate would take it along,
+	// and `up` returning Ok would look exactly the same either way.
+	//
+	// Known limit, measured rather than assumed: this does NOT detect podup
+	// skipping the volume creation. With `create_volumes` stubbed out to a no-op
+	// the test still passed, because Podman creates a named volume on first use
+	// anyway. What explicit creation adds is the `podup.project` label that makes
+	// `down --volumes` recognise the volume as the project's, and reading a
+	// volume's labels is not something the library returns. Anyone tightening
+	// this needs that, not another assertion on the contents.
+	engine
+		.test_exec_capture(
+			&cname,
+			vec![
+				"sh".into(),
+				"-c".into(),
+				"echo in-volume > /data/marker".into(),
+			],
+		)
+		.await
+		.unwrap();
+	engine
+		.up_with_options(&file, false, &[], &[], false, true, false)
+		.await
+		.unwrap();
+	let after = engine
+		.test_exec_capture(&cname, vec!["cat".into(), "/data/marker".into()])
+		.await
+		.unwrap_or_default();
 	engine.down_with_options(&file, true).await.unwrap();
+
+	assert_eq!(
+		after.trim(),
+		"in-volume",
+		"the mount did not survive a container recreate, so it was not backed by the named volume"
+	);
 }
 
 #[tokio::test]
@@ -331,7 +369,18 @@ async fn profile_filtered_service_skipped() {
 		.up_with_options(&file, false, &[], &[], false, false, false)
 		.await
 		.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	assert_eq!(
+		names,
+		vec![format!("{proj}-web-1")],
+		"the profile-gated service was started even though its profile is not active"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +401,21 @@ async fn scale_creates_multiple_replicas() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	// Both replicas, and the `-1`/`-2` suffixes rather than a bare base name: a
+	// scaled service has no container under the base name, which is the shape
+	// that made the readiness wait 404 in depends_on_scaled_service_completed.
+	assert_eq!(
+		names,
+		vec![format!("{proj}-worker-1"), format!("{proj}-worker-2")],
+		"replicas: 2 did not produce two suffixed containers"
+	);
 }
 
 // ---------------------------------------------------------------------------
