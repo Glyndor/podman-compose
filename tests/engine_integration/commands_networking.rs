@@ -104,6 +104,10 @@ async fn engine_run_nonzero_exit_returns_run_exited() {
 // Top
 // ---------------------------------------------------------------------------
 
+/// `Engine::top` returns `Result<()>` and writes the process table to stdout, so
+/// at this level the only thing to assert is that asking a running project does
+/// not error. What it prints is checked in `cli_commands::cli_top_subcommand`,
+/// which reads the container name, the header and the process actually running.
 #[tokio::test]
 async fn engine_top_running_container() {
 	let client = match podman().await {
@@ -126,6 +130,8 @@ async fn engine_top_running_container() {
 // Images
 // ---------------------------------------------------------------------------
 
+/// Same shape: `Engine::images` prints and returns `Result<()>`. The output is
+/// asserted in `cli_commands::cli_images_subcommand`.
 #[tokio::test]
 async fn engine_images_lists_service_images() {
 	let client = match podman().await {
@@ -294,6 +300,11 @@ async fn restart_scaled_service_all_replicas() {
 	);
 }
 
+/// Unassertable here, and — unlike `top` and `images` — **not covered anywhere
+/// else either**. `logs` on a scaled service prints, so the library returns
+/// nothing to check, and no CLI test drives a scaled project through it. The
+/// claim in the name, that every replica is included, is currently unverified.
+/// Closing that needs a CLI-level test over `replicas: 2`, not an assertion here.
 #[tokio::test]
 async fn logs_scaled_service_all_replicas() {
 	let client = match podman().await {
@@ -313,6 +324,8 @@ async fn logs_scaled_service_all_replicas() {
 	engine.down(&file).await.unwrap();
 }
 
+/// Same gap as the scaled `logs` above: `cli_top_subcommand` drives a
+/// single-service project, so "all replicas" is asserted nowhere.
 #[tokio::test]
 async fn top_scaled_service_all_replicas() {
 	let client = match podman().await {

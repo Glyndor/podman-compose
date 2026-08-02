@@ -323,6 +323,23 @@ async fn cli_top_subcommand() {
 		.output()
 		.unwrap();
 	assert!(top.status.success(), "top failed: {:?}", top.stderr);
+	// The exit code was the whole check, and passing `top.stderr` into the failure
+	// message made it look like the output was being read when nothing asserted
+	// anything about it. `top` exists to print processes: the container it belongs
+	// to, the column header, and the command actually running inside.
+	let out = String::from_utf8_lossy(&top.stdout);
+	assert!(
+		out.contains(&format!("{proj}-web-1")),
+		"top did not name the container the processes belong to: {out:?}"
+	);
+	assert!(
+		out.contains("PID") && out.contains("CMD"),
+		"top printed no process table header: {out:?}"
+	);
+	assert!(
+		out.contains("sleep infinity"),
+		"top did not report the process running in the container: {out:?}"
+	);
 
 	Command::new(bin())
 		.args(["-f", compose.to_str().unwrap(), "-p", &proj, "down"])
