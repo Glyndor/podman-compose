@@ -67,12 +67,44 @@ async fn build_with_args_and_extra_tags() {
 	let main_tag = format!("podup-test-bat-{}:latest", pid);
 	let extra_tag = format!("podup-test-bat-extra-{}:v1", pid);
 	let yaml = format!(
-		"services:\n  app:\n    build:\n      context: .\n      dockerfile_inline: |\n        FROM alpine:latest\n        ARG VERSION=0\n        RUN echo Version $VERSION\n      args:\n        VERSION: \"1.0\"\n      tags:\n        - {extra_tag}\n    image: {main_tag}\n    command: [\"sleep\", \"infinity\"]\n"
+		"services:\n  app:\n    build:\n      context: .\n      dockerfile_inline: |\n        FROM alpine:latest\n        ARG VERSION=0\n        RUN echo $$VERSION > /version\n      args:\n        VERSION: \"1.0\"\n      tags:\n        - {extra_tag}\n    image: {main_tag}\n    command: [\"sleep\", \"infinity\"]\n"
 	);
 	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	// Two separate problems, both of which made the old version unfalsifiable.
+	// `RUN echo` leaves nothing in the image, so a build that dropped the arg
+	// produced a byte-identical result — hence writing the value to a file. And
+	// the `$$` is load-bearing: compose substitutes `$VERSION` in the YAML before
+	// the Dockerfile is ever assembled, so the single-dollar form the old test
+	// used reached the build as an empty string and the ARG was never exercised
+	// at all.
+	let version = engine
+		.test_exec_capture(
+			&format!("{proj}-app-1"),
+			vec!["cat".into(), "/version".into()],
+		)
+		.await
+		.unwrap_or_default();
+	let extra = image_id(&extra_tag);
+	let main = image_id(&main_tag);
 	engine.down(&file).await.unwrap();
+	for t in [&main_tag, &extra_tag] {
+		let _ = std::process::Command::new("podman")
+			.args(["rmi", "-f", t])
+			.status();
+	}
+
+	assert_eq!(
+		version.trim(),
+		"1.0",
+		"the build arg did not reach the image"
+	);
+	assert!(!extra.is_empty(), "the extra tag was never applied");
+	assert_eq!(
+		extra, main,
+		"the extra tag points at a different image than the main one"
+	);
 }
 
 #[tokio::test]
@@ -86,7 +118,7 @@ async fn build_with_cli_no_cache_and_build_arg() {
 	let engine = Engine::with_base_dir(client, proj.clone(), dir.path().to_path_buf());
 	let tag = format!("podup-test-bco-{}:latest", std::process::id());
 	let yaml = format!(
-		"services:\n  app:\n    build:\n      context: .\n      dockerfile_inline: |\n        FROM alpine:latest\n        ARG VERSION=0\n        RUN echo Version $VERSION\n      args:\n        VERSION: \"1.0\"\n    image: {tag}\n    command: [\"sleep\", \"infinity\"]\n"
+		"services:\n  app:\n    build:\n      context: .\n      dockerfile_inline: |\n        FROM alpine:latest\n        ARG VERSION=0\n        RUN echo $$VERSION > /version\n      args:\n        VERSION: \"1.0\"\n    image: {tag}\n    command: [\"sleep\", \"infinity\"]\n"
 	);
 	let file = parse_str(&yaml).unwrap();
 
@@ -103,6 +135,26 @@ async fn build_with_cli_no_cache_and_build_arg() {
 		)
 		.await
 		.unwrap();
+	// The point of the override is that 2.0 wins over the 1.0 in the compose file.
+	// This test never starts a container, so read the baked value straight out of
+	// the image with a throwaway run.
+	let baked = String::from_utf8_lossy(
+		&std::process::Command::new("podman")
+			.args(["run", "--rm", &tag, "cat", "/version"])
+			.output()
+			.expect("podman run")
+			.stdout,
+	)
+	.trim()
+	.to_string();
+	let _ = std::process::Command::new("podman")
+		.args(["rmi", "-f", &tag])
+		.status();
+
+	assert_eq!(
+		baked, "2.0",
+		"the CLI build arg did not override the value in the compose file"
+	);
 }
 
 #[tokio::test]
@@ -116,12 +168,30 @@ async fn build_inline_dockerfile() {
 	let engine = Engine::with_base_dir(client, proj.clone(), dir.path().to_path_buf());
 	let image_tag = format!("podup-test-build-{}:latest", std::process::id());
 	let yaml = format!(
-		"services:\n  app:\n    build:\n      context: .\n      dockerfile_inline: |\n        FROM alpine:latest\n        RUN echo built\n    image: {image_tag}\n    command: [\"sleep\", \"infinity\"]\n"
+		"services:\n  app:\n    build:\n      context: .\n      dockerfile_inline: |\n        FROM alpine:latest\n        RUN echo inline-built > /built\n    image: {image_tag}\n    command: [\"sleep\", \"infinity\"]\n"
 	);
 	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	// `RUN echo built` left nothing to look at, so an inline Dockerfile that was
+	// ignored in favour of a plain `FROM alpine` pull produced the same container.
+	let built = engine
+		.test_exec_capture(
+			&format!("{proj}-app-1"),
+			vec!["cat".into(), "/built".into()],
+		)
+		.await
+		.unwrap_or_default();
 	engine.down(&file).await.unwrap();
+	let _ = std::process::Command::new("podman")
+		.args(["rmi", "-f", &image_tag])
+		.status();
+
+	assert_eq!(
+		built.trim(),
+		"inline-built",
+		"dockerfile_inline was not the image that got built"
+	);
 }
 
 #[tokio::test]
@@ -133,7 +203,7 @@ async fn build_from_dockerfile_in_context() {
 	let dir = tempfile::tempdir().unwrap();
 	fs::write(
 		dir.path().join("Dockerfile"),
-		b"FROM alpine:latest\nRUN echo context-build\n",
+		b"FROM alpine:latest\nRUN echo context-build > /built\n",
 	)
 	.unwrap();
 
@@ -146,7 +216,26 @@ async fn build_from_dockerfile_in_context() {
 	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	// The context's own Dockerfile has to be the one that built the image. With
+	// `RUN echo` alone, a build that fell back to pulling alpine straight looked
+	// identical from outside.
+	let built = engine
+		.test_exec_capture(
+			&format!("{proj}-app-1"),
+			vec!["cat".into(), "/built".into()],
+		)
+		.await
+		.unwrap_or_default();
 	engine.down(&file).await.unwrap();
+	let _ = std::process::Command::new("podman")
+		.args(["rmi", "-f", &image_tag])
+		.status();
+
+	assert_eq!(
+		built.trim(),
+		"context-build",
+		"the Dockerfile in the build context was not used"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +256,49 @@ async fn explicit_network_created() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	// These two are NOT mutation-proved, and the reason is worth keeping. Both
+	// mutations I tried — never creating declared networks, and creating them
+	// under a different name — take `up` itself down, because the container
+	// references a network that is then missing. So the old `up().unwrap()` did
+	// already cover "the network exists under the name the container expects".
+	//
+	// What these add is the contract in the open: the name carries the project
+	// prefix, and the container is actually attached rather than silently left on
+	// the default network. They would catch a future change where `up` stops
+	// failing on a missing network. Until then they are documentation with teeth,
+	// not verified coverage.
+	let networks = String::from_utf8_lossy(
+		&std::process::Command::new("podman")
+			.args(["network", "ls", "--format", "{{.Name}}"])
+			.output()
+			.expect("podman network ls")
+			.stdout,
+	)
+	.to_string();
+	let attached = String::from_utf8_lossy(
+		&std::process::Command::new("podman")
+			.args([
+				"inspect",
+				&format!("{proj}-web-1"),
+				"--format",
+				"{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}",
+			])
+			.output()
+			.expect("podman inspect")
+			.stdout,
+	)
+	.to_string();
 	engine.down(&file).await.unwrap();
+
+	let expected = format!("{proj}_mynet");
+	assert!(
+		networks.lines().any(|n| n == expected),
+		"the declared network {expected} was not created: {networks:?}"
+	);
+	assert!(
+		attached.contains(&expected),
+		"the container was not attached to {expected}: {attached:?}"
+	);
 }
 
 // ---------------------------------------------------------------------------
