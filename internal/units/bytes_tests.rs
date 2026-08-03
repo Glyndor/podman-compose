@@ -283,6 +283,32 @@ fn a_zero_component_count_still_renders_one_component() {
 	);
 }
 
+/// Three components by default, the same count durations use. One rule across
+/// both formatters: a reader who has learned what `1h 5m 3s` means should not
+/// have to learn a second one for a size.
+#[test]
+fn the_default_component_count_is_three_and_matches_durations() {
+	use super::super::DurationFormat;
+	let fmt = SizeFormat::decimal().default_parts();
+	assert_eq!(fmt.shape, SizeShape::Composite { parts: 3 });
+	assert_eq!(
+		format_bytes(1_512_200_000, &fmt),
+		"1GB 512MB 200kB",
+		"three components, largest first"
+	);
+	// Read off the same constant, so the two cannot drift apart.
+	assert_eq!(DurationFormat::default_parts(), DurationFormat::Parts(3));
+}
+
+/// Three is what a caller gets when it does not choose, not a floor on the
+/// output: a value with fewer components renders only the ones it has.
+#[test]
+fn the_default_count_never_pads_a_short_value() {
+	let fmt = SizeFormat::decimal().default_parts();
+	assert_eq!(format_bytes(1000, &fmt), "1kB");
+	assert_eq!(format_bytes(0, &fmt), "0B");
+}
+
 /// The builders replace the shape rather than merging into it, so the last call
 /// wins and a caller cannot end up with a half-set combination.
 #[test]

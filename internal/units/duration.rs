@@ -58,8 +58,13 @@ pub(crate) enum DurationFormat {
 impl DurationFormat {
 	/// Three components, which is the width the owner asked for: enough to say
 	/// `1h 5m 3s` or `1y 2mo 3d` without running on into `200ms`.
+	///
+	/// The count is shared with [`SizeFormat::default_parts`] rather than
+	/// written twice, so sizes and durations cannot drift to different defaults.
+	///
+	/// [`SizeFormat::default_parts`]: super::SizeFormat::default_parts
 	pub(crate) const fn default_parts() -> Self {
-		Self::Parts(3)
+		Self::Parts(super::bytes::DEFAULT_PARTS)
 	}
 }
 
