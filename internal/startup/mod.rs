@@ -503,6 +503,7 @@ mod tests {
 			all: false,
 			quiet: false,
 			services_only: false,
+			size: false,
 			filter: vec![],
 			status: vec![],
 			format: OutputFormat::Table,

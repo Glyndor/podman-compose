@@ -176,6 +176,7 @@ List project containers.
 | `--status <STATE>` | Show only containers in this state. Repeatable; folded together with any `status=` from `--filter`. | all |
 | `--filter <KEY=VAL>` | `name=<NAME>` or `status=<STATE>`. An unknown key is an error. | none |
 | `--services` | Print service names only. | off |
+| `-s, --size` | Add a SIZE column with each container's on-disk footprint. | off |
 
 ### `ls`
 List podup compose projects on the host. Needs no compose file.
@@ -283,6 +284,18 @@ stopped container reports its exit code instead (`Exited (7)`).
 `CREATED` is how long ago the container was made. It differs from `STATUS` after
 a restart, which is the point of having both: a container created three days ago
 and started four seconds ago reads `3d` / `Up 4s`.
+
+`SIZE` appears only with `-s/--size`. It reads `143kB (virtual 225MB)`: the bytes
+the container has written on top of its image, then the image's own size — the
+same shape `podman ps -s` and `docker ps -s` print, and `virtual` is the image
+size rather than the total of the two.
+
+It is opt-in because libpod has to walk each container's writable layer to
+answer, which costs real time as a project grows: measured across 59 containers
+on Podman 5.7.0, asking for it took the underlying call from 21 ms to 109 ms. On
+a small project the difference is below noise. Under `--format json` the field is
+`null` when the size was not requested, so a consumer can tell "not asked" from
+"empty".
 
 Both spans are largest-first and up to three components, skipping units that are
 empty — `1y 2mo 3d`, `1h 5m 3s`, `5s`. A year is 365 days and a month is 30.

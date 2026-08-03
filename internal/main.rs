@@ -297,6 +297,7 @@ async fn run() -> podup::Result<()> {
 		all,
 		quiet,
 		services_only,
+		size,
 		filter,
 		status,
 		format,
@@ -337,7 +338,7 @@ async fn run() -> podup::Result<()> {
 		let client = podup::podman::connect(resolve_socket(cli.socket.as_deref()).as_deref())?;
 		let engine = podup::Engine::with_base_dir(client, project, base_dir);
 		return engine
-			.ps_filtered(
+			.ps_filtered_with_display(
 				&file,
 				podup::PsOptions {
 					all: *all,
@@ -350,6 +351,7 @@ async fn run() -> podup::Result<()> {
 					status: status.clone(),
 					filters: filter.clone(),
 				},
+				podup::PsDisplayOptions::default().with_size(*size),
 			)
 			.await;
 	}
