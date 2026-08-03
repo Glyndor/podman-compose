@@ -118,9 +118,9 @@ async fn cli_ps_subcommand() {
 		.position(|c| *c == "Up")
 		.unwrap_or_else(|| panic!("ps printed the container without its status: {row:?}"));
 	assert!(
-		cells.get(up + 1).is_some_and(|span| {
-			span.chars().next().is_some_and(|c| c.is_ascii_digit())
-		}),
+		cells
+			.get(up + 1)
+			.is_some_and(|span| { span.chars().next().is_some_and(|c| c.is_ascii_digit()) }),
 		"the uptime after `Up` is missing or not a span: {row:?}"
 	);
 	// CREATED sits between the image and STATUS. It is only ever filled by
@@ -128,7 +128,11 @@ async fn cli_ps_subcommand() {
 	// parser failing against the live server — which no unit test can see,
 	// because every fixture it has was written by hand.
 	assert!(
-		up >= 3 && cells[up - 1].chars().next().is_some_and(|c| c.is_ascii_digit()),
+		up >= 3
+			&& cells[up - 1]
+				.chars()
+				.next()
+				.is_some_and(|c| c.is_ascii_digit()),
 		"ps printed no CREATED age, so the timestamp did not parse: {row:?}"
 	);
 
