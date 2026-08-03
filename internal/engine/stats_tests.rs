@@ -32,6 +32,30 @@ fn format_bytes_scales_units() {
 	assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.0GiB");
 }
 
+/// The edges the scaling test steps over. It goes from 512 straight to 1024, so
+/// the last value that must stay in bytes — and the empty case — were never
+/// pinned, and a threshold with no test on either side of it is where an
+/// off-by-one lives.
+#[test]
+fn format_bytes_pins_both_sides_of_the_first_threshold() {
+	assert_eq!(format_bytes(0), "0B");
+	assert_eq!(format_bytes(1), "1B");
+	assert_eq!(format_bytes(1023), "1023B");
+	assert_eq!(format_bytes(1024), "1.0KiB");
+}
+
+/// Every unit in the table, including the two the counters can only reach in
+/// principle. `u64::MAX` is just under 16 EiB, so this also pins that the
+/// function is total for its input type rather than saturating.
+#[test]
+fn format_bytes_reaches_the_top_of_the_table() {
+	assert_eq!(format_bytes(1u64 << 40), "1.0TiB");
+	assert_eq!(format_bytes(1u64 << 50), "1.0PiB");
+	assert_eq!(format_bytes(1u64 << 60), "1.0EiB");
+	// Before the table grew, this printed 16777216.0TiB.
+	assert_eq!(format_bytes(u64::MAX), "16.0EiB");
+}
+
 #[test]
 fn format_row_sums_network_and_shows_name() {
 	let mut network = HashMap::new();

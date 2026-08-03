@@ -137,7 +137,12 @@ struct NetStat {
 
 /// Render a byte count as a compact human string (`1.5MiB`). Pure for testing.
 fn format_bytes(bytes: u64) -> String {
-	const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+	// Through EiB, so the table is total for the input type: `u64::MAX` is just
+	// under 16 EiB. It used to stop at TiB, which made a petabyte render as
+	// `1024.0TiB` — correct arithmetic, wrong unit, and nine digits wide in a
+	// column sized for five. The NET I/O counters are cumulative u64, so the
+	// large end is reachable in principle even though no container gets there.
+	const UNITS: [&str; 7] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
 	let mut value = bytes as f64;
 	let mut unit = 0;
 	while value >= 1024.0 && unit < UNITS.len() - 1 {
