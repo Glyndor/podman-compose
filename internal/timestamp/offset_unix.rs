@@ -30,6 +30,14 @@ pub(super) fn local_offset_seconds(unix_secs: i64) -> Option<i64> {
 	// means libc could not resolve a zone at all and is handled rather than
 	// assumed away.
 	let result = unsafe { libc::localtime_r(&time, &mut tm) };
+	// Deleting this check survives the whole suite, and that is a statement
+	// about reach rather than about the tests: `localtime_r` returns null only
+	// when libc cannot resolve a zone at all — a missing or corrupt
+	// `/etc/localtime`, or a `TZ` it cannot parse — and no in-process test can
+	// produce that without replacing libc. The branch it guards is reachable in
+	// production and is exercised from the caller side instead:
+	// `render_with_offset(_, None)` has its own test, so what happens when the
+	// offset is unknown is pinned even though this line cannot be.
 	if result.is_null() {
 		return None;
 	}
