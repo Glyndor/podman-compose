@@ -19,7 +19,12 @@ const BINARY_UNITS: [&str; 7] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
 
 /// Decimal units, largest exponent last. `EB` is 1000^6; `u64::MAX` is a little
 /// over 18 of them, so this ladder covers the whole input type too.
-const DECIMAL_UNITS: [&str; 7] = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+///
+/// `kB` with a lowercase k, which is the SI prefix for kilo — `K` is kelvin.
+/// This is not pedantry about the standard: it is what the tools this table is
+/// compared against print. `podman images` rendered `805 kB` on Podman 5.7.0,
+/// and every other prefix from mega up is uppercase in the same output.
+const DECIMAL_UNITS: [&str; 7] = ["B", "kB", "MB", "GB", "TB", "PB", "EB"];
 
 impl SizeBase {
 	/// The factor between two neighbouring units on this ladder.
@@ -50,6 +55,19 @@ pub(crate) enum SizeShape {
 	/// One unit carrying `decimals` decimal places: `8.71MB`. What a table cell
 	/// wants, since a column has a width budget.
 	Single { decimals: usize },
+	/// One unit carrying `digits` significant digits: `98.2MB`, `8.71MB`,
+	/// `805kB`, `1.01GB`.
+	///
+	/// This is what podman and docker print, measured on Podman 5.7.0 and
+	/// docker compose v5.1.3 rather than assumed — `podman images` rendered
+	/// `1.01 GB`, `101 MB` and `103 MB`, and `docker compose images` rendered
+	/// `98.2MB`, all three digits wide. A fixed decimal count cannot express it:
+	/// `98.23MB` and `8.71MB` disagree about how many decimals the reference
+	/// uses because the reference is not counting decimals at all.
+	///
+	/// The digit count is also what keeps the column from breathing — every
+	/// value is three digits plus its unit, whatever its magnitude.
+	Significant { digits: usize },
 	/// Up to `parts` whole components, largest first, zeros skipped:
 	/// `1TB 1GB`, `1GB 512MB`. For the places where the number is the point.
 	Composite { parts: usize },
@@ -97,6 +115,56 @@ impl SizeFormat {
 			..self
 		}
 	}
+
+	/// Same ladder, `digits` significant digits on a single component.
+	pub(crate) const fn with_significant(self, digits: usize) -> Self {
+		Self {
+			shape: SizeShape::Significant { digits },
+			..self
+		}
+	}
+}
+
+/// How many decimal places a single-unit value shows.
+///
+/// Two ways of asking, because a table that has to line up against podman's own
+/// output is asking a different question from one that just needs a readable
+/// number.
+#[derive(Clone, Copy)]
+enum Precision {
+	/// Always this many decimals, whatever the magnitude.
+	Fixed(usize),
+	/// As many decimals as leave this many digits in total.
+	Significant(usize),
+}
+
+impl Precision {
+	/// Decimal places for a value already reduced onto its unit.
+	///
+	/// Callers hand over a value of at least one — unit selection guarantees it,
+	/// since a rung is only taken once the value reaches it. A smaller value is
+	/// still answered rather than underflowing, counting the leading zero as the
+	/// one digit before the point.
+	///
+	/// There is no clamp on `digits` because none is reachable: the digit count
+	/// before the point is always at least one, so `saturating_sub` already
+	/// floors the result, and `{:.0}` prints a digit regardless. A clamp was
+	/// written here first and a mutation deleting it survived every test, which
+	/// is what dead defensive code looks like from the outside.
+	fn decimals_for(self, value: f64) -> usize {
+		match self {
+			Self::Fixed(decimals) => decimals,
+			Self::Significant(digits) => {
+				let whole = value.trunc().abs();
+				let before_the_point = if whole < 1.0 {
+					1
+				} else {
+					whole.log10().floor() as usize + 1
+				};
+				digits.saturating_sub(before_the_point)
+			}
+		}
+	}
 }
 
 /// Render `bytes` as a human-readable size.
@@ -109,13 +177,16 @@ impl SizeFormat {
 /// integer division, so `1TB 1GB` is exact rather than a float rounded twice.
 pub(crate) fn format_bytes(bytes: u64, fmt: &SizeFormat) -> String {
 	match fmt.shape {
-		SizeShape::Single { decimals } => single(bytes, fmt.base, decimals),
+		SizeShape::Single { decimals } => single(bytes, fmt.base, Precision::Fixed(decimals)),
+		SizeShape::Significant { digits } => {
+			single(bytes, fmt.base, Precision::Significant(digits))
+		}
 		SizeShape::Composite { parts } => composite(bytes, fmt.base, parts),
 	}
 }
 
 /// One number and one unit: the largest unit whose value is at least one.
-fn single(bytes: u64, base: SizeBase, decimals: usize) -> String {
+fn single(bytes: u64, base: SizeBase, precision: Precision) -> String {
 	let units = base.units();
 	let step = base.step();
 
@@ -133,6 +204,7 @@ fn single(bytes: u64, base: SizeBase, decimals: usize) -> String {
 	}
 
 	let mut value = bytes as f64 / divisor as f64;
+	let mut decimals = precision.decimals_for(value);
 	// Rounding can carry the value onto the next rung: 1048575 bytes is
 	// 1023.999 KiB, which prints as `1024.00KiB` — right arithmetic, and the
 	// same unit-boundary artefact the ladder exists to avoid. Promote once,
@@ -146,6 +218,11 @@ fn single(bytes: u64, base: SizeBase, decimals: usize) -> String {
 		divisor *= step;
 		index += 1;
 		value = bytes as f64 / divisor as f64;
+		// The new value has a different magnitude, so a significant-digit
+		// request wants a different number of decimals for it. Recomputing is
+		// the whole reason the promotion happens before the format rather than
+		// as a retry after one.
+		decimals = precision.decimals_for(value);
 	}
 	format!("{value:.decimals$}{}", units[index])
 }

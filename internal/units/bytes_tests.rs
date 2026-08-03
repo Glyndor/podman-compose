@@ -44,7 +44,8 @@ fn binary_units_step_at_their_own_boundaries() {
 #[test]
 fn decimal_units_step_at_their_own_boundaries() {
 	let fmt = SizeFormat::decimal();
-	assert_eq!(format_bytes(1000, &fmt), "1.00KB");
+	// Lowercase k, the SI prefix, matching what podman prints.
+	assert_eq!(format_bytes(1000, &fmt), "1.00kB");
 	assert_eq!(format_bytes(1000_u64.pow(2), &fmt), "1.00MB");
 	assert_eq!(format_bytes(1000_u64.pow(3), &fmt), "1.00GB");
 	assert_eq!(format_bytes(1000_u64.pow(4), &fmt), "1.00TB");
@@ -117,6 +118,92 @@ fn the_decimal_count_is_configurable() {
 		format_bytes(bytes, &SizeFormat::binary().with_decimals(4)),
 		"1.5000GiB"
 	);
+}
+
+/// The reference rendering, captured rather than assumed. Every value here was
+/// read off a real tool on 2026-08-03: `docker compose` v5.1.3 printed `98.2MB`
+/// for `redis:8-alpine`, and `podman images` printed `1.01 GB`, `101 MB` and
+/// `805 kB` on the same host. Three digits in all of them, which a fixed decimal
+/// count cannot produce — `98.2` has one decimal and `8.71` has two.
+#[test]
+fn significant_digits_match_what_podman_and_docker_print() {
+	let fmt = SizeFormat::decimal().with_significant(3);
+	assert_eq!(format_bytes(98_234_179, &fmt), "98.2MB");
+	assert_eq!(format_bytes(8_710_000, &fmt), "8.71MB");
+	assert_eq!(format_bytes(805_007, &fmt), "805kB");
+	assert_eq!(format_bytes(1_010_000_000, &fmt), "1.01GB");
+}
+
+/// The digit count holds across every magnitude, which is the property that
+/// keeps the column from breathing as rows scroll past. A fixed decimal count
+/// gives `1.00GB` and `999.00MB` — four characters apart.
+#[test]
+fn significant_digits_keep_a_constant_width() {
+	let fmt = SizeFormat::decimal().with_significant(3);
+	for (bytes, expected) in [
+		(1_000_u64, "1.00kB"),
+		(12_000, "12.0kB"),
+		(123_000, "123kB"),
+		(1_230_000, "1.23MB"),
+		(123_000_000_000_000_000, "123PB"),
+	] {
+		let rendered = format_bytes(bytes, &fmt);
+		assert_eq!(rendered, expected);
+		let digits = rendered.chars().filter(char::is_ascii_digit).count();
+		assert_eq!(digits, 3, "{rendered:?} is not three digits wide");
+	}
+}
+
+/// A promotion changes the value's magnitude, so the digit count has to be
+/// recomputed for the new rung. Without that, 999999 bytes rounds to `1000kB`
+/// and then renders as `1kB` — the promotion applied and the decimals did not.
+#[test]
+fn significant_digits_are_recomputed_after_a_promotion() {
+	let fmt = SizeFormat::decimal().with_significant(3);
+	assert_eq!(format_bytes(999_999, &fmt), "1.00MB");
+	assert_eq!(format_bytes(999_999_999, &fmt), "1.00GB");
+}
+
+/// Whole bytes stay whole under this shape too: there is no fraction of a byte,
+/// so a three-digit request cannot invent one.
+#[test]
+fn significant_digits_do_not_reach_below_a_byte() {
+	let fmt = SizeFormat::decimal().with_significant(3);
+	assert_eq!(format_bytes(0, &fmt), "0B");
+	assert_eq!(format_bytes(7, &fmt), "7B");
+	assert_eq!(format_bytes(999, &fmt), "999B");
+}
+
+/// A zero-digit request still shows a digit, because `{:.0}` prints one
+/// whatever it is handed. Nothing in the formatter enforces this — it is a
+/// property of the format machinery, and it is pinned here so a future clamp
+/// added "to be safe" has something to justify itself against.
+#[test]
+fn a_zero_digit_request_still_renders_a_digit() {
+	let fmt = SizeFormat::decimal().with_significant(0);
+	assert_eq!(format_bytes(8_710_000, &fmt), "9MB");
+}
+
+/// Tested one level below `format_bytes` on purpose. Unit selection guarantees
+/// the value handed over is at least one, so the sub-one branch cannot be
+/// reached through the public entry point — a mutation deleting the clamp that
+/// used to sit here survived every test that went in the front door, which is
+/// what dead defensive code looks like from outside. The clamp is gone; this
+/// pins what the arithmetic actually does, including where it is weak.
+#[test]
+fn the_decimal_count_is_pinned_below_its_public_entry_point() {
+	use super::Precision;
+	// The ordinary path, which is everything `format_bytes` can produce.
+	assert_eq!(Precision::Significant(3).decimals_for(98.2), 1);
+	assert_eq!(Precision::Significant(3).decimals_for(8.71), 2);
+	assert_eq!(Precision::Significant(3).decimals_for(805.0), 0);
+	assert_eq!(Precision::Fixed(4).decimals_for(805.0), 4);
+	// Sub-one values count their leading zero as the digit before the point.
+	// That means one significant digit of 0.5 asks for no decimals and renders
+	// `0` — a real weakness, and unreachable, so it is recorded rather than
+	// fixed. If a caller ever hands this a fraction, fix it then.
+	assert_eq!(Precision::Significant(3).decimals_for(0.5), 2);
+	assert_eq!(Precision::Significant(1).decimals_for(0.5), 0);
 }
 
 /// The owner's worked examples, in the base each was written in.

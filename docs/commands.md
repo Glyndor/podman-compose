@@ -262,6 +262,12 @@ Print the public binding for a port.
 ### `images`
 List images used by services.
 
+`SIZE` is the image's on-disk size, rendered in decimal units at three
+significant digits (`98.2MB`, `805kB`) so the column lines up with what `podman
+images` and `docker compose images` print. An image that is not present locally
+has an empty `SIZE` and an empty `IMAGE ID`. Under `--format json` the size is
+the raw byte count, not the rendered string.
+
 | Flag | Description | Default |
 |---|---|---|
 | `-q, --quiet` | Print image IDs only. | off |
