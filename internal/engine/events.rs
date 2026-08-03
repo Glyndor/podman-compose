@@ -208,46 +208,25 @@ fn format_event(value: &Value, json: bool) -> String {
 		crate::ui::stdout_colored() && !json,
 	)
 }
-
-/// Render a Unix timestamp as `YYYY-MM-DD HH:MM:SS` in UTC.
+/// Render an event's timestamp in the reader's own time zone, with the offset
+/// that applied at that instant.
 ///
-/// UTC, not local, and the reason is not that it is cheaper. An event log exists
-/// to be correlated — against another host's log, against a metric, against the
-/// same file read next year — and a bare local timestamp carries no offset, so
-/// it is ambiguous across a DST boundary and unreadable anywhere else. docker
-/// compose prints local without an offset; this is the case its rendering is
-/// adequate rather than right.
-///
-/// It also avoids a dependency. podup has never formatted a wall-clock time and
-/// carries no date crate; local time would need the tz database and therefore
-/// one, for a single column.
-///
-/// The civil-from-days conversion is Howard Hinnant's, shifted to a March-based
-/// year so the leap day lands at the end and no month-length table is needed.
+/// The calendar arithmetic used to live here as its own civil-from-days walk.
+/// It moved to `crate::timestamp`, which already held the inverse for parsing —
+/// the two halves are one thing, and a round-trip test between them only means
+/// something while neither can be edited without the other in view.
 pub(crate) fn format_event_time(unix_secs: i64) -> String {
-	let days = unix_secs.div_euclid(86_400);
-	let secs = unix_secs.rem_euclid(86_400);
-	// Shift the epoch to 0000-03-01, which puts February last.
-	let z = days + 719_468;
-	let era = z.div_euclid(146_097);
-	let doe = z.rem_euclid(146_097);
-	let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-	let y = yoe + era * 400;
-	let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-	let mp = (5 * doy + 2) / 153;
-	let d = doy - (153 * mp + 2) / 5 + 1;
-	let m = if mp < 10 { mp + 3 } else { mp - 9 };
-	let y = if m <= 2 { y + 1 } else { y };
-	format!(
-		"{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}",
-		secs / 3600,
-		(secs % 3600) / 60,
-		secs % 60
-	)
+	crate::timestamp::format_local(unix_secs)
 }
 
-/// Display width of the `TIME` column: `YYYY-MM-DD HH:MM:SS` is nineteen.
-const TIME_WIDTH: usize = 19;
+/// Display width of the `TIME` column.
+///
+/// `YYYY-MM-DD HH:MM:SS -05:00` is twenty-six. It was nineteen while the column
+/// rendered UTC and said nothing about it; adding the offset without widening
+/// truncated every row to `...19:00:0…`, which the tests caught. The two belong
+/// in one edit — a width that describes a format it no longer holds is the same
+/// class of bug as the `stats` header that had drifted off its own columns.
+const TIME_WIDTH: usize = 26;
 
 /// Display width of the `TYPE` column. `container` is the longest type libpod
 /// emits (`network`, `volume`, `image`, `secret`, `pod` are all shorter).
@@ -315,7 +294,7 @@ fn format_event_line(
 
 #[cfg(test)]
 mod tests {
-	use super::{build_event_filters, format_event};
+	use super::{build_event_filters, format_event, TIME_WIDTH};
 	use serde_json::json;
 
 	#[test]
@@ -366,18 +345,28 @@ mod tests {
 		// Columns are fixed-width now (#1248): TIME leads, `container` fills TYPE
 		// exactly, `start` is padded out to ACTION, and NAME is the trailing raw
 		// column.
+		//
+		// The TIME cell is asserted by width rather than by value: it renders
+		// the reader's wall clock, so a fixed string would pass on a machine at
+		// -05:00 and fail on a runner at UTC. `crate::timestamp` pins what goes
+		// in the cell; this pins that the columns after it land where the header
+		// says.
+		let out = format_event(&ev, false);
 		assert_eq!(
-			format_event(&ev, false),
-			"1970-01-01 00:00:00 container start          web-1"
+			&out[TIME_WIDTH..],
+			" container start          web-1",
+			"columns after TIME drifted: {out:?}"
 		);
 	}
 
 	#[test]
 	fn formats_libpod_native_shape() {
 		let ev = json!({ "Type": "container", "status": "die", "id": "abc123", "time": 0 });
+		let out = format_event(&ev, false);
 		assert_eq!(
-			format_event(&ev, false),
-			"1970-01-01 00:00:00 container die            abc123"
+			&out[TIME_WIDTH..],
+			" container die            abc123",
+			"columns after TIME drifted: {out:?}"
 		);
 	}
 
@@ -392,38 +381,11 @@ mod tests {
 
 #[cfg(test)]
 mod event_colour_tests {
-	use super::{format_event_line, format_event_time};
+	use super::{format_event_line, TIME_WIDTH};
 
-	/// Known instants, including the ones the arithmetic can get wrong: the epoch
-	/// itself, a leap day, the day after one, a century that is not a leap year
-	/// and one that is, and the end of a year. The conversion is a March-based
-	/// civil-from-days, so February and the year boundary are where it earns its
-	/// keep.
-	#[test]
-	fn format_event_time_pins_known_instants() {
-		assert_eq!(format_event_time(0), "1970-01-01 00:00:00");
-		assert_eq!(format_event_time(1), "1970-01-01 00:00:01");
-		// 1972 was a leap year: 29 February exists.
-		assert_eq!(format_event_time(68_169_600), "1972-02-29 00:00:00");
-		assert_eq!(format_event_time(68_256_000), "1972-03-01 00:00:00");
-		// 1900 is divisible by 4 and NOT a leap year; 2000 is divisible by 400
-		// and is one. The second is the case a naive rule gets wrong.
-		assert_eq!(format_event_time(951_782_400), "2000-02-29 00:00:00");
-		// Last second of a year, then the first of the next.
-		assert_eq!(format_event_time(1_735_689_599), "2024-12-31 23:59:59");
-		assert_eq!(format_event_time(1_735_689_600), "2025-01-01 00:00:00");
-		// The event this column was added for, captured from libpod.
-		assert_eq!(format_event_time(1_785_718_245), "2026-08-03 00:50:45");
-	}
-
-	/// Before the epoch. `div_euclid`/`rem_euclid` are used rather than `/` and
-	/// `%` precisely so a negative input floors instead of truncating toward
-	/// zero; with the plain operators this would render an hour of -1.
-	#[test]
-	fn format_event_time_handles_dates_before_the_epoch() {
-		assert_eq!(format_event_time(-1), "1969-12-31 23:59:59");
-		assert_eq!(format_event_time(-86_400), "1969-12-31 00:00:00");
-	}
+	// The instant-by-instant pinning that used to live here moved to
+	// `crate::timestamp` with the arithmetic itself. Keeping a copy next to the
+	// caller would be two places to update and one of them would rot.
 
 	/// An event with no `time` renders the column blank rather than inventing a
 	/// value. A timestamp that looks real and is not is worse than none.
@@ -431,7 +393,7 @@ mod event_colour_tests {
 	fn an_event_without_a_time_leaves_the_column_empty() {
 		let line = format_event_line(None, "container", "start", "web-1", false);
 		assert!(
-			line.starts_with("                    container"),
+			line.starts_with(&" ".repeat(TIME_WIDTH)),
 			"expected a blank time cell, got: {line:?}"
 		);
 	}
@@ -443,8 +405,9 @@ mod event_colour_tests {
 		let out = format_event_line(Some(0), "container", "start", "proj-web-1", false);
 		assert!(!out.contains('\u{1b}'), "{out:?}");
 		assert_eq!(
-			out,
-			"1970-01-01 00:00:00 container start          proj-web-1"
+			&out[TIME_WIDTH..],
+			" container start          proj-web-1",
+			"{out:?}"
 		);
 	}
 

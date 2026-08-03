@@ -289,6 +289,20 @@ empty — `1y 2mo 3d`, `1h 5m 3s`, `5s`. A year is 365 days and a month is 30.
 Under `--format json` the raw wire values are passed through instead: `Created`
 is the RFC 3339 string and `StartedAt` is Unix seconds.
 
+### `events` timestamps
+
+The `TIME` column is the reader's own wall clock, with the offset that applied at
+that instant: `2026-08-02 23:43:35 -05:00`. That matches what `podman events`
+prints, so a podup line and a podman line for the same event read the same.
+
+The offset is resolved per event rather than once, so a `--since` window
+spanning a daylight-saving change renders each side correctly. If the platform
+cannot determine a zone, the time is shown in UTC and marked `Z` rather than
+left ambiguous.
+
+`--format json` is untouched: it passes libpod's own event object straight
+through.
+
 ### `volumes [SERVICE...]`
 List the project's named volumes (a trailing service list narrows it to volumes
 those services mount). `EXTERNAL` is highlighted when it reads `yes`: podup
