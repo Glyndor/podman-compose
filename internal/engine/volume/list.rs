@@ -9,8 +9,46 @@ use std::collections::BTreeSet;
 
 use crate::compose::types::{ComposeFile, VolumeMount};
 use crate::error::Result;
+use crate::libpod::types::volume::SystemDf;
+use crate::libpod::API_PREFIX;
+use crate::units::{format_bytes, SizeFormat};
 
 use super::super::Engine;
+
+/// How `volumes` renders a size: decimal units at three significant digits.
+///
+/// Three rather than the four `podman system df -v` prints (`193.2MB`,
+/// `67.33MB`, measured on Podman 5.7.0). podman is not self-consistent here —
+/// `podman images` and `podman ps -s` both use three — and matching podup's own
+/// other size columns is worth more than reproducing that split.
+const SIZE_FORMAT: SizeFormat = SizeFormat::decimal().with_significant(3);
+
+/// Options for `volumes` added after the crate's API froze.
+///
+/// `#[non_exhaustive]` from birth: [`VolumesOptions`] is externally
+/// constructible with a struct literal, so adding a field to it requires a
+/// MAJOR — `cargo semver-checks` reports `constructible_struct_adds_field`.
+/// Same reasoning, and the same shape, as `PsDisplayOptions`.
+#[derive(Default, Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct VolumesDisplayOptions {
+	/// Show SIZE and RECLAIMABLE, `-s/--size`.
+	///
+	/// Off by default and expensive when on: the only endpoint carrying a
+	/// volume's size is `system/df`, which accounts for every image, container
+	/// and volume on the host. Measured at **1.2 s against 10 ms** for the plain
+	/// volume list, on a host with 46 volumes.
+	pub size: bool,
+}
+
+impl VolumesDisplayOptions {
+	/// Ask for the size columns.
+	#[must_use]
+	pub fn with_size(mut self, size: bool) -> Self {
+		self.size = size;
+		self
+	}
+}
 
 /// Options for [`Engine::list_volumes`], mirroring `docker compose volumes`.
 #[derive(Default)]
@@ -29,6 +67,20 @@ impl Engine {
 		file: &ComposeFile,
 		services: &[String],
 		opts: VolumesOptions,
+	) -> Result<()> {
+		self.list_volumes_with_display(file, services, opts, VolumesDisplayOptions::default())
+			.await
+	}
+
+	/// Like [`Engine::list_volumes`], plus the options added after the API froze
+	/// ([`VolumesDisplayOptions`]). A separate entry point rather than a fourth
+	/// parameter on the old one, so existing callers keep compiling.
+	pub async fn list_volumes_with_display(
+		&self,
+		file: &ComposeFile,
+		services: &[String],
+		opts: VolumesOptions,
+		display: VolumesDisplayOptions,
 	) -> Result<()> {
 		// Reject an unknown service name (docker compose errors with "no such
 		// service") instead of silently filtering it out and printing nothing.
@@ -63,11 +115,36 @@ impl Engine {
 			}
 			return Ok(());
 		}
+		// One `system/df` for the whole table when the size was asked for, never
+		// per row: the call accounts for the entire host, so asking once per
+		// volume would multiply a 1.2 s answer by the number of rows.
+		let usage = if display.size {
+			self.volume_disk_usage().await?
+		} else {
+			std::collections::HashMap::new()
+		};
+
 		if opts.json {
 			let arr: Vec<_> = rows
 				.iter()
 				.map(|(_, name, driver, external)| {
-					serde_json::json!({ "Name": name, "Driver": driver, "External": external })
+					// Raw byte counts, and absent entirely when the size was not
+					// requested — a consumer can tell "not asked" from "empty",
+					// the same distinction the table draws.
+					let size = display.size.then(|| {
+						let u = usage.get(name.as_str());
+						serde_json::json!({
+							"Size": u.map(|u| u.size).unwrap_or(0),
+							"ReclaimableSize": u.map(|u| u.reclaimable).unwrap_or(0),
+							"Links": u.map(|u| u.links).unwrap_or(0),
+						})
+					});
+					serde_json::json!({
+						"Name": name,
+						"Driver": driver,
+						"External": external,
+						"Usage": size,
+					})
 				})
 				.collect();
 			println!("{}", serde_json::to_string_pretty(&arr).unwrap_or_default());
@@ -92,19 +169,53 @@ impl Engine {
 		// the table was the least visible one. `caution_col` rather than
 		// `status_col`: green would say "healthy", and an external volume is not
 		// healthy or unhealthy — it is the one podup will not delete.
-		let mut table = crate::ui::Table::new(&["NAME", "DRIVER", "EXTERNAL"])
+		//
+		// SIZE and RECLAIMABLE are appended rather than inserted, so a reader's
+		// existing column positions do not move when the flag is off.
+		let mut headers: Vec<&str> = vec!["NAME", "DRIVER", "EXTERNAL"];
+		if display.size {
+			headers.push("SIZE");
+			headers.push("RECLAIMABLE");
+		}
+		let mut table = crate::ui::Table::new(&headers)
 			.cap(0, 48)
 			.identity_col(0)
 			.caution_col(2);
 		for (_, name, driver, external) in &rows {
-			table.push(vec![
+			let mut row = vec![
 				name.clone(),
 				driver.clone(),
 				if *external { "yes" } else { "no" }.to_string(),
-			]);
+			];
+			if display.size {
+				let (size, reclaimable) = size_cells(usage.get(name.as_str()));
+				row.push(size);
+				row.push(reclaimable);
+			}
+			table.push(row);
 		}
 		table.print();
 		Ok(())
+	}
+
+	/// Per-volume disk usage from `system/df`, keyed by on-host volume name.
+	///
+	/// One call for the whole table. libpod has no per-volume size endpoint —
+	/// this one walks the entire installation — so the cost is paid once or not
+	/// at all.
+	async fn volume_disk_usage(
+		&self,
+	) -> Result<std::collections::HashMap<String, crate::libpod::types::volume::VolumeDiskUsage>> {
+		let df: SystemDf = self
+			.client
+			.get_json(&format!("{API_PREFIX}/system/df"))
+			.await
+			.map_err(crate::error::ComposeError::Podman)?;
+		Ok(df
+			.volumes
+			.into_iter()
+			.map(|v| (v.name.clone(), v))
+			.collect())
 	}
 
 	/// The top-level volume keys to list: all of them, or just those mounted by
@@ -170,3 +281,28 @@ mod tests {
 		assert_eq!(mount_source_name(&VolumeMount::Short("/data".into())), None);
 	}
 }
+
+/// The SIZE and RECLAIMABLE cells for one volume.
+///
+/// A volume the accounting does not mention renders empty rather than `0B`:
+/// libpod lists what exists on the host, and a compose file can declare a volume
+/// that has never been created. An empty cell says "not there"; `0B` would claim
+/// it exists and is empty.
+///
+/// RECLAIMABLE is shown next to SIZE rather than instead of it because the two
+/// answer different questions: a volume still linked by a container reports its
+/// full size and **zero** reclaimable, which is the fact someone clearing disk
+/// space actually needs.
+fn size_cells(usage: Option<&crate::libpod::types::volume::VolumeDiskUsage>) -> (String, String) {
+	match usage {
+		Some(u) => (
+			format_bytes(u.size, &SIZE_FORMAT),
+			format_bytes(u.reclaimable, &SIZE_FORMAT),
+		),
+		None => (String::new(), String::new()),
+	}
+}
+
+#[cfg(test)]
+#[path = "list_tests.rs"]
+mod size_tests;

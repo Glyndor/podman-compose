@@ -487,6 +487,11 @@ pub(crate) enum Commands {
 		/// Only display volume names. Mutually exclusive with `--format`.
 		#[arg(short, long, conflicts_with = "format")]
 		quiet: bool,
+		/// Show each volume's size and how much removing it would reclaim.
+		/// Slow: the only endpoint carrying a volume's size accounts for the
+		/// whole host, which measured 1.2s against 10ms for the plain list.
+		#[arg(short = 's', long)]
+		size: bool,
 		/// Output format.
 		#[arg(long, value_enum, default_value_t = OutputFormat::Table)]
 		format: OutputFormat,

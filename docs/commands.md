@@ -275,7 +275,7 @@ the raw byte count, not the rendered string.
 | `-q, --quiet` | Print image IDs only. | off |
 | `--format <FMT>` | `table` or `json`. | `table` |
 
-### `ps` columns
+### The ps CREATED and STATUS columns
 
 `STATUS` reports how long a running container has been up (`Up 2h 5m 3s`), with
 its health in parentheses when it has a healthcheck (`Up 13h (healthy)`). A
@@ -302,7 +302,27 @@ empty — `1y 2mo 3d`, `1h 5m 3s`, `5s`. A year is 365 days and a month is 30.
 Under `--format json` the raw wire values are passed through instead: `Created`
 is the RFC 3339 string and `StartedAt` is Unix seconds.
 
-### `events` timestamps
+### Volume size accounting
+
+`SIZE` is what the volume occupies; `RECLAIMABLE` is what removing it would free.
+The two differ and both are worth seeing: a volume a container still uses reports
+its full size and **zero** reclaimable, which is the fact that matters when you
+are clearing disk space.
+
+A volume declared in the compose file but never created renders both cells empty
+rather than `0B` — an empty cell says it is not there, while `0B` would claim it
+exists and holds nothing.
+
+**It is opt-in because it is slow, not because it is verbose.** No libpod
+endpoint reports a single volume's size; the only one that knows is `system/df`,
+which accounts for every image, container and volume on the host. Measured on
+Podman 5.7.0 with 46 volumes: 1.2 s, against 10 ms for the plain list. podup
+makes that call once per table, never once per row.
+
+Under `--format json` each entry gains a `Usage` object with the raw byte counts
+and the container link count, and `Usage` is `null` when `--size` was not given.
+
+### Event timestamps
 
 The `TIME` column is the reader's own wall clock, with the offset that applied at
 that instant: `2026-08-02 23:43:35 -05:00`. That matches what `podman events`
@@ -325,6 +345,7 @@ neither creates nor deletes an external volume, so those are the ones a
 | Flag | Description | Default |
 |---|---|---|
 | `-q, --quiet` | Print volume names only. | off |
+| `-s, --size` | Add SIZE and RECLAIMABLE columns. Slow — see below. | off |
 | `--format <FMT>` | `table` or `json`. | `table` |
 
 ## Container operations

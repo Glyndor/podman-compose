@@ -64,7 +64,7 @@ mod stats;
 pub use staging::is_safe_project_name;
 pub use stats::StatsOptions;
 mod volume;
-pub use volume::VolumesOptions;
+pub use volume::{VolumesDisplayOptions, VolumesOptions};
 mod volume_mounts;
 #[cfg(feature = "watch")]
 mod watch;
