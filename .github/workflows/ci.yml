@@ -31,7 +31,22 @@ jobs:
       # It is deliberately NOT the measured 78.96%: a floor set exactly at
       # today's number turns any unrelated refactor that moves one region into a
       # failed build.
-      coverage-threshold: 75
+      # 79, not the org standard's 90, and not because podup is short of it.
+      #
+      # Measured 2026-08-03: the full suite covers **91.52%** of lines. This job
+      # cannot run it — the integration tests need a live Podman and skip
+      # themselves on a runner without one — so what it measures is `--lib
+      # --bins` alone, which is **79.39%**. The two numbers describe different
+      # things and only one of them is checkable here.
+      #
+      # 75 left four points of silent slack on a figure that is already a
+      # subset: coverage could fall from 79 to 75 with nothing saying so. This
+      # locks in what holds today rather than demanding new work, which is what
+      # the testing standard asks for when adopting a floor.
+      #
+      # The 90 gate belongs where the tests can actually run — the `podman-vm`
+      # lane — and that is tracked separately rather than papered over here.
+      coverage-threshold: 79
       msrv: "1.85"
       package-check: true
       semver-check: true
