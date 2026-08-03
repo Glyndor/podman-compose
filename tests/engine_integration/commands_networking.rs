@@ -167,9 +167,13 @@ async fn engine_port_resolves_a_published_port() {
 	};
 	let proj = proj("prt");
 	let engine = Engine::new(client, proj.clone());
-	let file = parse_str(
-		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    ports:\n      - \"127.0.0.1:18080:80\"\n",
-	)
+	// A port chosen at run time, not a constant: three tests shared 18081 and a
+	// fourth 18080, so any two running at once lost the bind and failed with
+	// `pasta failed ... Address already in use`.
+	let port = super::free_port();
+	let file = parse_str(&format!(
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    ports:\n      - \"127.0.0.1:{port}:80\"\n"
+	))
 	.unwrap();
 
 	engine.up(&file).await.unwrap();

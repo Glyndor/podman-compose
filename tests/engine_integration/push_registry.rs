@@ -18,17 +18,6 @@ use tempfile::tempdir;
 
 use super::*;
 
-/// A free loopback port, chosen by binding zero and releasing it.
-///
-/// There is a window between releasing and the registry binding it. It is small
-/// and the readiness poll below fails loudly rather than silently if it is lost,
-/// which is the honest trade against hard-coding a port two concurrent runs
-/// would fight over.
-fn free_port() -> u16 {
-	let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("no loopback port");
-	listener.local_addr().unwrap().port()
-}
-
 /// One HTTP GET over a plain TCP socket, returning the body.
 ///
 /// Raw rather than a client library on purpose: this asks a local registry for a
