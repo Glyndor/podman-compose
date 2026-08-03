@@ -149,12 +149,11 @@ const fn days_in_month(year: i64, month: i64) -> i64 {
 
 /// Days since the Unix epoch for a civil date.
 ///
-/// The exact inverse of the civil-from-days walk in `engine::events`, which
-/// turns Unix seconds back into a date. Both shift the epoch to 0000-03-01 so
-/// February — the month whose length varies — lands last and the leap-day case
-/// needs no branch of its own. Round-tripping one through the other is the test
-/// that matters here: for both to agree and both be wrong, they would have to be
-/// wrong in the same direction.
+/// The exact inverse of [`civil_from_days`]. Both shift the epoch to 0000-03-01
+/// so February — the month whose length varies — lands last and the leap-day
+/// case needs no branch of its own. Round-tripping one through the other is the
+/// test that matters here: for both to agree and both be wrong, they would have
+/// to be wrong in the same direction.
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 	let year = year - i64::from(month <= 2);
 	let era = if year >= 0 { year } else { year - 399 } / 400;
@@ -165,6 +164,126 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 	era * 146_097 + day_of_era - 719_468
 }
 
+/// The civil date for a count of days since the Unix epoch, as
+/// `(year, month, day)`.
+///
+/// The exact inverse of [`days_from_civil`]. This used to live in
+/// `engine::events` as half of its timestamp formatter; the two halves are one
+/// thing and belong next to each other, and the round-trip test between them is
+/// only honest while neither can be edited without the other in view.
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+	let shifted = days + 719_468;
+	let era = shifted.div_euclid(146_097);
+	let day_of_era = shifted.rem_euclid(146_097);
+	let year_of_era =
+		(day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+	let year = year_of_era + era * 400;
+	let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+	let month_shifted = (5 * day_of_year + 2) / 153;
+	let day = day_of_year - (153 * month_shifted + 2) / 5 + 1;
+	let month = if month_shifted < 10 {
+		month_shifted + 3
+	} else {
+		month_shifted - 9
+	};
+	let year = if month <= 2 { year + 1 } else { year };
+	(year, month, day)
+}
+
+/// Render `unix_secs` as a wall-clock timestamp in the reader's own time zone,
+/// with the offset that applies **at that instant**: `2026-08-02 23:43:35 -05:00`.
+///
+/// Matching what `podman events` prints. Before this, podup rendered UTC and did
+/// not say so, which is worse than either alternative: a reader correlating a
+/// podup line against `podman events` or `journalctl` reads it as their own wall
+/// clock and is silently wrong by the offset.
+///
+/// The offset is resolved per instant rather than once, so an event from July
+/// and one from January render correctly wherever daylight saving applies. When
+/// the platform cannot say what the offset is, the value is rendered in UTC and
+/// labelled `Z` — an unlabelled guess is the failure this replaced.
+pub(crate) fn format_local(unix_secs: i64) -> String {
+	match local_offset_seconds(unix_secs) {
+		Some(offset) => {
+			let sign = if offset < 0 { '-' } else { '+' };
+			let magnitude = offset.abs();
+			format!(
+				"{} {sign}{:02}:{:02}",
+				format_civil(unix_secs + offset),
+				magnitude / 3600,
+				(magnitude % 3600) / 60
+			)
+		}
+		None => format!("{}Z", format_civil(unix_secs)),
+	}
+}
+
+/// `YYYY-MM-DD HH:MM:SS` for a count of seconds, with no zone of its own.
+///
+/// `div_euclid`/`rem_euclid` rather than `/` and `%` so a negative input floors
+/// instead of truncating toward zero; with the plain operators a pre-epoch
+/// instant renders an hour of -1.
+fn format_civil(secs_total: i64) -> String {
+	let days = secs_total.div_euclid(SECS_PER_DAY);
+	let secs = secs_total.rem_euclid(SECS_PER_DAY);
+	let (year, month, day) = civil_from_days(days);
+	format!(
+		"{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",
+		secs / 3600,
+		(secs % 3600) / 60,
+		secs % 60
+	)
+}
+
+#[cfg(unix)]
+#[path = "offset_unix.rs"]
+mod offset;
+#[cfg(windows)]
+#[path = "offset_windows.rs"]
+mod offset;
+
+/// Offset from UTC in seconds at `unix_secs`, or `None` when the platform
+/// cannot say.
+///
+/// Split per platform because the two ask entirely different questions of the
+/// OS, and both need FFI: there is no portable way to reach a timezone database
+/// from the standard library.
+fn local_offset_seconds(unix_secs: i64) -> Option<i64> {
+	offset::local_offset_seconds(unix_secs)
+}
+
+/// Build a Win32 `SYSTEMTIME` from Unix seconds.
+///
+/// Lives here rather than in the Windows module so it is compiled — and
+/// therefore type-checked and unit-tested — on every platform. A conversion
+/// that only builds on the one machine nobody develops on is a conversion
+/// nobody has checked.
+#[cfg(windows)]
+fn to_system_time(unix_secs: i64) -> Option<windows_sys::Win32::Foundation::SYSTEMTIME> {
+	let days = unix_secs.div_euclid(SECS_PER_DAY);
+	let secs = unix_secs.rem_euclid(SECS_PER_DAY);
+	let (year, month, day) = civil_from_days(days);
+	Some(windows_sys::Win32::Foundation::SYSTEMTIME {
+		wYear: u16::try_from(year).ok()?,
+		wMonth: u16::try_from(month).ok()?,
+		wDayOfWeek: 0,
+		wDay: u16::try_from(day).ok()?,
+		wHour: u16::try_from(secs / 3600).ok()?,
+		wMinute: u16::try_from((secs % 3600) / 60).ok()?,
+		wSecond: u16::try_from(secs % 60).ok()?,
+		wMilliseconds: 0,
+	})
+}
+
+/// Unix seconds from a Win32 `SYSTEMTIME`, ignoring milliseconds.
+#[cfg(windows)]
+fn from_system_time(t: &windows_sys::Win32::Foundation::SYSTEMTIME) -> i64 {
+	let days = days_from_civil(i64::from(t.wYear), i64::from(t.wMonth), i64::from(t.wDay));
+	days * SECS_PER_DAY
+		+ i64::from(t.wHour) * 3600
+		+ i64::from(t.wMinute) * 60
+		+ i64::from(t.wSecond)
+}
+
 #[cfg(test)]
-#[path = "timestamp_tests.rs"]
 mod tests;
