@@ -203,19 +203,30 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 /// the platform cannot say what the offset is, the value is rendered in UTC and
 /// labelled `Z` — an unlabelled guess is the failure this replaced.
 pub(crate) fn format_local(unix_secs: i64) -> String {
-	match local_offset_seconds(unix_secs) {
-		Some(offset) => {
-			let sign = if offset < 0 { '-' } else { '+' };
-			let magnitude = offset.abs();
-			format!(
-				"{} {sign}{:02}:{:02}",
-				format_civil(unix_secs + offset),
-				magnitude / 3600,
-				(magnitude % 3600) / 60
-			)
-		}
-		None => format!("{}Z", format_civil(unix_secs)),
-	}
+	render_with_offset(unix_secs, local_offset_seconds(unix_secs))
+}
+
+/// The rendering half, split from the lookup so both of its branches can be
+/// entered from a test.
+///
+/// Two things follow from the split, and both are why it exists. The `None`
+/// branch is unreachable through [`format_local`] on any machine whose libc
+/// resolves a zone — mutations deleting it survived every test that went in the
+/// front door, which is what an untestable control looks like from outside. And
+/// the rendered string stops depending on the machine's own zone, so it can be
+/// pinned exactly instead of only by shape.
+fn render_with_offset(unix_secs: i64, offset: Option<i64>) -> String {
+	let Some(offset) = offset else {
+		return format!("{}Z", format_civil(unix_secs));
+	};
+	let sign = if offset < 0 { '-' } else { '+' };
+	let magnitude = offset.abs();
+	format!(
+		"{} {sign}{:02}:{:02}",
+		format_civil(unix_secs + offset),
+		magnitude / 3600,
+		(magnitude % 3600) / 60
+	)
 }
 
 /// `YYYY-MM-DD HH:MM:SS` for a count of seconds, with no zone of its own.

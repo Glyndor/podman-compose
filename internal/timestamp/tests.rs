@@ -102,6 +102,47 @@ fn format_local_renders_a_fixed_width_shape() {
 	);
 }
 
+/// The rendering, pinned exactly. Possible because the offset is a parameter
+/// here rather than a reading of the machine's own zone, so these strings are
+/// the same on a laptop at -05:00 and a runner at UTC.
+#[test]
+fn the_rendering_is_pinned_for_every_offset_shape() {
+	let t = 1_785_718_245; // 2026-08-03 00:50:45 UTC
+	assert_eq!(
+		super::render_with_offset(t, Some(-5 * 3600)),
+		"2026-08-02 19:50:45 -05:00"
+	);
+	assert_eq!(
+		super::render_with_offset(t, Some(5 * 3600 + 30 * 60)),
+		"2026-08-03 06:20:45 +05:30"
+	);
+	assert_eq!(
+		super::render_with_offset(t, Some(0)),
+		"2026-08-03 00:50:45 +00:00"
+	);
+	// A negative offset with minutes, so the sign is not carried by the hours
+	// alone: -09:30 is a real zone (Marquesas).
+	assert_eq!(
+		super::render_with_offset(t, Some(-(9 * 3600 + 30 * 60))),
+		"2026-08-02 15:20:45 -09:30"
+	);
+}
+
+/// When the platform cannot say what the offset is, the value renders in UTC
+/// and says so. An unlabelled guess is the defect this whole change replaced,
+/// so the fallback must not quietly become one.
+///
+/// Only reachable at this level: on any machine whose libc resolves a zone,
+/// `format_local` never takes this branch.
+#[test]
+fn an_unknown_offset_renders_utc_and_labels_it() {
+	assert_eq!(
+		super::render_with_offset(1_785_718_245, None),
+		"2026-08-03 00:50:45Z"
+	);
+	assert_eq!(super::render_with_offset(0, None), "1970-01-01 00:00:00Z");
+}
+
 /// The calendar half, pinned absolutely because it has no zone in it. This is
 /// what the round-trip cannot check on its own: two inverse functions can agree
 /// while both being shifted by the same amount.
