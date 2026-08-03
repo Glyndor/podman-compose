@@ -233,6 +233,71 @@ fn render_help(rendered: &clap::builder::StyledStr, colour: bool) -> String {
 	}
 }
 
+/// The help of the deepest subcommand the arguments actually reached.
+///
+/// Walks the given command tree along the non-flag arguments, following aliases,
+/// and stops at the first token that is not a subcommand of the current level.
+/// With no subcommand at all it returns the root's help, which is what bare
+/// `podup` should print.
+fn help_for_argv(root: clap::Command) -> clap::builder::StyledStr {
+	help_for(root, std::env::args().skip(1))
+}
+
+/// The tree walk, separated from the process environment so it is testable.
+fn help_for(root: clap::Command, args: impl Iterator<Item = String>) -> clap::builder::StyledStr {
+	// Build first. An unbuilt tree has not propagated the binary name or the
+	// global options down to its subcommands, so a subcommand plucked out of it
+	// renders `Usage: generate <COMMAND>` instead of
+	// `Usage: podup generate [OPTIONS] <COMMAND>` — the same text `--help` on
+	// that group already produces.
+	let mut cmd = root;
+	cmd.build();
+	let mut args = args.peekable();
+	while let Some(arg) = args.next() {
+		if arg.starts_with('-') {
+			// A flag that takes a value consumes the next token, and that token
+			// must not be read as a subcommand: `-p build` names a project, not
+			// the `build` command. `--flag=value` carries its own value, so only
+			// the separated form eats one.
+			if !arg.contains('=') && takes_a_value(&cmd, &arg) {
+				args.next();
+			}
+			continue;
+		}
+		match cmd.find_subcommand(&arg) {
+			Some(sub) => cmd = sub.clone(),
+			// Stop at the first token that is not a subcommand here, so
+			// `podup generate quadlet --bad` stays on `quadlet`.
+			None => break,
+		}
+	}
+	cmd.render_help()
+}
+
+/// Whether `token` names an argument of `cmd` that consumes a following value.
+///
+/// Matches long (`--ansi`), short (`-p`) and clustered-short (`-fp`) forms; for a
+/// cluster only the last letter can take the value, which is how getopt works.
+fn takes_a_value(cmd: &clap::Command, token: &str) -> bool {
+	let wants_value = |a: &clap::Arg| {
+		matches!(
+			a.get_action(),
+			clap::ArgAction::Set | clap::ArgAction::Append
+		)
+	};
+	if let Some(long) = token.strip_prefix("--") {
+		return cmd
+			.get_arguments()
+			.any(|a| a.get_long() == Some(long) && wants_value(a));
+	}
+	match token.strip_prefix('-').and_then(|s| s.chars().last()) {
+		Some(last) => cmd
+			.get_arguments()
+			.any(|a| a.get_short() == Some(last) && wants_value(a)),
+		None => false,
+	}
+}
+
 pub(crate) fn parse_cli() -> Cli {
 	// Apply `--ansi` before clap renders anything: `--help` and clap's own
 	// errors are produced inside the parse call below, so a choice applied
@@ -277,12 +342,90 @@ pub(crate) fn parse_cli() -> Cli {
 				// `MissingSubcommand` error renders as a one-line complaint plus
 				// that subcommand wall, and the help is the useful answer to
 				// both kinds.
-				let help = <Cli as clap::CommandFactory>::command().render_help();
+				//
+				// From the command the user actually reached, not always the root.
+				// `generate` and `autostart` declare `subcommand_required`, so bare
+				// `podup generate` lands here — and rendering the root told them
+				// about the whole tool while withholding the one thing they needed,
+				// which is what `generate` accepts. Their own `--help` already
+				// answers that correctly; this path did not.
+				let help = help_for_argv(<Cli as clap::CommandFactory>::command());
 				eprint!("\n{}\n", render_help(&help, podup::ui::stderr_colored()));
 				process::exit(2);
 			}
 			_ => e.exit(),
 		},
+	}
+}
+
+#[cfg(test)]
+mod help_for_tests {
+	use super::help_for;
+	use crate::cli::Cli;
+	use clap::CommandFactory;
+
+	fn help(args: &[&str]) -> String {
+		help_for(Cli::command(), args.iter().map(|s| (*s).to_string())).to_string()
+	}
+
+	#[test]
+	fn no_subcommand_renders_the_root_help() {
+		assert!(help(&[]).contains("Usage: podup [OPTIONS] <COMMAND>"));
+	}
+
+	#[test]
+	fn a_subcommand_group_renders_its_own_help_not_the_root() {
+		let out = help(&["generate"]);
+		assert!(
+			out.contains("Usage: podup generate"),
+			"expected generate's own usage, got: {out}"
+		);
+		// The point of the fix: the root's usage must NOT be what a user asking
+		// about `generate` is shown.
+		assert!(
+			!out.contains("Usage: podup [OPTIONS] <COMMAND>"),
+			"the root help was rendered instead: {out}"
+		);
+		assert!(
+			out.contains("quadlet"),
+			"the group's subcommands are missing"
+		);
+	}
+
+	#[test]
+	fn an_alias_resolves_to_the_command_it_names() {
+		assert!(help(&["gen"]).contains("Usage: podup generate"));
+	}
+
+	#[test]
+	fn flags_before_the_subcommand_do_not_stop_the_walk() {
+		// `--ansi never generate` must still reach generate. A walk that treated
+		// the flag's value as a subcommand token would stop at `never`.
+		assert!(help(&["--ansi", "never", "autostart"]).contains("Usage: podup autostart"));
+	}
+
+	#[test]
+	fn a_flag_value_that_looks_like_a_subcommand_is_not_walked_into() {
+		// `-p` names a project. A project called "build" is ordinary, and reading
+		// it as the `build` command would render the wrong help for bare
+		// `podup -p build`.
+		let out = help(&["-p", "build"]);
+		assert!(
+			out.contains("Usage: podup [OPTIONS] <COMMAND>"),
+			"a flag's value was walked into as a subcommand: {out}"
+		);
+	}
+
+	#[test]
+	fn the_equals_form_carries_its_own_value() {
+		// `--project-name=build` consumes nothing after it, so `generate` is still
+		// the next token to consider.
+		assert!(help(&["--project-name=build", "generate"]).contains("Usage: podup generate"));
+	}
+
+	#[test]
+	fn an_unknown_token_stops_the_walk_at_the_last_real_command() {
+		assert!(help(&["generate", "nosuchthing"]).contains("Usage: podup generate"));
 	}
 }
 

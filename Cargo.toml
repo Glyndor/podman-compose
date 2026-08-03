@@ -1,6 +1,6 @@
 [package]
 name = "podup"
-version = "3.4.1"
+version = "3.5.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Translate and run docker-compose files on rootless Podman"
@@ -20,6 +20,22 @@ path = "internal/main.rs"
 [lib]
 name = "podup"
 path = "internal/lib.rs"
+
+# The engine integration suite drives the library through test-only seams
+# (`test_exec_capture`, `test_project_container_names`) that live behind the
+# `test-helpers` feature so they never reach a release build. Without the
+# feature the target does not compile, and `debian/rules` builds with
+# `--no-default-features --features watch,completions` — so it broke there while
+# every other caller passed either `--all-features` or `--features test-helpers`
+# and stayed green.
+#
+# `required-features` makes cargo skip the target instead of failing to build it.
+# Nothing is lost: the suite needs a reachable Podman, which a package builder
+# does not have, and the lane that gates merges always passes the feature.
+[[test]]
+name = "engine_integration"
+path = "tests/engine_integration.rs"
+required-features = ["test-helpers"]
 
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "net", "io-util", "io-std"] }

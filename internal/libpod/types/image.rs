@@ -49,4 +49,21 @@ pub struct ImageInspect {
 	/// --resolve-image-digests`. Empty for purely local/built images.
 	#[serde(rename = "RepoDigests", default)]
 	pub repo_digests: Vec<String>,
+	/// On-disk size of the image in bytes, as libpod reports it.
+	///
+	/// Present in the default inspect response, so reading it costs no extra
+	/// call and no query parameter — unlike a container's size, which libpod
+	/// leaves `null` until asked. Defaults to zero when the field is absent, so
+	/// an older server renders an empty cell rather than failing the whole
+	/// listing.
+	#[serde(rename = "Size", default)]
+	pub size: u64,
+	/// When the image was built, as an RFC 3339 string.
+	///
+	/// Note the shape: the image **list** endpoint reports this as Unix seconds,
+	/// the **inspect** endpoint this code calls reports it as RFC 3339. Measured
+	/// on Podman 5.7.0; reading the list's documentation and applying it here
+	/// yields a parse failure and a blank column.
+	#[serde(rename = "Created", default)]
+	pub created: String,
 }

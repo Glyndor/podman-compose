@@ -90,6 +90,17 @@ async fn cli_push_to_unreachable_registry_errors() {
 		])
 		.output()
 		.unwrap();
+	// Which failure, not just that one happened. A non-zero exit is satisfied by
+	// a missing compose file or an unreachable Podman, neither of which reaches
+	// the registry. #1076 is the reason this matters: a failed pull used to be
+	// reported as success, and push shares that in-band-error shape — a test that
+	// only reads the exit code cannot tell a real registry failure from podup
+	// falling over before it tried.
+	let err = String::from_utf8_lossy(&push.stderr);
+	assert!(
+		err.contains("localhost:1/podup-nope"),
+		"the failure did not name the image it could not push: {err:?}"
+	);
 	assert!(
 		!push.status.success(),
 		"push to an unreachable registry must fail"
@@ -323,6 +334,23 @@ async fn cli_top_subcommand() {
 		.output()
 		.unwrap();
 	assert!(top.status.success(), "top failed: {:?}", top.stderr);
+	// The exit code was the whole check, and passing `top.stderr` into the failure
+	// message made it look like the output was being read when nothing asserted
+	// anything about it. `top` exists to print processes: the container it belongs
+	// to, the column header, and the command actually running inside.
+	let out = String::from_utf8_lossy(&top.stdout);
+	assert!(
+		out.contains(&format!("{proj}-web-1")),
+		"top did not name the container the processes belong to: {out:?}"
+	);
+	assert!(
+		out.contains("PID") && out.contains("CMD"),
+		"top printed no process table header: {out:?}"
+	);
+	assert!(
+		out.contains("sleep infinity"),
+		"top did not report the process running in the container: {out:?}"
+	);
 
 	Command::new(bin())
 		.args(["-f", compose.to_str().unwrap(), "-p", &proj, "down"])

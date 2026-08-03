@@ -20,6 +20,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RAW = os.path.join(HERE, "results", "raw.csv")
+BUDGET = os.path.join(os.path.dirname(os.path.abspath(__file__)), "memory-budget-mib")
 MD = os.path.join(HERE, "results", "report.md")
 JSON = os.path.join(HERE, "results", "summary.json")
 ENGINE = os.path.join(HERE, "results", "engine")
@@ -113,6 +114,13 @@ def row_unit(cells, metric):
 		values += [v for v in (s["median"], s["p95"]) if v == v]
 	if values and max(values) < 1.0:
 		return ("ms", 1000.0, 1)
+	# Above a minute, seconds stop being readable at a glance: a scenario that
+	# takes two minutes printed as `120.000 s` makes the reader do the division.
+	# No published row reaches this yet — the slowest is `wide-level up` at 9.7 s
+	# for docker-compose — but the tier belongs here before a long scenario is
+	# added rather than after, when the fix competes with reading the results.
+	if values and max(values) >= 60.0:
+		return ("min", 1.0 / 60.0, 2)
 	return ("s", 1.0, 3)
 
 
@@ -267,12 +275,78 @@ def main():
 		# and a table nobody looks at cannot show that a row picked the wrong
 		# unit or that a cell came out empty.
 		print("\n".join(lines))
+		# Exercise the budget gate in both directions. The fixture rows are
+		# synthetic, so they are not measured against the real budget — but a gate
+		# nobody has watched fail is decoration, and this is the only place the
+		# shared-CI smoke run can watch it.
+		# The unit tiers, exercised rather than assumed: a row is rendered in one
+		# unit chosen from its largest value, and each boundary decides a report
+		# column nobody re-reads once it is published.
+		def unit_of(seconds):
+			return row_unit([{"seconds": {"median": seconds, "p95": seconds}}], "seconds")[0]
+
+		for value, want in ((0.5, "ms"), (1.0, "s"), (59.9, "s"), (60.0, "min"), (600.0, "min")):
+			got = unit_of(value)
+			if got != want:
+				print(f"self-test FAILED: {value}s rendered in {got}, expected {want}", file=sys.stderr)
+				return 1
+
+		under = {"podup": {"single": {"up": {"rss_mib": {"median": 1.0}}}}}
+		over = {"podup": {"single": {"up": {"rss_mib": {"median": 10_000.0}}}}}
+		if check_memory_budget(under) != 0:
+			print("self-test FAILED: the budget rejected a value under it", file=sys.stderr)
+			return 1
+		if check_memory_budget(over) != 1:
+			print("self-test FAILED: the budget accepted a value over it", file=sys.stderr)
+			return 1
 		print(f"self-test ok ({len(rows)} fixture rows); {MD} and {JSON} left untouched")
 		return 0
 
 	with open(MD, "w") as f:
 		f.write("\n".join(lines))
 	print(f"wrote {MD} and {JSON}")
+	return check_memory_budget(summary)
+
+
+def check_memory_budget(summary):
+	"""Fail when podup's peak median RSS exceeds the budget in bench/memory-budget-mib.
+
+	The releases standard asks for a size budget per artifact and treats an
+	unexplained growth as a regression to investigate rather than ship. There was
+	none for memory, so the drift from 7.5 MiB at 2.1.0 to 8.1 at 3.4.1 was
+	noticed by a human reading a published table months later instead of by a red
+	run on the day it landed.
+
+	The budget is a file, not a literal here, for the same reason
+	.github/podman-baseline-tests is: raising it is a reviewable commit that says
+	someone decided to, not a number that drifts inside a script.
+	"""
+	if not os.path.exists(BUDGET):
+		print(f"no memory budget at {BUDGET} — skipping the check", file=sys.stderr)
+		return 0
+	with open(BUDGET) as f:
+		budget = float(f.read().strip())
+	peaks = [
+		(scen, op, cell["rss_mib"]["median"])
+		for scen, ops in summary.get("podup", {}).items()
+		for op, cell in ops.items()
+	]
+	if not peaks:
+		print("no podup rows to check against the memory budget", file=sys.stderr)
+		return 0
+	scen, op, worst = max(peaks, key=lambda t: t[2])
+	# Report the number either way: a budget nobody sees the margin on is one
+	# nobody notices tightening around them.
+	print(f"memory: peak median {worst:.2f} MiB ({scen} {op}), budget {budget:.2f} MiB")
+	if worst > budget:
+		print(
+			f"::error::podup peak median RSS {worst:.2f} MiB exceeds the "
+			f"{budget:.2f} MiB budget in bench/memory-budget-mib "
+			f"(worst: {scen} {op}). Attribute the growth, or raise the budget "
+			f"deliberately in its own commit.",
+			file=sys.stderr,
+		)
+		return 1
 	return 0
 
 

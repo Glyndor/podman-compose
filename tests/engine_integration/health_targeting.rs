@@ -52,7 +52,20 @@ fn active_profiles_via_env() {
 				.up_with_options(&file, false, &[], &[], false, false, false)
 				.await
 				.unwrap();
+			let mut names = engine
+				.test_project_container_names()
+				.await
+				.unwrap_or_default();
+			names.sort();
 			engine.down(&file).await.unwrap();
+
+			// COMPOSE_PROFILES=prod must not enable the "debug" profile. Reading it
+			// and then starting everything anyway returned Ok just as happily.
+			assert_eq!(
+				names,
+				vec![format!("{proj}-web-1")],
+				"COMPOSE_PROFILES=prod started the debug-profiled service"
+			);
 		});
 	});
 }
@@ -92,14 +105,27 @@ async fn wait_completed_polling() {
 	};
 	let proj = proj("wcp");
 	let engine = Engine::new(client, proj.clone());
-	// init sleeps 1.5s before exiting; first poll sees it running (L73-75 covered)
-	let file = parse_str(
-		"services:\n  init:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"sleep 1.5; exit 0\"]\n  app:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    depends_on:\n      init:\n        condition: service_completed_successfully\n",
-	)
-	.unwrap();
+	// init takes a while before exiting, so the first poll sees it running and the
+	// polling loop is exercised rather than short-circuited. The delay has to beat
+	// the cost of creating app's container, or `up` would appear ordered even with
+	// the wait removed — the reason 2s was not enough in
+	// resources_health::depends_on_service_completed.
+	// The bind uses an absolute path, so no base_dir is needed.
+	let dir = tempfile::tempdir().unwrap();
+	let yaml = format!(
+		"services:\n  init:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"sleep 12; echo init-done > /out/order; exit 0\"]\n    volumes:\n      - {out}:/out:z\n  app:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"cat /out/order > /out/app-saw 2>/dev/null; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    depends_on:\n      init:\n        condition: service_completed_successfully\n",
+		out = dir.path().display()
+	);
+	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	let saw = poll_host_file(dir.path().join("app-saw"), "init-done", 30).await;
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		saw,
+		"app started before init completed, so the polling wait was not honoured"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +198,44 @@ async fn service_with_expose_proto_and_ulimits() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let cname = format!("{proj}-web-1");
+	// Both keys are silently droppable: a container with neither still starts, and
+	// `up` returns Ok either way. The ulimits are readable from inside the
+	// container; `expose` is container config, so read it out of band.
+	let limits = engine
+		.test_exec_capture(
+			&cname,
+			vec!["sh".into(), "-c".into(), "ulimit -Sn; ulimit -Hn".into()],
+		)
+		.await
+		.unwrap_or_default();
+	let exposed = String::from_utf8_lossy(
+		&std::process::Command::new("podman")
+			.args([
+				"inspect",
+				&cname,
+				"--format",
+				"{{json .Config.ExposedPorts}}",
+			])
+			.output()
+			.expect("podman inspect")
+			.stdout,
+	)
+	.trim()
+	.to_string();
 	engine.down(&file).await.unwrap();
+
+	assert_eq!(
+		limits.trim(),
+		"1024\n2048",
+		"the soft and hard nofile limits did not reach the container"
+	);
+	// The `/tcp` suffix is the point: `expose: "8080/tcp"` takes the raw-string
+	// branch, and a parser that dropped the protocol would still produce a port.
+	assert!(
+		exposed.contains("8080/tcp"),
+		"expose did not reach the container config with its protocol: {exposed:?}"
+	);
 }
 
 #[tokio::test]
@@ -237,7 +300,18 @@ async fn target_services_skips_non_dep() {
 		.up_with_options(&file, false, &[], &["web".to_string()], false, false, false)
 		.await
 		.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	assert_eq!(
+		names,
+		vec![format!("{proj}-web-1")],
+		"targeting web started extra as well, which nothing depends on"
+	);
 }
 
 #[tokio::test]
@@ -248,19 +322,49 @@ async fn dep_on_profile_filtered_service() {
 	};
 	let proj = proj("dpf");
 	let engine = Engine::new(client, proj.clone());
-	// "db" has profile "debug" → not active → dep wait skipped (lifecycle.rs L73)
-	// "web" depends on "db" but db is profile-filtered so its dep wait is skipped
+	// podup ACTIVATES a profile-filtered service when a service that is running
+	// depends on it, transitively, so a retained service never points at a dropped
+	// one. The rationale is in internal/engine/profiles.rs. This comment used to
+	// say the opposite — that db is skipped and its dep wait skipped with it —
+	// which is what a deliberate design looks like when nothing pins it: the next
+	// reader believes the comment over the code.
 	let file = parse_str(
 		"services:\n  db:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    profiles: [\"debug\"]\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    depends_on:\n      - db\n",
 	)
 	.unwrap();
 
-	// No active profiles → db is skipped; web still runs but skips db's dep wait
 	engine
 		.up_with_options(&file, false, &[], &[], false, false, false)
 		.await
 		.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	// This is a DELIBERATE divergence from docker compose, pinned here so it
+	// cannot be reverted by accident. Measured 2026-08-02 against docker-compose
+	// v5.1.3 on the same Podman socket: it refuses the project with
+	// `service "web" depends on undefined service "db"` — a misleading message,
+	// since db is defined and filtered, not undefined.
+	//
+	// podup is not departing from a standard. The Compose Specification says only
+	// that a profiled service starts "if the profile is activated" and is silent
+	// on a dependency whose profile is inactive; Docker's own documentation makes
+	// it a requirement on the author (same profile, started separately, or
+	// unprofiled) rather than a rule the spec imposes. So the reference errors on
+	// a situation that is satisfiable, and podup resolves it.
+	//
+	// If you are here because this looks wrong: read #1276 and
+	// docs/docker-migration.md first. Changing it is a behaviour change and a
+	// breaking one, not a bug fix.
+	assert_eq!(
+		names,
+		vec![format!("{proj}-db-1"), format!("{proj}-web-1")],
+		"the profile-gated dependency was not activated; this divergence is deliberate, see #1276"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -282,12 +386,35 @@ fn build_with_env_arg() {
 			let engine = Engine::with_base_dir(client, proj.clone(), dir.path().to_path_buf());
 			let image_tag = format!("podup-test-bea-{}:latest", std::process::id());
 			let yaml = format!(
-				"services:\n  app:\n    build:\n      context: .\n      dockerfile_inline: |\n        FROM alpine:latest\n        ARG FROM_ENV\n        RUN echo env=$FROM_ENV\n      args:\n        FROM_ENV:\n    image: {image_tag}\n    command: [\"sleep\", \"infinity\"]\n"
+				"services:\n  app:\n    build:\n      context: .\n      dockerfile_inline: |\n        FROM alpine:latest\n        ARG FROM_ENV\n        RUN echo $$FROM_ENV > /from-env\n      args:\n        FROM_ENV:\n    image: {image_tag}\n    command: [\"sleep\", \"infinity\"]\n"
 			);
 			let file = parse_str(&yaml).unwrap();
 
 			engine.up(&file).await.unwrap();
+			// Same two traps as the build-arg tests in build_images.rs, and this one
+			// is the sharper case. A valueless `args: FROM_ENV:` entry is supposed to
+			// take its value from the environment, and the single-dollar form the old
+			// version used made compose substitute FROM_ENV in the YAML instead — so
+			// the value arrived by a completely different route than the one under
+			// test, and the ARG never mattered. `RUN echo` then left nothing to
+			// contradict it.
+			let baked = engine
+				.test_exec_capture(
+					&format!("{proj}-app-1"),
+					vec!["cat".into(), "/from-env".into()],
+				)
+				.await
+				.unwrap_or_default();
 			engine.down(&file).await.unwrap();
+			let _ = std::process::Command::new("podman")
+				.args(["rmi", "-f", &image_tag])
+				.status();
+
+			assert_eq!(
+				baked.trim(),
+				"test-value",
+				"a valueless build arg did not pick up the environment variable"
+			);
 		});
 	});
 }
@@ -316,7 +443,38 @@ async fn label_file_labels_applied() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	// Both labels from the file have to reach the container. Labels are container
+	// config, which the library does not return, so read them out of band — the
+	// same way the sibling tests read annotations. Reading both catches a loader
+	// that stops after the first line.
+	let inspect = |key: &str| {
+		String::from_utf8_lossy(
+			&std::process::Command::new("podman")
+				.args([
+					"inspect",
+					&format!("{proj}-web-1"),
+					"--format",
+					&format!("{{{{index .Config.Labels \"{key}\"}}}}"),
+				])
+				.output()
+				.expect("podman inspect")
+				.stdout,
+		)
+		.trim()
+		.to_string()
+	};
+	let role = inspect("com.example.role");
+	let env = inspect("com.example.env");
 	engine.down(&file).await.unwrap();
+
+	assert_eq!(
+		role, "web",
+		"the first label_file entry did not reach the container"
+	);
+	assert_eq!(
+		env, "test",
+		"the second label_file entry did not reach the container"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +501,21 @@ async fn optional_dep_not_in_file() {
 		.up_with_options(&file, false, &[], &["web".to_string()], false, false, false)
 		.await
 		.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	// web has to actually come up. An optional dependency that is not in the file
+	// must be skipped, not turned into a container and not made to block the
+	// service that named it.
+	assert_eq!(
+		names,
+		vec![format!("{proj}-web-1")],
+		"an optional dependency missing from the file did not resolve to exactly web"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -377,7 +549,20 @@ async fn target_services_duplicate_entry() {
 		)
 		.await
 		.unwrap();
+	let names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
 	engine.down(&file).await.unwrap();
+
+	// One container, not two. The deduplication is the whole point of the test,
+	// and a second pass over the same service would have shown up here rather
+	// than in the return value.
+	assert_eq!(
+		names,
+		vec![format!("{proj}-web-1")],
+		"naming the same service twice did not resolve to a single container"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -405,7 +590,33 @@ fn service_healthy_image_inherited_healthcheck() {
 		);
 		let file = parse_str(&yaml).unwrap();
 
+		// The point is that db has NO healthcheck in the compose file — it inherits
+		// one from the image's HEALTHCHECK line, and web's service_healthy gate has
+		// to honour it. Two things can go wrong invisibly: the inherited check is
+		// ignored (web starts immediately, gate skipped) or it is never satisfied
+		// (up hangs to the deadline). Bounding the time catches the second; the
+		// containers being up catches the first collapsing into a silent no-op.
+		let started = std::time::Instant::now();
 		engine.up(&file).await.unwrap();
+		let elapsed = started.elapsed();
+		let mut names = engine
+			.test_project_container_names()
+			.await
+			.unwrap_or_default();
+		names.sort();
 		engine.down(&file).await.unwrap();
+		let _ = std::process::Command::new("podman")
+			.args(["rmi", "-f", &image_tag])
+			.status();
+
+		assert!(
+			elapsed < std::time::Duration::from_secs(60),
+			"up took {elapsed:?} — an image-inherited healthcheck must be reachable, not waited on to the deadline"
+		);
+		assert_eq!(
+			names,
+			vec![format!("{proj}-db-1"), format!("{proj}-web-1")],
+			"web did not come up behind a healthcheck inherited from the image"
+		);
 	});
 }

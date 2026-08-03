@@ -99,6 +99,42 @@ async fn cli_ps_subcommand() {
 		.output()
 		.unwrap();
 	assert!(ps.status.success());
+	// The exit code was the whole assertion here, on a command whose entire job
+	// is what it prints. Reading STATUS matters especially: #590 was `ps` leaving
+	// that column empty for every container, which an exit-code check cannot see.
+	//
+	// This used to look for the bare word `running`. STATUS reports the uptime
+	// now (`Up 4s`), matching what podman and docker compose print, so the check
+	// moved to that shape — and it is stricter than the old one rather than
+	// looser: an empty STATUS has no `Up`, so #590 would still turn this red.
+	let out = String::from_utf8_lossy(&ps.stdout);
+	let row = out
+		.lines()
+		.find(|line| line.contains(&format!("{proj}-web-1")))
+		.unwrap_or_else(|| panic!("ps did not list the running container: {out:?}"));
+	let cells: Vec<&str> = row.split_whitespace().collect();
+	let up = cells
+		.iter()
+		.position(|c| *c == "Up")
+		.unwrap_or_else(|| panic!("ps printed the container without its status: {row:?}"));
+	assert!(
+		cells
+			.get(up + 1)
+			.is_some_and(|span| { span.chars().next().is_some_and(|c| c.is_ascii_digit()) }),
+		"the uptime after `Up` is missing or not a span: {row:?}"
+	);
+	// CREATED sits between the image and STATUS. It is only ever filled by
+	// parsing the RFC 3339 string libpod really sends, so a blank here is the
+	// parser failing against the live server — which no unit test can see,
+	// because every fixture it has was written by hand.
+	assert!(
+		up >= 3
+			&& cells[up - 1]
+				.chars()
+				.next()
+				.is_some_and(|c| c.is_ascii_digit()),
+		"ps printed no CREATED age, so the timestamp did not parse: {row:?}"
+	);
 
 	Command::new(bin())
 		.args(["-f", compose.to_str().unwrap(), "-p", &proj, "down"])
@@ -114,9 +150,12 @@ async fn cli_logs_subcommand() {
 	let dir = tempdir().unwrap();
 	let compose = dir.path().join("docker-compose.yml");
 	let proj = format!("t{}-cllg", std::process::id());
+	// The container has to say something. With `sleep infinity` it prints nothing,
+	// so `logs` has no output to be right or wrong about and no assertion on it
+	// could fail.
 	fs::write(
 		&compose,
-		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n",
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"echo hello-from-web; sleep infinity\"]\n",
 	)
 	.unwrap();
 
@@ -137,6 +176,18 @@ async fn cli_logs_subcommand() {
 		.output()
 		.unwrap();
 	assert!(logs.status.success());
+	// Both halves of the line are a contract. The container's own output is the
+	// point of the command, and the `service |` prefix was missing entirely once
+	// (#594), which is invisible to a check on the exit code.
+	let out = String::from_utf8_lossy(&logs.stdout);
+	assert!(
+		out.contains("hello-from-web"),
+		"logs did not carry the container's output: {out:?}"
+	);
+	assert!(
+		out.contains("web-1 |"),
+		"logs dropped the per-service prefix: {out:?}"
+	);
 
 	Command::new(bin())
 		.args(["-f", compose.to_str().unwrap(), "-p", &proj, "down"])
@@ -184,6 +235,13 @@ async fn cli_exec_subcommand() {
 		.output()
 		.unwrap();
 	assert!(exec.status.success());
+	// The command was chosen to print something and then nobody read it.
+	let out = String::from_utf8_lossy(&exec.stdout);
+	assert_eq!(
+		out.trim(),
+		"cli-exec",
+		"exec did not forward the command's output"
+	);
 
 	Command::new(bin())
 		.args(["-f", compose.to_str().unwrap(), "-p", &proj, "down"])
@@ -222,6 +280,15 @@ async fn cli_restart_subcommand() {
 		.output()
 		.unwrap();
 	assert!(restart.status.success());
+	// Progress goes to stderr, measured rather than assumed: asserting stdout here
+	// would fail with nothing wrong. Six lifecycle commands used to exit 0 in
+	// silence on a project that was never created, so naming the container is the
+	// part worth pinning.
+	let err = String::from_utf8_lossy(&restart.stderr);
+	assert!(
+		err.contains(&format!("{proj}-web-1")) && err.contains("Restarted"),
+		"restart did not report which container it restarted: {err:?}"
+	);
 
 	Command::new(bin())
 		.args(["-f", compose.to_str().unwrap(), "-p", &proj, "down"])
@@ -243,6 +310,14 @@ async fn cli_pull_subcommand() {
 		.output()
 		.unwrap();
 	assert!(pull.status.success());
+	// Also stderr, measured. #1076 is the reason the reported outcome matters
+	// here: a failed pull used to arrive as an in-band error line on a 200 and be
+	// dropped, so `pull` exited 0 having pulled nothing.
+	let err = String::from_utf8_lossy(&pull.stderr);
+	assert!(
+		err.contains("alpine:latest") && err.contains("Pulled"),
+		"pull did not report pulling the image: {err:?}"
+	);
 }
 
 #[tokio::test]

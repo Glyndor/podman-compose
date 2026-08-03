@@ -9,6 +9,7 @@ use crate::compose::types::ComposeFile;
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::container::ContainerListEntry;
 use crate::libpod::{parse_json_lines, urlencoded, API_PREFIX};
+use crate::units::SizeFormat;
 
 use super::Engine;
 
@@ -135,20 +136,20 @@ struct NetStat {
 	tx: u64,
 }
 
+/// How `stats` renders a size: binary units at one decimal.
+///
+/// Binary because this table is read next to `free` and `htop`, which are
+/// binary — not next to podman's own output, which is decimal. One decimal
+/// because the columns below are fixed-width by design (a live view must not
+/// resize itself mid-repaint), and a second decimal does not fit `NET I/O`.
+const SIZE_FORMAT: SizeFormat = SizeFormat::binary().with_decimals(1);
+
 /// Render a byte count as a compact human string (`1.5MiB`). Pure for testing.
+///
+/// The ladder, the rounding and the totality guarantee live in [`crate::units`]
+/// now; this is the surface's choice of base and precision, nothing else.
 fn format_bytes(bytes: u64) -> String {
-	const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-	let mut value = bytes as f64;
-	let mut unit = 0;
-	while value >= 1024.0 && unit < UNITS.len() - 1 {
-		value /= 1024.0;
-		unit += 1;
-	}
-	if unit == 0 {
-		format!("{bytes}B")
-	} else {
-		format!("{value:.1}{}", UNITS[unit])
-	}
+	crate::units::format_bytes(bytes, &SIZE_FORMAT)
 }
 
 /// Sum a container's per-interface network counters into one `(rx, tx)` pair.

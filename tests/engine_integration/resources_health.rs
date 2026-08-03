@@ -18,7 +18,45 @@ async fn named_volume_created_on_up() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let cname = format!("{proj}-web-1");
+	// Write into the mount, then force a recreate. A named volume outlives the
+	// container that mounted it, so the file has to still be there afterwards. If
+	// /data were ordinary container filesystem, the recreate would take it along,
+	// and `up` returning Ok would look exactly the same either way.
+	//
+	// Known limit, measured rather than assumed: this does NOT detect podup
+	// skipping the volume creation. With `create_volumes` stubbed out to a no-op
+	// the test still passed, because Podman creates a named volume on first use
+	// anyway. What explicit creation adds is the `podup.project` label that makes
+	// `down --volumes` recognise the volume as the project's, and reading a
+	// volume's labels is not something the library returns. Anyone tightening
+	// this needs that, not another assertion on the contents.
+	engine
+		.test_exec_capture(
+			&cname,
+			vec![
+				"sh".into(),
+				"-c".into(),
+				"echo in-volume > /data/marker".into(),
+			],
+		)
+		.await
+		.unwrap();
+	engine
+		.up_with_options(&file, false, &[], &[], false, true, false)
+		.await
+		.unwrap();
+	let after = engine
+		.test_exec_capture(&cname, vec!["cat".into(), "/data/marker".into()])
+		.await
+		.unwrap_or_default();
 	engine.down_with_options(&file, true).await.unwrap();
+
+	assert_eq!(
+		after.trim(),
+		"in-volume",
+		"the mount did not survive a container recreate, so it was not backed by the named volume"
+	);
 }
 
 #[tokio::test]
@@ -218,14 +256,35 @@ async fn post_start_and_pre_stop_hooks_run() {
 		None => return,
 	};
 	let proj = proj("hks");
+	let dir = tempfile::tempdir().unwrap();
 	let engine = Engine::new(client, proj.clone());
-	let file = parse_str(
-		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    post_start:\n      - command: [\"echo\", \"started\"]\n    pre_stop:\n      - command: [\"echo\", \"stopping\"]\n",
-	)
-	.unwrap();
+	// The hooks used to `echo` into a stream nothing reads, so a hook that never
+	// ran looked the same as one that did. They append to a bind-mounted host
+	// directory instead, which is also the only way to observe `pre_stop`: it
+	// fires while the container is going away, so there is nothing left to exec
+	// into afterwards. The `z` relabel is required on an SELinux-enforcing host
+	// (the lane is Fedora); without it the container is denied the write.
+	let yaml = format!(
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    volumes:\n      - {out}:/out:z\n    post_start:\n      - command: [\"sh\", \"-c\", \"echo post-start >> /out/hooks\"]\n    pre_stop:\n      - command: [\"sh\", \"-c\", \"echo pre-stop >> /out/hooks\"]\n",
+		out = dir.path().display()
+	);
+	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	let after_up = fs::read_to_string(dir.path().join("hooks")).unwrap_or_default();
 	engine.down(&file).await.unwrap();
+	let after_down = fs::read_to_string(dir.path().join("hooks")).unwrap_or_default();
+
+	assert_eq!(
+		after_up.trim(),
+		"post-start",
+		"post_start did not run, or ran more than once"
+	);
+	assert_eq!(
+		after_down.trim(),
+		"post-start\npre-stop",
+		"pre_stop did not run on down"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -239,15 +298,33 @@ async fn depends_on_service_healthy() {
 		None => return,
 	};
 	let proj = proj("hlt");
+	let dir = tempfile::tempdir().unwrap();
 	let engine = Engine::new(client, proj.clone());
-	// db has a healthcheck (CMD true), web waits for it to be healthy
-	let file = parse_str(
-		"services:\n  db:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    healthcheck:\n      test: [\"CMD\", \"true\"]\n      interval: 1s\n      timeout: 1s\n      retries: 5\n      start_period: 0s\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    depends_on:\n      db:\n        condition: service_healthy\n",
-	)
-	.unwrap();
+	// `CMD true` is healthy from the first probe, so it cannot show whether web
+	// waited. db's healthcheck now depends on work db does after a delay, and
+	// web's first act is to read what db left, so web starting early finds
+	// nothing.
+	//
+	// Two constraints pull against each other here. The delay has to exceed the
+	// time it takes to create web's container, or the mutation that empties the
+	// readiness map still leaves this green (see depends_on_service_completed).
+	// And `retries` has to outlast that same delay, or db is declared unhealthy
+	// before it writes and `up` fails before any assertion runs — which is what
+	// 12s against 10 retries at a 1s interval did.
+	let yaml = format!(
+		"services:\n  db:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"sleep 12; echo db-ready > /out/ready; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    healthcheck:\n      test: [\"CMD\", \"test\", \"-f\", \"/out/ready\"]\n      interval: 1s\n      timeout: 2s\n      retries: 30\n      start_period: 0s\n  web:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"cat /out/ready > /out/web-saw 2>/dev/null; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    depends_on:\n      db:\n        condition: service_healthy\n",
+		out = dir.path().display()
+	);
+	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	let saw = poll_host_file(dir.path().join("web-saw"), "db-ready", 30).await;
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		saw,
+		"web started before db reported healthy, so service_healthy was not waited on"
+	);
 }
 
 #[tokio::test]
@@ -266,8 +343,30 @@ async fn depends_on_service_healthy_with_default_timeout() {
 	)
 	.unwrap();
 
+	// The comment above states the failure mode exactly: without the compose-spec
+	// default, Podman treats a missing Timeout as 0s, every probe fails "exceeded
+	// timeout of 0s", db never reports healthy and this `up` hangs until the
+	// health deadline. A hang is not something a bare `.unwrap()` can report, so
+	// bound it.
+	let started = std::time::Instant::now();
 	engine.up(&file).await.unwrap();
+	let elapsed = started.elapsed();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		elapsed < std::time::Duration::from_secs(45),
+		"up took {elapsed:?} — a healthcheck with no explicit timeout must get the spec default, not 0s"
+	);
+	assert_eq!(
+		names,
+		vec![format!("{proj}-db-1"), format!("{proj}-web-1")],
+		"web did not come up behind a healthcheck that omits timeout and retries"
+	);
 }
 
 #[tokio::test]
@@ -277,15 +376,34 @@ async fn depends_on_service_completed() {
 		None => return,
 	};
 	let proj = proj("cmp");
+	let dir = tempfile::tempdir().unwrap();
 	let engine = Engine::new(client, proj.clone());
-	// init exits 0 quickly; app waits for it to complete
-	let file = parse_str(
-		"services:\n  init:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"exit 0\"]\n  app:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    depends_on:\n      init:\n        condition: service_completed_successfully\n",
-	)
-	.unwrap();
+	// Ordering is the contract, and `up` returning Ok says nothing about it. init
+	// takes a while and then leaves a file; app's first act is to read that file.
+	//
+	// The delay has to beat the cost of creating app's container, not just be
+	// non-zero. `up` starts services in dependency levels, so init is launched
+	// before app whether or not the readiness wait happens — the wait only adds
+	// "and has finished". With a 2s delay the mutation that empties the readiness
+	// map left this test green, because creating app took longer than that on its
+	// own.
+	// If app were started before init completed, the read finds nothing and the
+	// marker below stays empty — which is exactly what a dropped dependency wait
+	// looks like from outside.
+	let yaml = format!(
+		"services:\n  init:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"sleep 12; echo init-done > /out/order; exit 0\"]\n    volumes:\n      - {out}:/out:z\n  app:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"cat /out/order > /out/app-saw 2>/dev/null; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    depends_on:\n      init:\n        condition: service_completed_successfully\n",
+		out = dir.path().display()
+	);
+	let file = parse_str(&yaml).unwrap();
 
 	engine.up(&file).await.unwrap();
+	let saw = poll_host_file(dir.path().join("app-saw"), "init-done", 30).await;
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		saw,
+		"app started before init had completed, so service_completed_successfully was not waited on"
+	);
 }
 
 // Regression: a dependency scaled to >1 has no base-named container, only
@@ -305,7 +423,31 @@ async fn depends_on_scaled_service_completed() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	// The comment above names the regression precisely: a scaled dependency has no
+	// container under the base name, so a readiness wait aimed at `init` rather
+	// than `init-1` 404s and aborts `up`.
+	//
+	// Measured: aiming the wait at the base name reddens this test at
+	// `up().unwrap()`, not here — so the bare unwrap already covered that
+	// regression. What the assertion adds is that both replicas exist and app
+	// came up with them, which the unwrap could not distinguish from a run where
+	// app was silently skipped. Precision, not new falsifiability.
+	assert_eq!(
+		names,
+		vec![
+			format!("{proj}-app-1"),
+			format!("{proj}-init-1"),
+			format!("{proj}-init-2"),
+		],
+		"a scaled completed-successfully dependency did not resolve to both replicas plus the dependant"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +473,18 @@ async fn profile_filtered_service_skipped() {
 		.up_with_options(&file, false, &[], &[], false, false, false)
 		.await
 		.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	assert_eq!(
+		names,
+		vec![format!("{proj}-web-1")],
+		"the profile-gated service was started even though its profile is not active"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +505,21 @@ async fn scale_creates_multiple_replicas() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	// Both replicas, and the `-1`/`-2` suffixes rather than a bare base name: a
+	// scaled service has no container under the base name, which is the shape
+	// that made the readiness wait 404 in depends_on_scaled_service_completed.
+	assert_eq!(
+		names,
+		vec![format!("{proj}-worker-1"), format!("{proj}-worker-2")],
+		"replicas: 2 did not produce two suffixed containers"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -374,14 +541,39 @@ async fn depends_on_healthy_no_healthcheck_skips_wait() {
 	)
 	.unwrap();
 
+	// "Skips the wait" is the claim, and the way it fails is by NOT skipping:
+	// waiting on a container that has no healthcheck can only end in the timeout,
+	// so the test would take the full health deadline and then error rather than
+	// fail. A bound turns that into an assertion.
+	let started = std::time::Instant::now();
 	engine.up(&file).await.unwrap();
+	let elapsed = started.elapsed();
+	let mut names = engine
+		.test_project_container_names()
+		.await
+		.unwrap_or_default();
+	names.sort();
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		elapsed < std::time::Duration::from_secs(30),
+		"up took {elapsed:?} — a service_healthy dependency with no healthcheck must be skipped, not waited on"
+	);
+	assert_eq!(
+		names,
+		vec![format!("{proj}-backend-1"), format!("{proj}-frontend-1")],
+		"the dependant did not come up despite the healthcheck-less dependency being skipped"
+	);
 }
 
 // ---------------------------------------------------------------------------
 // PS with port bindings
 // ---------------------------------------------------------------------------
 
+/// `Engine::ps` prints and returns `Result<()>`, so the port column it exists to
+/// render is not reachable from here. `cli_ps_subcommand` asserts the table, and
+/// `stats_flags::cli_port_prints_the_published_binding` asserts the binding
+/// itself. Kept because it drives the with-ports branch of the same call.
 #[tokio::test]
 async fn ps_with_port_bindings() {
 	let client = match podman().await {
@@ -404,6 +596,11 @@ async fn ps_with_port_bindings() {
 // Query: attach_logs streaming and logs stderr
 // ---------------------------------------------------------------------------
 
+/// `attach_logs` streams to stdout, so what it carries cannot be read from the
+/// library. Unlike `attach_logs_empty_attach_returns`, which asserts a bound
+/// because "returns immediately" is checkable without the stream, there is
+/// nothing here to bound — this one names the content. No CLI test covers
+/// attached output either, so the claim in the name is unverified.
 #[tokio::test]
 async fn attach_logs_streams_container_output() {
 	let client = match podman().await {
@@ -424,6 +621,10 @@ async fn attach_logs_streams_container_output() {
 	let _ = engine.down(&file).await;
 }
 
+/// Same: `logs` prints, and whether a container's stderr is interleaved into it
+/// is a property of the output. `cli_logs_subcommand` asserts stdout content and
+/// the service prefix, but drives a service that writes only to stdout — so the
+/// stderr path this test is named for is asserted nowhere.
 #[tokio::test]
 async fn logs_with_stderr_output() {
 	let client = match podman().await {

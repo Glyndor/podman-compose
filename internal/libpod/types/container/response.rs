@@ -55,6 +55,18 @@ pub struct ContainerListEntry {
 	/// Container labels (key/value), including compose project/service labels.
 	#[serde(rename = "Labels", default, deserialize_with = "null_default")]
 	pub labels: HashMap<String, String>,
+	/// When the container was last started, in Unix seconds. Zero for one that
+	/// has never run, which is why `ps` keys "how long has this been up" on the
+	/// state rather than on this being non-zero.
+	#[serde(rename = "StartedAt", default)]
+	pub started_at: i64,
+	/// When the container was created, as an RFC 3339 string.
+	///
+	/// Not the docker-compatible `CreatedAt`, which libpod also sends and leaves
+	/// **empty** — measured on Podman 5.7.0. Reading the familiar name gets a
+	/// blank column, the same trap as `Status` versus `State` above.
+	#[serde(rename = "Created", default)]
+	pub created: String,
 }
 
 /// Port mapping entry in container list response.

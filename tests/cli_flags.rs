@@ -235,6 +235,13 @@ fn missing_subcommand_exits_non_zero() {
 		.output()
 		.expect("run podup with no args");
 	assert!(!none.status.success(), "no args must exit non-zero");
+	// Exiting non-zero with nothing on stderr would satisfy the check above and
+	// leave the user with no idea what to type. clap prints usage; assert it.
+	let none_err = String::from_utf8_lossy(&none.stderr);
+	assert!(
+		none_err.contains("Usage: podup"),
+		"running with no arguments printed no usage: {none_err:?}"
+	);
 	let gen = Command::new(bin())
 		.arg("generate")
 		.output()
@@ -242,6 +249,19 @@ fn missing_subcommand_exits_non_zero() {
 	assert!(
 		!gen.status.success(),
 		"generate with no subcommand must exit non-zero"
+	);
+	// The group's own usage, not the root's. Until #1293 this printed
+	// `Usage: podup [OPTIONS] <COMMAND>` and listed every top-level command,
+	// withholding the one thing the user needed — what `generate` accepts —
+	// which its own `--help` had been answering correctly all along.
+	let gen_err = String::from_utf8_lossy(&gen.stderr);
+	assert!(
+		gen_err.contains("Usage: podup generate"),
+		"generate with no subcommand did not print generate's own usage: {gen_err:?}"
+	);
+	assert!(
+		gen_err.contains("quadlet"),
+		"generate's usage did not list the subcommand it accepts: {gen_err:?}"
 	);
 }
 

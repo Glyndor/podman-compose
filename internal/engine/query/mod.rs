@@ -10,6 +10,7 @@ use super::Engine;
 
 mod exec;
 mod exec_interactive;
+mod images;
 mod inspect;
 mod inspect_util;
 mod log_prefix;

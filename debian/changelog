@@ -1,3 +1,50 @@
+podup (3.5.0) unstable; urgency=medium
+
+  Incompatible
+
+  * Three tables changed shape, so a script slicing their columns by position
+    needs updating. `ps` gained a CREATED column between IMAGE and STATUS, and
+    its STATUS now reads `Up 2h 5m` rather than the bare word `running`.
+    `images` gained SIZE and CREATED. `events` gained a TIME column, in 3.4.x
+    it had none. The `--format json` output of each is a superset of what it
+    was: existing keys keep their names and meaning, and the new ones carry raw
+    wire values rather than rendered strings.
+
+  Added
+
+  * `ps` reports how long a running container has been up, with its health in
+    parentheses when it has a healthcheck. The state alone answered "is it on";
+    the span answers "did it just restart", which is what CREATED next to it
+    makes visible.
+  * `ps` and `images` report when things were created, and `images` reports what
+    each image costs on disk. Sizes there render the way `podman images` and
+    `docker compose images` render them, measured against both rather than
+    assumed.
+  * `events` reports when each event happened. The feed carried the timestamp
+    all along and printed nothing, so nothing could be correlated against it.
+
+  Changed
+
+  * Sizes and durations now come from one formatter that is total over its input
+    type. `stats` used to saturate at TiB, rendering a petabyte as `1024.0TiB` —
+    right arithmetic, wrong unit. Its own output is otherwise unchanged.
+  * Durations read as up to three components whose units follow the magnitude:
+    `5s`, `1h 5m 3s`, `1y 1mo 5d`. A year is 365 days and a month is 30.
+
+  Fixed
+
+  * `podup generate` and `podup autostart` print their own usage when a
+    subcommand is missing, instead of the root usage.
+  * A value one byte short of a unit boundary no longer prints the unit it has
+    already left, so 1048575 bytes reads `1.0MiB` and not `1024.0KiB`.
+
+  Known limitation
+
+  * The `events` TIME column is UTC and does not say so, while `podman events`
+    prints local time with its offset. Tracked; the fix is a later release.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Mon, 03 Aug 2026 04:43:42 -0500
+
 podup (3.4.1) unstable; urgency=medium
 
   Fixed

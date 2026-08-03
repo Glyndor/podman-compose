@@ -1,15 +1,13 @@
-//! Container inspection commands: top, port, images, and log attachment.
+//! Container inspection commands: top, port, and log attachment.
 
 use futures_util::StreamExt;
 
 use crate::compose::types::ComposeFile;
 use crate::error::{ComposeError, Result};
-use crate::libpod::types::image::ImageInspect;
 use crate::libpod::{urlencoded, LogOutput, API_PREFIX};
 
 use super::inspect_util::{
 	dedup_preserving_order, is_running_status, parse_port_proto, process_table, select_replica,
-	split_repo_tag,
 };
 use super::Engine;
 
@@ -217,111 +215,6 @@ impl Engine {
 				"no host binding for {service_name} port {port}/{proto}"
 			))),
 		}
-	}
-
-	/// List images used by each service as a table (default options).
-	pub async fn images(&self, file: &ComposeFile) -> Result<()> {
-		self.images_with_options(file, super::ImagesOptions::default())
-			.await
-	}
-
-	/// List service images with `docker compose images`-style options:
-	/// `-q/--quiet` (IDs only) and `--format` (table | json), across all services.
-	/// To restrict to specific services use [`Engine::images_with_services`].
-	pub async fn images_with_options(
-		&self,
-		file: &ComposeFile,
-		opts: super::ImagesOptions,
-	) -> Result<()> {
-		self.images_with_services(file, &[], opts).await
-	}
-
-	/// List service images like [`Engine::images_with_options`]. When
-	/// `target_services` is non-empty, only those services are listed (an unknown
-	/// name is an error), matching `docker compose images [SERVICE...]`.
-	pub async fn images_with_services(
-		&self,
-		file: &ComposeFile,
-		target_services: &[String],
-		opts: super::ImagesOptions,
-	) -> Result<()> {
-		for name in target_services {
-			if !file.services.contains_key(name) {
-				return Err(ComposeError::ServiceNotFound(name.clone()));
-			}
-		}
-		// Collect rows first so quiet/json modes can render without the header.
-		let mut rows: Vec<(String, String, String, String)> = Vec::new();
-		for (name, service) in &file.services {
-			if !target_services.is_empty() && !target_services.iter().any(|t| t == name) {
-				continue;
-			}
-			let image_ref = match (&service.image, &service.build) {
-				(Some(img), _) => img.clone(),
-				// A build-only service's image is the tag the build step produced
-				// (project-scoped `{project}-{service}:latest`, or `build.tags[0]`).
-				(None, Some(build)) => {
-					super::super::build::primary_build_tag(&self.project, name, None, build.tags())
-				}
-				(None, None) => continue,
-			};
-			let (repo, tag) = split_repo_tag(&image_ref);
-			let path = format!("{API_PREFIX}/images/{}/json", urlencoded(&image_ref));
-			match self.client.get_json::<ImageInspect>(&path).await {
-				Ok(img) => {
-					let id = img.id.trim_start_matches("sha256:").get(..12).unwrap_or("");
-					rows.push((name.clone(), repo, tag, id.to_string()));
-				}
-				// A 404 means the image is simply not present locally — list it with
-				// an empty ID rather than silently dropping it, matching docker
-				// compose. Any other error (a connection failure / unreachable
-				// socket, or an HTTP 500) is a real failure that must propagate with
-				// a non-zero exit rather than printing an empty table and exiting 0.
-				Err(e) if e.is_status(404) => {
-					tracing::debug!("images {name}: not present ({e})");
-					rows.push((name.clone(), repo, tag, String::new()));
-				}
-				Err(e) => return Err(ComposeError::Podman(e)),
-			}
-		}
-
-		if opts.quiet {
-			// Deduplicate IDs so services sharing an image emit it once, like
-			// docker compose images -q. Empty IDs (not-pulled) are skipped.
-			let mut seen = std::collections::HashSet::new();
-			for (_, _, _, id) in &rows {
-				if !id.is_empty() && seen.insert(id.as_str()) {
-					println!("{id}");
-				}
-			}
-			return Ok(());
-		}
-		if opts.json {
-			let json: Vec<_> = rows
-				.iter()
-				.map(|(svc, repo, tag, id)| {
-					serde_json::json!({
-						"Service": svc, "Repository": repo, "Tag": tag, "ID": id,
-					})
-				})
-				.collect();
-			println!(
-				"{}",
-				serde_json::to_string_pretty(&json).unwrap_or_default()
-			);
-			return Ok(());
-		}
-
-		let mut table = crate::ui::Table::new(&["SERVICE", "REPOSITORY", "TAG", "IMAGE ID"])
-			.cap(0, 48)
-			.cap(1, 48)
-			.cap(2, 24)
-			.identity_col(0);
-		for (svc, repo, tag, id) in &rows {
-			table.push(vec![svc.clone(), repo.clone(), tag.clone(), id.clone()]);
-		}
-		table.print();
-		Ok(())
 	}
 
 	/// Attach to a single service container's output (`docker compose attach`).
