@@ -28,19 +28,48 @@ fn composite_renders_the_example_from_the_issue() {
 	);
 }
 
-/// Two components is the default because that is what reads at a glance. The
-/// same span at five components is the thing the default exists to avoid.
+/// Three components is the default. The same span at five components is what
+/// the default exists to cut off.
 #[test]
-fn the_default_is_two_components() {
+fn the_default_is_three_components() {
 	let span = Duration::new(7503, 200_000_000);
 	assert_eq!(
 		format_duration(span, &DurationFormat::default_parts()),
-		"2h 5m"
+		"2h 5m 3s"
 	);
 	assert_eq!(
 		format_duration(span, &DurationFormat::Parts(5)),
 		"2h 5m 3s 200ms"
 	);
+}
+
+/// The component count is fixed and the units that fill it slide with the
+/// magnitude. This is the whole contract: a column three components wide always
+/// carries the three that matter at that scale, so a freshly started container
+/// and one up for two years are equally readable in the same width.
+#[test]
+fn the_window_slides_up_the_ladder_as_the_span_grows() {
+	let three = DurationFormat::default_parts();
+	let day = 86_400;
+	for (secs, expected) in [
+		(5_u64, "5s"),
+		(90, "1m 30s"),
+		(3903, "1h 5m 3s"),
+		(61 * day, "2mo 1d"),
+		(400 * day, "1y 1mo 5d"),
+		// A gap inside the window: a year and two days has no whole month in
+		// it, so the month is skipped rather than ending the walk. Without this
+		// row the whole test passes against a formatter that stops at the first
+		// empty unit, because every span above happens to have none.
+		(367 * day, "1y 2d"),
+		(365 * day + 3600, "1y 1h"),
+	] {
+		assert_eq!(
+			format_duration(Duration::from_secs(secs), &three),
+			expected,
+			"{secs}s"
+		);
+	}
 }
 
 /// A span smaller than its component count renders only what it has, with no
@@ -69,21 +98,38 @@ fn every_unit_appears_at_its_own_boundary() {
 	assert_eq!(format_duration(Duration::from_secs(60), &one), "1m");
 	assert_eq!(format_duration(Duration::from_secs(3600), &one), "1h");
 	assert_eq!(format_duration(Duration::from_secs(86_400), &one), "1d");
+	assert_eq!(format_duration(Duration::from_secs(2_592_000), &one), "1mo");
 	assert_eq!(format_duration(Duration::from_secs(31_536_000), &one), "1y");
 }
 
-/// A year is exactly 365 days, so 365 days is one year and 364 is not. The
-/// definition is arbitrary but it has to be pinned: a reader doing the
-/// arithmetic back has to land on the same number.
+/// A year is exactly 365 days and a month exactly 30, both pinned because a
+/// reader doing the arithmetic back has to land on the same number.
 #[test]
-fn a_year_is_three_hundred_and_sixty_five_days() {
+fn a_year_is_three_hundred_and_sixty_five_days_and_a_month_is_thirty() {
 	let one = DurationFormat::Parts(1);
 	assert_eq!(
-		format_duration(Duration::from_secs(364 * 86_400), &one),
-		"364d"
+		format_duration(Duration::from_secs(30 * 86_400), &one),
+		"1mo"
 	);
 	assert_eq!(
 		format_duration(Duration::from_secs(365 * 86_400), &one),
+		"1y"
+	);
+}
+
+/// The two definitions do not divide evenly, and the seam is deliberate rather
+/// than a rounding slip: twelve thirty-day months are 360 days, so 364 days is
+/// twelve months and four days while 365 is one year. The alternative is a
+/// fractional month nobody can verify by hand.
+#[test]
+fn twelve_months_are_not_a_year_and_the_output_says_so() {
+	let three = DurationFormat::default_parts();
+	assert_eq!(
+		format_duration(Duration::from_secs(364 * 86_400), &three),
+		"12mo 4d"
+	);
+	assert_eq!(
+		format_duration(Duration::from_secs(365 * 86_400), &three),
 		"1y"
 	);
 }

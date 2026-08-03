@@ -123,6 +123,21 @@ impl SizeFormat {
 			..self
 		}
 	}
+
+	/// Same ladder, the default number of components.
+	///
+	/// Three, matching [`DurationFormat::default_parts`]. One default across
+	/// both formatters is the point: a reader who has learned what `1h 5m 3s`
+	/// means should not have to learn a second rule for `1GB 512MB 200kB`.
+	///
+	/// This is the default *component count*, not a floor on the output. A value
+	/// with fewer components than that still renders only the ones it has —
+	/// three is what a caller gets when it does not choose, never padding.
+	///
+	/// [`DurationFormat::default_parts`]: super::DurationFormat::default_parts
+	pub(crate) const fn default_parts(self) -> Self {
+		self.with_parts(DEFAULT_PARTS)
+	}
 }
 
 /// How many decimal places a single-unit value shows.
@@ -166,6 +181,12 @@ impl Precision {
 		}
 	}
 }
+
+/// The default component count for both formatters.
+///
+/// Lives here and is read by the duration side too, so the two cannot drift to
+/// different defaults without the change being visible in one place.
+pub(crate) const DEFAULT_PARTS: usize = 3;
 
 /// Render `bytes` as a human-readable size.
 ///
