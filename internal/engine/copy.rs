@@ -7,6 +7,7 @@ use http_body_util::{BodyExt, Limited};
 
 use crate::compose::types::ComposeFile;
 use crate::error::{ComposeError, Result};
+use crate::libpod::client::PathStat;
 use crate::libpod::urlencoded;
 use crate::libpod::API_PREFIX;
 
@@ -207,8 +208,21 @@ impl Engine {
 				.map(|n| n.to_string_lossy().into_owned())
 				.unwrap_or_default()
 		});
-		self.put_archive_verified(&container_name, &extract_dir, &entry, tar_bytes)
-			.await
+		// The size the destination entry must end up with. Only a regular file
+		// has one to compare; a directory upload stays unverifiable and
+		// fail-closed, as it was before.
+		let uploaded_size = std::fs::metadata(src)
+			.ok()
+			.filter(std::fs::Metadata::is_file)
+			.map(|m| m.len());
+		self.put_archive_verified(
+			&container_name,
+			&extract_dir,
+			&entry,
+			tar_bytes,
+			uploaded_size,
+		)
+		.await
 	}
 
 	/// PUT a gzipped tar to a container's archive endpoint at `dir`, extracting
@@ -221,23 +235,30 @@ impl Engine {
 	/// measured on 6.0.1; every raw request to the same endpoint gets a clean
 	/// 200, so the trigger is client-side and could not be stripped out). To tell
 	/// that apply-then-close apart from a *genuine* upload failure (a dropped
-	/// socket, a truncated body), capture `dir/entry`'s mtime before the PUT and,
-	/// on an `IncompleteMessage`, treat the copy as landed only if that mtime
-	/// moved — the extracted file takes the source's mtime, so an unchanged one
-	/// means a failed upload left the old entry in place. Fails, rather than
-	/// guessing, when the entry has no name (`cp . svc:/`), when the pre- or
-	/// post-PUT stat cannot be read, or when the mtime did not move.
+	/// socket, a truncated body), read `dir/entry` after the PUT and treat the
+	/// copy as landed only if it now **matches what was uploaded**, which is what
+	/// `uploaded_size` carries.
 	///
-	/// Known limit: the mtime of a *directory* entry moves only when its own
-	/// children are added or removed, so re-syncing a tree whose only change is
-	/// deeper than the top level is reported as unverifiable (fail-closed, never a
-	/// false success). Inert on Podman 5, which returns a normal response.
+	/// This used to compare the entry's mtime before and after and require it to
+	/// move. That signal cannot express the question: Podman 6 reports the mtime
+	/// to whole seconds, so two copies inside one second look identical
+	/// (#1270 — three failures in six back-to-back copies, measured), and
+	/// re-copying an *unchanged* file is undetectable at any resolution because
+	/// the extracted file takes the source's own mtime.
+	///
+	/// Fails, rather than guessing, when the entry has no name (`cp . svc:/`),
+	/// when the source size is unknown, or when the post-PUT stat cannot be read.
+	///
+	/// Known limit: a *directory* entry has no size to compare, so re-syncing a
+	/// tree is reported as unverifiable (fail-closed, never a false success).
+	/// Inert on Podman 5, which returns a normal response.
 	pub(super) async fn put_archive_verified(
 		&self,
 		container: &str,
 		dir: &str,
 		entry: &str,
 		tar_bytes: Vec<u8>,
+		uploaded_size: Option<u64>,
 	) -> Result<()> {
 		let path = format!(
 			"{API_PREFIX}/containers/{}/archive?path={}",
@@ -251,13 +272,24 @@ impl Engine {
 				urlencoded(&join_archive_path(dir, entry)),
 			)
 		});
-		// The pre-PUT mtime, only when it can be read cleanly. `None` means
-		// "unknown" (no verifiable entry, or the stat failed) and forces a later
-		// IncompleteMessage to fail rather than guess.
-		let pre_mtime = match &verify_path {
-			Some(p) => self.client.head_path_mtime(p).await.ok(),
-			None => None,
-		};
+		// What the destination entry must look like once the archive is applied.
+		//
+		// This used to read the entry's mtime *before* the PUT and check that it
+		// moved afterwards. That cannot work: Podman 6 reports the mtime to
+		// whole seconds, so two copies inside one second are indistinguishable
+		// — measured at three failures in six back-to-back copies (#1270) — and
+		// copying an unchanged file twice is undetectable at any resolution,
+		// because the extracted file takes the source's own mtime.
+		//
+		// The question the confirmation should ask is not "did the entry
+		// change" but "does the entry now match what was uploaded". `None`
+		// means the answer is unknowable (no verifiable entry, or the source
+		// could not be stat'd) and forces a later IncompleteMessage to fail
+		// rather than guess.
+		let expected = verify_path
+			.as_ref()
+			.and(uploaded_size)
+			.map(|size| ExpectedEntry { size });
 
 		// `application/gzip` is the honest label for the gzipped tar; Podman
 		// sniffs the magic bytes and forgives either.
@@ -273,9 +305,9 @@ impl Engine {
 		if !e.is_incomplete_message() {
 			return Err(ComposeError::Podman(e));
 		}
-		let landed = match (&verify_path, pre_mtime) {
-			(Some(p), Some(pre)) => match self.client.head_path_mtime(p).await {
-				Ok(post) => copy_landed(pre.as_deref(), post.as_deref()),
+		let landed = match (&verify_path, &expected) {
+			(Some(p), Some(want)) => match self.client.head_path_stat(p).await {
+				Ok(post) => copy_landed(want, post.as_ref()),
 				Err(stat_err) => {
 					tracing::debug!(
 						"cp: could not re-verify {p} after an incomplete PUT: {stat_err}"
@@ -298,15 +330,38 @@ impl Engine {
 	}
 }
 
+/// What the destination entry must look like for the upload to have landed.
+///
+/// Only the size for now. The mtime is deliberately not part of it: the archive
+/// sets it from the source, but Podman reports it to whole seconds while the
+/// source's own mtime carries sub-second precision, so comparing the two would
+/// re-introduce a resolution mismatch — this time as a false *negative* on a
+/// copy that did land.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExpectedEntry {
+	size: u64,
+}
+
 /// Whether a `cp`/sync whose archive PUT ended in an `IncompleteMessage`
-/// actually landed, from the destination entry's mtime before and after the
-/// PUT. The entry must exist now (`post` is `Some`) and its mtime must differ
-/// from before — the extracted file takes the source's mtime, so an unchanged
-/// mtime means a failed upload left the old entry in place. A vanished entry, or
-/// one whose mtime did not move, is "did not land". Pure so the decision is
-/// unit-tested without a container.
-fn copy_landed(pre: Option<&str>, post: Option<&str>) -> bool {
-	post.is_some() && post != pre
+/// actually landed, by comparing the destination entry against what was
+/// uploaded.
+///
+/// The entry must exist and its size must equal the source's. **Not "did it
+/// change"**, which is what this asked before: Podman 6's mtime has one-second
+/// resolution, so a second copy inside the same second reported an unchanged
+/// mtime and a copy that had landed was called a failure (#1270, measured at
+/// three failures in six). Copying an unchanged file twice was undetectable at
+/// any resolution, since the extracted file takes the source's own mtime.
+///
+/// The residual false positive is a failed upload onto an entry that already
+/// happened to be the same size. It is benign in a way the old false negative
+/// was not: the destination already holds bytes of the length the caller
+/// intended, and the caller is told the copy succeeded rather than being told a
+/// successful copy failed.
+///
+/// Pure so the decision is unit-tested without a container.
+fn copy_landed(expected: &ExpectedEntry, post: Option<&PathStat>) -> bool {
+	post.is_some_and(|entry| entry.size == expected.size)
 }
 
 /// Join a container directory and an entry name into one path, without doubling
@@ -380,7 +435,7 @@ fn parse_endpoint(s: &str) -> Option<(&str, &str)> {
 
 #[cfg(test)]
 mod tests {
-	use super::{copy_landed, join_archive_path, parse_endpoint};
+	use super::{copy_landed, join_archive_path, parse_endpoint, ExpectedEntry, PathStat};
 
 	#[test]
 	fn join_archive_path_does_not_double_the_separator() {
@@ -393,23 +448,61 @@ mod tests {
 	}
 
 	#[test]
-	fn copy_landed_requires_the_entry_to_exist_and_its_mtime_to_move() {
-		// A brand-new destination: absent before, present after -> landed.
-		assert!(copy_landed(None, Some("2026-01-01T00:00:00Z")));
-		// An overwrite that applied: the entry's mtime changed to the source's.
-		assert!(copy_landed(
-			Some("2026-01-01T00:00:00Z"),
-			Some("2026-06-01T00:00:00Z")
-		));
-		// An overwrite whose PUT actually failed: the old entry is still there,
-		// unchanged. This is the silent-success the mtime check exists to prevent.
-		assert!(!copy_landed(
-			Some("2026-01-01T00:00:00Z"),
-			Some("2026-01-01T00:00:00Z")
-		));
-		// The entry vanished (or never appeared): not landed.
-		assert!(!copy_landed(Some("2026-01-01T00:00:00Z"), None));
-		assert!(!copy_landed(None, None));
+	fn copy_landed_asks_whether_the_entry_matches_what_was_uploaded() {
+		let want = ExpectedEntry { size: 42 };
+		let stat = |size: u64| PathStat {
+			size,
+			..PathStat::default()
+		};
+		// The entry is there and is the size that was sent -> landed.
+		assert!(copy_landed(&want, Some(&stat(42))));
+		// A failed PUT leaves the old entry, which is a different size.
+		assert!(!copy_landed(&want, Some(&stat(41))));
+		assert!(!copy_landed(&want, Some(&stat(0))));
+		// The entry vanished, or never appeared.
+		assert!(!copy_landed(&want, None));
+	}
+
+	/// The case the previous signal could not express, and the reason it
+	/// changed: copying the **same** file twice.
+	///
+	/// The old check required the destination's mtime to move. The archive sets
+	/// that mtime from the source, so re-copying an unchanged file leaves it
+	/// identical by construction — no resolution would have helped — and the
+	/// second copy was reported as a failure. Matching against what was uploaded
+	/// answers correctly.
+	#[test]
+	fn copying_an_unchanged_file_twice_is_confirmed() {
+		let want = ExpectedEntry { size: 42 };
+		let already_there = PathStat {
+			size: 42,
+			..PathStat::default()
+		};
+		assert!(copy_landed(&want, Some(&already_there)));
+	}
+
+	/// Two copies inside one second, which is what #1270 measured on Podman 6:
+	/// the mtime string is identical either side of the PUT because the runtime
+	/// reports whole seconds, while the size moved. Under the old signal this
+	/// was three failures in six back-to-back copies.
+	#[test]
+	fn two_copies_in_the_same_second_are_told_apart_by_size() {
+		let same_second = "2026-08-03T18:36:05Z";
+		let before = PathStat {
+			size: 14,
+			mtime: same_second.into(),
+			..PathStat::default()
+		};
+		let after = PathStat {
+			size: 15,
+			mtime: same_second.into(),
+			..PathStat::default()
+		};
+		assert_eq!(before.mtime, after.mtime, "the fixture must share an mtime");
+		// What was uploaded is the 15-byte version.
+		assert!(copy_landed(&ExpectedEntry { size: 15 }, Some(&after)));
+		// And the pre-PUT entry would not have satisfied it.
+		assert!(!copy_landed(&ExpectedEntry { size: 15 }, Some(&before)));
 	}
 
 	#[test]

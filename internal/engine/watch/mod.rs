@@ -319,10 +319,14 @@ impl Engine {
 
 		// Shared with `cp`: the same archive upload, and the same #1097 Podman-6
 		// apply-then-close handling (the endpoint applies the tar then closes
-		// without a response; the upload is confirmed by the entry's mtime moving).
-		// `watch` used to have its own copy of this PUT, which is how the two
-		// drifted apart and left sync unfixed on Podman 6.
-		self.put_archive_verified(container, &dest_dir, &entry_name, tar_bytes)
+		// without a response; the upload is confirmed by the entry matching what
+		// was sent). `watch` used to have its own copy of this PUT, which is how
+		// the two drifted apart and left sync unfixed on Podman 6.
+		let uploaded_size = std::fs::metadata(changed)
+			.ok()
+			.filter(std::fs::Metadata::is_file)
+			.map(|m| m.len());
+		self.put_archive_verified(container, &dest_dir, &entry_name, tar_bytes, uploaded_size)
 			.await?;
 
 		info!("synced {} -> {target}", changed.display());
