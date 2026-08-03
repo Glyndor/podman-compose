@@ -124,6 +124,27 @@ fn table_status(c: &ContainerListEntry, now: i64) -> String {
 	}
 }
 
+/// The libpod list request `ps` makes, as a URL.
+///
+/// Pure so the query it builds can be asserted without a server. The `size`
+/// parameter is the one worth pinning: `size=true` is not a bigger payload, it
+/// is work — libpod walks each container's writable layer to answer, measured
+/// at 21 ms against 109 ms over 59 containers on Podman 5.7.0 — so asking for it
+/// unconditionally would make every `ps` pay for a column most readers do not
+/// look at. `docker ps -s` is opt-in for the same reason.
+///
+/// Extracted after a mutation that hard-coded `size=true` survived every test:
+/// the string was built inside an async method that needs a live socket, so
+/// nothing could reach it.
+fn containers_path(project: &str, all: bool, size: bool) -> String {
+	let label = format!("podup.project={project}");
+	let filters = serde_json::json!({ "label": [label] });
+	format!(
+		"{API_PREFIX}/containers/json?all={all}&size={size}&filters={}",
+		urlencoded(&filters.to_string()),
+	)
+}
+
 /// How `ps` renders a size: decimal units at three significant digits.
 ///
 /// The same shape `images` uses, and for the same reason — this column is read
@@ -442,18 +463,7 @@ impl Engine {
 		// below still narrows the result to the requested status(es); this only
 		// widens what libpod itself is asked for.
 		let all = opts.all || !status_filter.is_empty();
-		let label = format!("podup.project={}", self.project);
-		let filters = serde_json::json!({ "label": [label] });
-		// `size=true` only when the column was asked for. It is not a bigger
-		// payload, it is work: libpod walks each container's writable layer to
-		// answer, measured at 21 ms → 109 ms over 59 containers on Podman
-		// 5.7.0. `docker ps -s` is opt-in for the same reason.
-		let path = format!(
-			"{API_PREFIX}/containers/json?all={}&size={}&filters={}",
-			all,
-			display.size,
-			urlencoded(&filters.to_string()),
-		);
+		let path = containers_path(&self.project, all, display.size);
 
 		let all_containers = self
 			.client

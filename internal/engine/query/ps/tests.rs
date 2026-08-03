@@ -349,6 +349,30 @@ fn an_unparseable_created_leaves_the_cell_blank() {
 	}
 }
 
+/// The request only asks for the size when the column was asked for.
+///
+/// Tested at this level because the string is built inside an async method that
+/// needs a live socket: a mutation hard-coding `size=true` survived every test
+/// that went in the front door. Asking unconditionally would make every `ps`
+/// pay for a filesystem walk per container.
+#[test]
+fn the_request_asks_for_the_size_only_when_the_column_was_asked_for() {
+	assert!(
+		containers_path("demo", false, true).contains("size=true"),
+		"{}",
+		containers_path("demo", false, true)
+	);
+	assert!(
+		containers_path("demo", false, false).contains("size=false"),
+		"{}",
+		containers_path("demo", false, false)
+	);
+	// The other parameters still travel, so the extraction did not drop any.
+	let path = containers_path("demo", true, false);
+	assert!(path.contains("all=true"), "{path}");
+	assert!(path.contains("podup.project%3Ddemo"), "{path}");
+}
+
 /// The exact strings `podman ps -s` printed for these containers on
 /// 2026-08-03. The column exists to be read against that output, so a
 /// divergence here is a bug rather than a matter of taste.
