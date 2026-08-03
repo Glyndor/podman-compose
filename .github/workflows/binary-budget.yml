@@ -1,0 +1,66 @@
+# A ceiling on the shipped binary, so an unexplained jump is a red run rather
+# than something noticed in a table months later.
+#
+# The releases standard asks for exactly this — "keep a size budget per artifact;
+# treat a large unexplained growth as a regression to investigate, not ship" —
+# and #1296 gave peak memory one. The binary had none: it went from 7,228,256
+# bytes at v3.3.0 to 7,347,248 on develop with nothing watching.
+#
+# On pull requests rather than at tag time on purpose. A gate that only fires
+# during a release blocks the release, which is the worst moment to discover it
+# and the moment when the pressure to raise the number is highest.
+name: Binary budget
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "internal/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "bench/binary-budget-mib"
+      - ".github/workflows/binary-budget.yml"
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - "internal/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "bench/binary-budget-mib"
+      - ".github/workflows/binary-budget.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  size:
+    name: Release binary fits its budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the release binary
+        # The same profile the release ships, including the strip setting: a
+        # budget measured against a different profile is measuring nothing.
+        run: cargo build --release --locked --bin podup
+
+      - name: Compare against the budget
+        run: |
+          set -euo pipefail
+          # LC_ALL=C so awk formats with a dot wherever this runs. The verdict
+          # compares integer bytes and does not depend on it, but a message that
+          # reads 7,007 MiB on one machine and 7.007 on another is a message
+          # nobody trusts.
+          export LC_ALL=C
+          BUDGET_MIB="$(tr -d '[:space:]' < bench/binary-budget-mib)"
+          BUDGET_BYTES="$(awk -v m="$BUDGET_MIB" 'BEGIN { printf "%d", m * 1048576 }')"
+          ACTUAL="$(stat -c%s target/release/podup)"
+          ACTUAL_MIB="$(awk -v b="$ACTUAL" 'BEGIN { printf "%.3f", b / 1048576 }')"
+          echo "podup is ${ACTUAL} bytes (${ACTUAL_MIB} MiB); budget is ${BUDGET_MIB} MiB (${BUDGET_BYTES} bytes)."
+          if [ "$ACTUAL" -gt "$BUDGET_BYTES" ]; then
+            echo "::error::the release binary is over its budget. Either the growth is explained and bench/binary-budget-mib should move with a reason in the commit message, or it is a regression to investigate."
+            exit 1
+          fi
