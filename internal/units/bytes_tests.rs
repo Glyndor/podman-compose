@@ -174,12 +174,36 @@ fn significant_digits_do_not_reach_below_a_byte() {
 	assert_eq!(format_bytes(999, &fmt), "999B");
 }
 
-/// A zero-digit request has no rendering, so it is treated as one digit rather
-/// than producing a bare unit with no number in front of it.
+/// A zero-digit request still shows a digit, because `{:.0}` prints one
+/// whatever it is handed. Nothing in the formatter enforces this — it is a
+/// property of the format machinery, and it is pinned here so a future clamp
+/// added "to be safe" has something to justify itself against.
 #[test]
 fn a_zero_digit_request_still_renders_a_digit() {
 	let fmt = SizeFormat::decimal().with_significant(0);
 	assert_eq!(format_bytes(8_710_000, &fmt), "9MB");
+}
+
+/// Tested one level below `format_bytes` on purpose. Unit selection guarantees
+/// the value handed over is at least one, so the sub-one branch cannot be
+/// reached through the public entry point — a mutation deleting the clamp that
+/// used to sit here survived every test that went in the front door, which is
+/// what dead defensive code looks like from outside. The clamp is gone; this
+/// pins what the arithmetic actually does, including where it is weak.
+#[test]
+fn the_decimal_count_is_pinned_below_its_public_entry_point() {
+	use super::Precision;
+	// The ordinary path, which is everything `format_bytes` can produce.
+	assert_eq!(Precision::Significant(3).decimals_for(98.2), 1);
+	assert_eq!(Precision::Significant(3).decimals_for(8.71), 2);
+	assert_eq!(Precision::Significant(3).decimals_for(805.0), 0);
+	assert_eq!(Precision::Fixed(4).decimals_for(805.0), 4);
+	// Sub-one values count their leading zero as the digit before the point.
+	// That means one significant digit of 0.5 asks for no decimals and renders
+	// `0` — a real weakness, and unreachable, so it is recorded rather than
+	// fixed. If a caller ever hands this a fraction, fix it then.
+	assert_eq!(Precision::Significant(3).decimals_for(0.5), 2);
+	assert_eq!(Precision::Significant(1).decimals_for(0.5), 0);
 }
 
 /// The owner's worked examples, in the base each was written in.

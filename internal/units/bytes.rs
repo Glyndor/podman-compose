@@ -140,6 +140,17 @@ enum Precision {
 
 impl Precision {
 	/// Decimal places for a value already reduced onto its unit.
+	///
+	/// Callers hand over a value of at least one — unit selection guarantees it,
+	/// since a rung is only taken once the value reaches it. A smaller value is
+	/// still answered rather than underflowing, counting the leading zero as the
+	/// one digit before the point.
+	///
+	/// There is no clamp on `digits` because none is reachable: the digit count
+	/// before the point is always at least one, so `saturating_sub` already
+	/// floors the result, and `{:.0}` prints a digit regardless. A clamp was
+	/// written here first and a mutation deleting it survived every test, which
+	/// is what dead defensive code looks like from the outside.
 	fn decimals_for(self, value: f64) -> usize {
 		match self {
 			Self::Fixed(decimals) => decimals,
@@ -150,7 +161,7 @@ impl Precision {
 				} else {
 					whole.log10().floor() as usize + 1
 				};
-				digits.max(1).saturating_sub(before_the_point)
+				digits.saturating_sub(before_the_point)
 			}
 		}
 	}
