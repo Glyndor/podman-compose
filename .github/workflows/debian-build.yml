@@ -9,6 +9,13 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "internal/**"
+      # debian/rules is the only caller that builds the test targets with
+      # --no-default-features --features watch,completions, so it is the only
+      # place a feature-gating mistake in the test tree is visible. Leaving
+      # tests/ out of this filter hid a broken develop across twenty pull
+      # requests (#1295): every other lane builds with test-helpers or
+      # all-features and compiles the same code fine.
+      - "tests/**"
       - ".github/workflows/debian-build.yml"
   pull_request:
     branches:
@@ -19,6 +26,13 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "internal/**"
+      # debian/rules is the only caller that builds the test targets with
+      # --no-default-features --features watch,completions, so it is the only
+      # place a feature-gating mistake in the test tree is visible. Leaving
+      # tests/ out of this filter hid a broken develop across twenty pull
+      # requests (#1295): every other lane builds with test-helpers or
+      # all-features and compiles the same code fine.
+      - "tests/**"
       - ".github/workflows/debian-build.yml"
 
 permissions:
