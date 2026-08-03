@@ -250,20 +250,18 @@ fn missing_subcommand_exits_non_zero() {
 		!gen.status.success(),
 		"generate with no subcommand must exit non-zero"
 	);
-	// Measured 2026-08-02: a subcommand group invoked with no subcommand prints
-	// the ROOT usage, not the group's. `podup generate --help` does render
-	// `Usage: podup generate [OPTIONS] <COMMAND>` and lists `quadlet`, but bare
-	// `podup generate` renders `Usage: podup [OPTIONS] <COMMAND>` and lists every
-	// top-level command instead. `podup autostart` behaves the same way.
-	//
-	// So this asserts what it does, which is still better than asserting only the
-	// exit code: a non-zero exit with an empty stderr would pass that and leave
-	// the user nothing to read. Tightening it to the group's own usage is a
-	// behaviour change, not a test change.
+	// The group's own usage, not the root's. Until #1293 this printed
+	// `Usage: podup [OPTIONS] <COMMAND>` and listed every top-level command,
+	// withholding the one thing the user needed — what `generate` accepts —
+	// which its own `--help` had been answering correctly all along.
 	let gen_err = String::from_utf8_lossy(&gen.stderr);
 	assert!(
-		gen_err.contains("Usage: podup"),
-		"generate with no subcommand printed no usage at all: {gen_err:?}"
+		gen_err.contains("Usage: podup generate"),
+		"generate with no subcommand did not print generate's own usage: {gen_err:?}"
+	);
+	assert!(
+		gen_err.contains("quadlet"),
+		"generate's usage did not list the subcommand it accepts: {gen_err:?}"
 	);
 }
 
