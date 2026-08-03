@@ -4,7 +4,7 @@ use crate::compose::types::ComposeFile;
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::image::ImageInspect;
 use crate::libpod::{urlencoded, API_PREFIX};
-use crate::units::{format_bytes, SizeFormat};
+use crate::units::{format_bytes, format_duration, DurationFormat, SizeFormat};
 
 use super::inspect_util::split_repo_tag;
 use super::Engine;
@@ -18,6 +18,9 @@ use super::Engine;
 /// images` rendered `1.01 GB` and `805 kB` on the same host. A fixed decimal
 /// count cannot produce all three.
 const SIZE_FORMAT: SizeFormat = SizeFormat::decimal().with_significant(3);
+
+/// How `images` renders an age: the shared default, three components.
+const AGE_FORMAT: DurationFormat = DurationFormat::default_parts();
 
 /// One row of the `images` table.
 ///
@@ -34,6 +37,9 @@ struct ImageRow {
 	/// locally, which the table renders as an empty cell — a missing image has
 	/// no size, and `0B` would claim it has one.
 	size: u64,
+	/// The RFC 3339 string libpod sent, kept raw so the table can render an age
+	/// and the JSON path can pass the instant through unchanged.
+	created: String,
 }
 
 impl Engine {
@@ -94,6 +100,7 @@ impl Engine {
 						tag,
 						id: id.to_string(),
 						size: img.size,
+						created: img.created,
 					});
 				}
 				// A 404 means the image is simply not present locally — list it with
@@ -109,6 +116,7 @@ impl Engine {
 						tag,
 						id: String::new(),
 						size: 0,
+						created: String::new(),
 					});
 				}
 				Err(e) => return Err(ComposeError::Podman(e)),
@@ -139,6 +147,9 @@ impl Engine {
 						"Tag": row.tag,
 						"ID": row.id,
 						"Size": row.size,
+						// The raw instant, like the reference: a machine
+						// consumer wants something it can compute with.
+						"Created": row.created,
 					})
 				})
 				.collect();
@@ -149,12 +160,21 @@ impl Engine {
 			return Ok(());
 		}
 
-		let mut table =
-			crate::ui::Table::new(&["SERVICE", "REPOSITORY", "TAG", "IMAGE ID", "SIZE"])
-				.cap(0, 48)
-				.cap(1, 48)
-				.cap(2, 24)
-				.identity_col(0);
+		// One clock read for the whole table, so two rows built in the same
+		// second cannot render different ages.
+		let now = super::ps::now_unix();
+		let mut table = crate::ui::Table::new(&[
+			"SERVICE",
+			"REPOSITORY",
+			"TAG",
+			"IMAGE ID",
+			"SIZE",
+			"CREATED",
+		])
+		.cap(0, 48)
+		.cap(1, 48)
+		.cap(2, 24)
+		.identity_col(0);
 		for row in &rows {
 			table.push(vec![
 				row.service.clone(),
@@ -162,6 +182,7 @@ impl Engine {
 				row.tag.clone(),
 				row.id.clone(),
 				size_cell(row.size),
+				age_cell(&row.created, now),
 			]);
 		}
 		table.print();
@@ -179,6 +200,18 @@ fn size_cell(size: u64) -> String {
 		return String::new();
 	}
 	format_bytes(size, &SIZE_FORMAT)
+}
+
+/// The CREATED cell: how long ago the image was built.
+///
+/// Empty when libpod sent nothing or something this cannot parse. A blank cell
+/// says podup could not tell; a plausible wrong date is the one a reader acts on.
+fn age_cell(created: &str, now: i64) -> String {
+	let Some(built) = crate::timestamp::parse_rfc3339(created) else {
+		return String::new();
+	};
+	let elapsed = now.saturating_sub(built).max(0);
+	format_duration(std::time::Duration::from_secs(elapsed as u64), &AGE_FORMAT)
 }
 
 #[cfg(test)]

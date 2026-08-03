@@ -70,6 +70,12 @@ pub(crate) enum SizeShape {
 	Significant { digits: usize },
 	/// Up to `parts` whole components, largest first, zeros skipped:
 	/// `1TB 1GB`, `1GB 512MB`. For the places where the number is the point.
+	///
+	/// No caller yet: the surfaces that want it are `ps --size` and the volume
+	/// accounting in #1304. Exercised by this module's tests meanwhile, which is
+	/// what the allow covers — it is scoped to the three composite items rather
+	/// than the module, so anything else going dead here still warns.
+	#[allow(dead_code)]
 	Composite { parts: usize },
 }
 
@@ -109,6 +115,7 @@ impl SizeFormat {
 	}
 
 	/// Same ladder, up to `parts` whole components.
+	#[allow(dead_code)]
 	pub(crate) const fn with_parts(self, parts: usize) -> Self {
 		Self {
 			shape: SizeShape::Composite { parts },
@@ -135,6 +142,7 @@ impl SizeFormat {
 	/// three is what a caller gets when it does not choose, never padding.
 	///
 	/// [`DurationFormat::default_parts`]: super::DurationFormat::default_parts
+	#[allow(dead_code)]
 	pub(crate) const fn default_parts(self) -> Self {
 		self.with_parts(DEFAULT_PARTS)
 	}
