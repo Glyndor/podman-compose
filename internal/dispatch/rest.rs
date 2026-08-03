@@ -187,17 +187,19 @@ pub(super) async fn dispatch_rest(
 		}
 		Commands::Volumes {
 			quiet,
+			size,
 			format,
 			services,
 		} => {
 			engine
-				.list_volumes(
+				.list_volumes_with_display(
 					file,
 					&services,
 					podup::VolumesOptions {
 						quiet,
 						json: format == OutputFormat::Json,
 					},
+					podup::VolumesDisplayOptions::default().with_size(size),
 				)
 				.await?
 		}
