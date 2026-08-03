@@ -1,4 +1,4 @@
-use super::{DurationFormat, format_duration};
+use super::{format_duration, DurationFormat};
 use std::time::Duration;
 
 /// The ladder is walked in `u128` nanoseconds, which `Duration::MAX` cannot
@@ -96,11 +96,11 @@ fn a_year_is_three_hundred_and_sixty_five_days() {
 fn plain_milliseconds_keeps_sub_millisecond_spans() {
 	let two = DurationFormat::Millis { decimals: 2 };
 	assert_eq!(format_duration(Duration::from_micros(340), &two), "0.34ms");
-	assert_eq!(format_duration(Duration::from_millis(340), &two), "340.00ms");
 	assert_eq!(
-		format_duration(Duration::from_secs(90), &two),
-		"90000.00ms"
+		format_duration(Duration::from_millis(340), &two),
+		"340.00ms"
 	);
+	assert_eq!(format_duration(Duration::from_secs(90), &two), "90000.00ms");
 }
 
 /// The decimal count is the caller's, the same way it is for sizes.

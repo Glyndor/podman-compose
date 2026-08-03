@@ -11,8 +11,18 @@
 //! the right base depends on what the reader is comparing against — podman and
 //! docker print decimal, while `free` and `htop` are binary.
 
+// `stats` is the only caller so far, and it wants one shape: binary units at
+// one decimal. The decimal ladder, the composite shape and every duration are
+// exercised by this module's own tests and by nothing else yet, which is what
+// the allow is for — the surfaces that need them are `ps`, `images` and
+// `volumes`, and #1298 is where they arrive. Take this line out with that
+// change; it is scoped to the module so a genuinely dead item elsewhere still
+// warns. `unused_imports` rides along because the re-exports below are what a
+// caller will reach for, and an unused one is the same fact reported twice.
+#![allow(dead_code, unused_imports)]
+
 mod bytes;
 mod duration;
 
-pub(crate) use bytes::{SizeBase, SizeFormat, SizeShape, format_bytes};
-pub(crate) use duration::{DurationFormat, format_duration};
+pub(crate) use bytes::{format_bytes, SizeBase, SizeFormat, SizeShape};
+pub(crate) use duration::{format_duration, DurationFormat};

@@ -1,4 +1,4 @@
-use super::{SizeBase, SizeFormat, SizeShape, format_bytes};
+use super::{format_bytes, SizeBase, SizeFormat, SizeShape};
 
 /// Both ladders reach an exponent `u64::MAX` cannot exceed, so no input can
 /// push the renderer off the end of its table. This is the whole reason the
@@ -16,8 +16,14 @@ fn both_ladders_cover_the_whole_input_type() {
 /// column sized for five.
 #[test]
 fn a_petabyte_does_not_saturate_into_terabytes() {
-	assert_eq!(format_bytes(1024_u64.pow(5), &SizeFormat::binary()), "1.00PiB");
-	assert_eq!(format_bytes(1000_u64.pow(5), &SizeFormat::decimal()), "1.00PB");
+	assert_eq!(
+		format_bytes(1024_u64.pow(5), &SizeFormat::binary()),
+		"1.00PiB"
+	);
+	assert_eq!(
+		format_bytes(1000_u64.pow(5), &SizeFormat::decimal()),
+		"1.00PB"
+	);
 }
 
 /// Every rung of the binary ladder, at the exact value that first reaches it.
@@ -71,10 +77,19 @@ fn whole_bytes_carry_no_decimals() {
 /// hit: any size within half a display digit of a boundary shows it.
 #[test]
 fn a_value_that_rounds_onto_the_next_unit_is_promoted() {
-	assert_eq!(format_bytes(1024_u64.pow(2) - 1, &SizeFormat::binary()), "1.00MiB");
-	assert_eq!(format_bytes(1000_u64.pow(2) - 1, &SizeFormat::decimal()), "1.00MB");
+	assert_eq!(
+		format_bytes(1024_u64.pow(2) - 1, &SizeFormat::binary()),
+		"1.00MiB"
+	);
+	assert_eq!(
+		format_bytes(1000_u64.pow(2) - 1, &SizeFormat::decimal()),
+		"1.00MB"
+	);
 	// One rung further up, to show the promotion is not special-cased to KiB.
-	assert_eq!(format_bytes(1024_u64.pow(4) - 1, &SizeFormat::binary()), "1.00TiB");
+	assert_eq!(
+		format_bytes(1024_u64.pow(4) - 1, &SizeFormat::binary()),
+		"1.00TiB"
+	);
 }
 
 /// Below the rounding threshold the value stays on its own rung, which is what
@@ -90,8 +105,14 @@ fn a_value_that_does_not_round_up_stays_on_its_rung() {
 #[test]
 fn the_decimal_count_is_configurable() {
 	let bytes = 1_610_612_736; // 1.5 GiB exactly.
-	assert_eq!(format_bytes(bytes, &SizeFormat::binary().with_decimals(0)), "2GiB");
-	assert_eq!(format_bytes(bytes, &SizeFormat::binary().with_decimals(1)), "1.5GiB");
+	assert_eq!(
+		format_bytes(bytes, &SizeFormat::binary().with_decimals(0)),
+		"2GiB"
+	);
+	assert_eq!(
+		format_bytes(bytes, &SizeFormat::binary().with_decimals(1)),
+		"1.5GiB"
+	);
 	assert_eq!(
 		format_bytes(bytes, &SizeFormat::binary().with_decimals(4)),
 		"1.5000GiB"
@@ -169,7 +190,10 @@ fn zero_renders_under_either_shape() {
 /// is treated as one component rather than returning an empty string.
 #[test]
 fn a_zero_component_count_still_renders_one_component() {
-	assert_eq!(format_bytes(1025, &SizeFormat::binary().with_parts(0)), "1KiB");
+	assert_eq!(
+		format_bytes(1025, &SizeFormat::binary().with_parts(0)),
+		"1KiB"
+	);
 }
 
 /// The builders replace the shape rather than merging into it, so the last call
