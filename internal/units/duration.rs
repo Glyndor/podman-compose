@@ -52,6 +52,12 @@ pub(crate) enum DurationFormat {
 	/// One number in milliseconds with `decimals` decimal places: `340.00ms`.
 	/// For machine reading, or when the reader wants to compare two durations
 	/// rather than skim one.
+	///
+	/// No caller yet — the benchmark aggregation is where it lands, and that is
+	/// Python today (`bench/aggregate.py`). Exercised by this module's tests
+	/// meanwhile; the allow is on this variant alone so anything else going dead
+	/// here still warns.
+	#[allow(dead_code)]
 	Millis { decimals: usize },
 }
 

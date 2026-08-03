@@ -5,7 +5,7 @@
 mod build;
 mod container;
 mod copy;
-mod events;
+pub(crate) mod events;
 mod terminal_pump;
 pub use events::EventsOptions;
 mod image;

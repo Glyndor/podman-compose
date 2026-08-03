@@ -32,6 +32,7 @@ pub mod quadlet;
 pub mod size;
 /// Docker Compose `${VAR}`/`$VAR` substitution over raw YAML before parsing.
 pub mod substitute;
+pub(crate) mod timestamp;
 /// Terminal colour/styling, honouring `--ansi`, `NO_COLOR`, and TTY detection.
 pub mod ui;
 pub(crate) mod units;
