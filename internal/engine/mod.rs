@@ -42,7 +42,8 @@ fn wants_interactive_with(no_tty: bool, detach: bool, stdin_tty: bool, stdout_tt
 }
 
 pub use query::{
-	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsFilterOptions, PsOptions,
+	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsDisplayOptions,
+	PsFilterOptions, PsOptions,
 };
 mod container_config;
 #[cfg(test)]
