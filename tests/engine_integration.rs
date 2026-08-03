@@ -171,6 +171,8 @@ mod create_ls;
 mod lifecycle_output;
 #[path = "engine_integration/multi_file.rs"]
 mod multi_file;
+#[path = "engine_integration/push_registry.rs"]
+mod push_registry;
 #[path = "engine_integration/scale.rs"]
 mod scale;
 #[path = "engine_integration/stats_flags.rs"]
