@@ -208,13 +208,7 @@ impl Engine {
 				.map(|n| n.to_string_lossy().into_owned())
 				.unwrap_or_default()
 		});
-		// The size the destination entry must end up with. Only a regular file
-		// has one to compare; a directory upload stays unverifiable and
-		// fail-closed, as it was before.
-		let uploaded_size = std::fs::metadata(src)
-			.ok()
-			.filter(std::fs::Metadata::is_file)
-			.map(|m| m.len());
+		let uploaded_size = uploaded_entry_size(src);
 		self.put_archive_verified(
 			&container_name,
 			&extract_dir,
@@ -330,6 +324,25 @@ impl Engine {
 	}
 }
 
+/// The size the destination entry must end up with, or `None` when there is
+/// nothing to compare.
+///
+/// Only a regular file has a size the archive preserves. A directory upload
+/// stays unverifiable and therefore fail-closed, which is what it was before —
+/// a directory entry's own size says nothing about whether its children
+/// arrived. A source that cannot be stat'd is `None` for the same reason:
+/// unknown must not become a guess.
+///
+/// Extracted so it is reachable from a test. Inside the async upload it was
+/// covered only by running against a real container, and a mutation replacing
+/// the real length with a constant survived the whole unit suite.
+pub(super) fn uploaded_entry_size(src: &std::path::Path) -> Option<u64> {
+	std::fs::metadata(src)
+		.ok()
+		.filter(std::fs::Metadata::is_file)
+		.map(|m| m.len())
+}
+
 /// What the destination entry must look like for the upload to have landed.
 ///
 /// Only the size for now. The mtime is deliberately not part of it: the archive
@@ -435,7 +448,10 @@ fn parse_endpoint(s: &str) -> Option<(&str, &str)> {
 
 #[cfg(test)]
 mod tests {
-	use super::{copy_landed, join_archive_path, parse_endpoint, ExpectedEntry, PathStat};
+	use super::{
+		copy_landed, join_archive_path, parse_endpoint, uploaded_entry_size, ExpectedEntry,
+		PathStat,
+	};
 
 	#[test]
 	fn join_archive_path_does_not_double_the_separator() {
@@ -479,6 +495,32 @@ mod tests {
 			..PathStat::default()
 		};
 		assert!(copy_landed(&want, Some(&already_there)));
+	}
+
+	/// The size that goes into the comparison is the source file's real length,
+	/// and a directory has none.
+	///
+	/// A mutation replacing the length with a constant survived every other test
+	/// here, because they all build `ExpectedEntry` by hand — this is the only
+	/// one that goes through the filesystem.
+	#[test]
+	fn the_expected_size_comes_from_the_source_file() {
+		let dir = tempfile::tempdir().unwrap();
+		let file = dir.path().join("payload.bin");
+		std::fs::write(&file, vec![7u8; 1234]).unwrap();
+		assert_eq!(uploaded_entry_size(&file), Some(1234));
+
+		std::fs::write(&file, b"").unwrap();
+		assert_eq!(
+			uploaded_entry_size(&file),
+			Some(0),
+			"an empty file has a size"
+		);
+
+		// A directory upload has nothing comparable, so it stays unverifiable
+		// and fail-closed rather than confirming on the directory's own size.
+		assert_eq!(uploaded_entry_size(dir.path()), None);
+		assert_eq!(uploaded_entry_size(&dir.path().join("absent")), None);
 	}
 
 	/// Two copies inside one second, which is what #1270 measured on Podman 6:
