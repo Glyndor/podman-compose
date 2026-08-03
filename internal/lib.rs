@@ -34,6 +34,7 @@ pub mod size;
 pub mod substitute;
 /// Terminal colour/styling, honouring `--ansi`, `NO_COLOR`, and TTY detection.
 pub mod ui;
+pub(crate) mod units;
 /// Secure self-update for the `podup` binary (signature-verified release fetch).
 #[cfg(feature = "update")]
 pub mod update;
