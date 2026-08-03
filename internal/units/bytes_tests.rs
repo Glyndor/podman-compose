@@ -1,0 +1,209 @@
+use super::{format_bytes, SizeBase, SizeFormat, SizeShape};
+
+/// Both ladders reach an exponent `u64::MAX` cannot exceed, so no input can
+/// push the renderer off the end of its table. This is the whole reason the
+/// units go past what a container plausibly reports: a formatter is either
+/// total over its input type or it has a cliff, and the cliff is only ever
+/// found by whoever is big enough to hit it.
+#[test]
+fn both_ladders_cover_the_whole_input_type() {
+	assert_eq!(format_bytes(u64::MAX, &SizeFormat::binary()), "16.00EiB");
+	assert_eq!(format_bytes(u64::MAX, &SizeFormat::decimal()), "18.45EB");
+}
+
+/// The regression the ladder was extended for: stopping at `TiB` rendered a
+/// petabyte as `1024.0TiB` — right arithmetic, wrong unit, and nine digits in a
+/// column sized for five.
+#[test]
+fn a_petabyte_does_not_saturate_into_terabytes() {
+	assert_eq!(
+		format_bytes(1024_u64.pow(5), &SizeFormat::binary()),
+		"1.00PiB"
+	);
+	assert_eq!(
+		format_bytes(1000_u64.pow(5), &SizeFormat::decimal()),
+		"1.00PB"
+	);
+}
+
+/// Every rung of the binary ladder, at the exact value that first reaches it.
+#[test]
+fn binary_units_step_at_their_own_boundaries() {
+	let fmt = SizeFormat::binary();
+	assert_eq!(format_bytes(1024, &fmt), "1.00KiB");
+	assert_eq!(format_bytes(1024_u64.pow(2), &fmt), "1.00MiB");
+	assert_eq!(format_bytes(1024_u64.pow(3), &fmt), "1.00GiB");
+	assert_eq!(format_bytes(1024_u64.pow(4), &fmt), "1.00TiB");
+	assert_eq!(format_bytes(1024_u64.pow(5), &fmt), "1.00PiB");
+	assert_eq!(format_bytes(1024_u64.pow(6), &fmt), "1.00EiB");
+}
+
+/// Every rung of the decimal ladder. This is the base podman and docker print,
+/// so an `images` or `ps` table is compared against these strings, not the
+/// binary ones.
+#[test]
+fn decimal_units_step_at_their_own_boundaries() {
+	let fmt = SizeFormat::decimal();
+	assert_eq!(format_bytes(1000, &fmt), "1.00KB");
+	assert_eq!(format_bytes(1000_u64.pow(2), &fmt), "1.00MB");
+	assert_eq!(format_bytes(1000_u64.pow(3), &fmt), "1.00GB");
+	assert_eq!(format_bytes(1000_u64.pow(4), &fmt), "1.00TB");
+	assert_eq!(format_bytes(1000_u64.pow(5), &fmt), "1.00PB");
+	assert_eq!(format_bytes(1000_u64.pow(6), &fmt), "1.00EB");
+}
+
+/// The two bases disagree on the same input, which is why the base is a
+/// per-surface choice rather than a constant. 8_711_starting bytes is the
+/// worked case from the issue: podman says `8.71MB`, `free` says `8.31MiB`.
+#[test]
+fn the_two_bases_render_the_same_input_differently() {
+	assert_eq!(format_bytes(8_710_000, &SizeFormat::decimal()), "8.71MB");
+	assert_eq!(format_bytes(8_710_000, &SizeFormat::binary()), "8.31MiB");
+}
+
+/// Under a kilobyte there is no fraction of a byte to report, so the value
+/// prints whole under either base and costs no column width.
+#[test]
+fn whole_bytes_carry_no_decimals() {
+	assert_eq!(format_bytes(0, &SizeFormat::binary()), "0B");
+	assert_eq!(format_bytes(1, &SizeFormat::binary()), "1B");
+	assert_eq!(format_bytes(1023, &SizeFormat::binary()), "1023B");
+	assert_eq!(format_bytes(999, &SizeFormat::decimal()), "999B");
+}
+
+/// A value just under a boundary rounds up onto it, and the renderer promotes
+/// rather than printing `1024.00KiB`. Without the promotion this is the same
+/// class of defect as saturating at `TiB`, one rung lower and much easier to
+/// hit: any size within half a display digit of a boundary shows it.
+#[test]
+fn a_value_that_rounds_onto_the_next_unit_is_promoted() {
+	assert_eq!(
+		format_bytes(1024_u64.pow(2) - 1, &SizeFormat::binary()),
+		"1.00MiB"
+	);
+	assert_eq!(
+		format_bytes(1000_u64.pow(2) - 1, &SizeFormat::decimal()),
+		"1.00MB"
+	);
+	// One rung further up, to show the promotion is not special-cased to KiB.
+	assert_eq!(
+		format_bytes(1024_u64.pow(4) - 1, &SizeFormat::binary()),
+		"1.00TiB"
+	);
+}
+
+/// Below the rounding threshold the value stays on its own rung, which is what
+/// makes the test above a promotion rather than an off-by-one.
+#[test]
+fn a_value_that_does_not_round_up_stays_on_its_rung() {
+	// 1048000 bytes is 1023.4KiB, which rounds to 1023.44 — still KiB.
+	assert_eq!(format_bytes(1_048_000, &SizeFormat::binary()), "1023.44KiB");
+}
+
+/// The decimal count is the caller's, because a table cell and a summary line
+/// have different width budgets.
+#[test]
+fn the_decimal_count_is_configurable() {
+	let bytes = 1_610_612_736; // 1.5 GiB exactly.
+	assert_eq!(
+		format_bytes(bytes, &SizeFormat::binary().with_decimals(0)),
+		"2GiB"
+	);
+	assert_eq!(
+		format_bytes(bytes, &SizeFormat::binary().with_decimals(1)),
+		"1.5GiB"
+	);
+	assert_eq!(
+		format_bytes(bytes, &SizeFormat::binary().with_decimals(4)),
+		"1.5000GiB"
+	);
+}
+
+/// The owner's worked examples, in the base each was written in.
+#[test]
+fn composite_renders_the_examples_from_the_issue() {
+	let decimal = SizeFormat::decimal().with_parts(2);
+	assert_eq!(format_bytes(1_001_000_000_000, &decimal), "1TB 1GB");
+	assert_eq!(format_bytes(1_512_000_000, &decimal), "1GB 512MB");
+}
+
+/// Components that are zero are skipped rather than ending the walk, so the
+/// parts that survive are the ones carrying value. A terabyte and five
+/// megabytes has nothing in between, and reporting `1TiB` alone would drop the
+/// five megabytes the caller asked for a second component to see.
+#[test]
+fn composite_skips_empty_components() {
+	let fmt = SizeFormat::binary().with_parts(2);
+	let bytes = 1024_u64.pow(4) + 5 * 1024_u64.pow(2);
+	assert_eq!(format_bytes(bytes, &fmt), "1TiB 5MiB");
+}
+
+/// Asking for more components than the value has yields only the ones that
+/// exist — no `1KiB 0B` padding.
+#[test]
+fn composite_stops_when_the_value_runs_out() {
+	let fmt = SizeFormat::binary().with_parts(7);
+	assert_eq!(format_bytes(1024, &fmt), "1KiB");
+	assert_eq!(format_bytes(1025, &fmt), "1KiB 1B");
+}
+
+/// Composite arithmetic is integer division, so the components sum back to the
+/// input exactly. A float round-trip through seven rungs would not.
+#[test]
+fn composite_components_are_exact() {
+	let fmt = SizeFormat::binary().with_parts(7);
+	let bytes = u64::MAX;
+	let rendered = format_bytes(bytes, &fmt);
+	let units: Vec<(&str, u64)> = vec![
+		("EiB", 1024_u64.pow(6)),
+		("PiB", 1024_u64.pow(5)),
+		("TiB", 1024_u64.pow(4)),
+		("GiB", 1024_u64.pow(3)),
+		("MiB", 1024_u64.pow(2)),
+		("KiB", 1024),
+		("B", 1),
+	];
+	let total: u64 = rendered
+		.split(' ')
+		.map(|part| {
+			let (unit, scale) = units
+				.iter()
+				.find(|(unit, _)| part.ends_with(unit))
+				.unwrap_or_else(|| panic!("unknown unit in {rendered:?}"));
+			let count: u64 = part[..part.len() - unit.len()].parse().unwrap();
+			count * scale
+		})
+		.sum();
+	assert_eq!(total, bytes, "{rendered:?} did not sum back to the input");
+}
+
+/// Zero has no components at all, and still has to render something. Both
+/// shapes answer `0B` rather than an empty cell.
+#[test]
+fn zero_renders_under_either_shape() {
+	assert_eq!(format_bytes(0, &SizeFormat::binary().with_parts(3)), "0B");
+	assert_eq!(format_bytes(0, &SizeFormat::decimal().with_parts(3)), "0B");
+	assert_eq!(format_bytes(0, &SizeFormat::decimal()), "0B");
+}
+
+/// A zero component count is a caller mistake with no sensible rendering, so it
+/// is treated as one component rather than returning an empty string.
+#[test]
+fn a_zero_component_count_still_renders_one_component() {
+	assert_eq!(
+		format_bytes(1025, &SizeFormat::binary().with_parts(0)),
+		"1KiB"
+	);
+}
+
+/// The builders replace the shape rather than merging into it, so the last call
+/// wins and a caller cannot end up with a half-set combination.
+#[test]
+fn the_builders_replace_the_shape() {
+	let fmt = SizeFormat::binary().with_decimals(3).with_parts(2);
+	assert_eq!(fmt.shape, SizeShape::Composite { parts: 2 });
+	assert_eq!(fmt.base, SizeBase::Binary);
+	let fmt = SizeFormat::decimal().with_parts(2).with_decimals(3);
+	assert_eq!(fmt.shape, SizeShape::Single { decimals: 3 });
+	assert_eq!(fmt.base, SizeBase::Decimal);
+}
