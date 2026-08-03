@@ -171,6 +171,24 @@ mod create_ls;
 mod lifecycle_output;
 #[path = "engine_integration/multi_file.rs"]
 mod multi_file;
+/// A free loopback port, chosen by binding zero and releasing it.
+///
+/// Shared because three tests hard-coded `18081` and a fourth `18080`, so any
+/// two of them running at once fought over the same bind and the loser failed
+/// with `pasta failed ... Address already in use`. That is not flakiness: at
+/// eight test threads it is close to certain.
+///
+/// There is a window between releasing the port and the container binding it.
+/// It is small, and far smaller than the certainty of a shared constant.
+#[allow(dead_code)]
+fn free_port() -> u16 {
+	std::net::TcpListener::bind("127.0.0.1:0")
+		.expect("no loopback port")
+		.local_addr()
+		.unwrap()
+		.port()
+}
+
 #[path = "engine_integration/push_registry.rs"]
 mod push_registry;
 #[path = "engine_integration/scale.rs"]

@@ -210,9 +210,15 @@ async fn cli_port_prints_the_published_binding() {
 	let dir = tempdir().unwrap();
 	let compose = dir.path().join("docker-compose.yml");
 	let proj = format!("t{}-prtb", std::process::id());
+	// A port chosen at run time, not a constant: three tests shared 18081 and a
+	// fourth 18080, so any two running at once lost the bind and failed with
+	// `pasta failed ... Address already in use`.
+	let port = super::free_port();
 	fs::write(
 		&compose,
-		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    ports:\n      - \"127.0.0.1:18081:80\"\n",
+		format!(
+			"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    ports:\n      - \"127.0.0.1:{port}:80\"\n"
+		),
 	)
 	.unwrap();
 	let c = compose.to_str().unwrap();
@@ -235,7 +241,7 @@ async fn cli_port_prints_the_published_binding() {
 		"port failed for a published port: {stdout:?}"
 	);
 	assert!(
-		stdout.contains("127.0.0.1:18081"),
+		stdout.contains(&format!("127.0.0.1:{port}")),
 		"port did not print the host binding it was asked for: {stdout:?}"
 	);
 }
