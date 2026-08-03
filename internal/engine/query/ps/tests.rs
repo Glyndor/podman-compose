@@ -290,15 +290,34 @@ fn a_start_time_in_the_future_clamps_to_zero() {
 	assert_eq!(table_status(&c, NOW), "Up 0s");
 }
 
-/// Only a running container gets an age. A stopped one keeps the exit code it
-/// already reported, which is the more useful fact about it.
+/// Only a running container gets an age.
+///
+/// A stopped one keeps the exit code it already reported, which is the more
+/// useful fact about it. The case that actually exercises the guard is
+/// **paused**: it has a real `StartedAt` and is not running, so without the
+/// check it would claim `Up 1h` for a container that is doing nothing. The
+/// first version of this test used an exited container and proved nothing —
+/// that path returns from the exit-code branch before the guard is reached, so
+/// deleting the guard left it green.
 #[test]
 fn only_a_running_container_reports_an_age() {
-	let c = ContainerListEntry {
+	let exited = ContainerListEntry {
 		started_at: NOW - 3600,
 		..entry_exit("exited", Some(7))
 	};
-	assert_eq!(table_status(&c, NOW), "Exited (7)");
+	assert_eq!(table_status(&exited, NOW), "Exited (7)");
+
+	let paused = ContainerListEntry {
+		started_at: NOW - 3600,
+		..entry("paused", "paused")
+	};
+	assert_eq!(table_status(&paused, NOW), "paused");
+
+	let created = ContainerListEntry {
+		started_at: NOW - 3600,
+		..entry("", "created")
+	};
+	assert_eq!(table_status(&created, NOW), "created");
 }
 
 /// CREATED is how long ago the container was made, parsed from the RFC 3339
