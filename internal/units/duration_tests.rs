@@ -57,6 +57,12 @@ fn the_window_slides_up_the_ladder_as_the_span_grows() {
 		(3903, "1h 5m 3s"),
 		(61 * day, "2mo 1d"),
 		(400 * day, "1y 1mo 5d"),
+		// A gap inside the window: a year and two days has no whole month in
+		// it, so the month is skipped rather than ending the walk. Without this
+		// row the whole test passes against a formatter that stops at the first
+		// empty unit, because every span above happens to have none.
+		(367 * day, "1y 2d"),
+		(365 * day + 3600, "1y 1h"),
 	] {
 		assert_eq!(
 			format_duration(Duration::from_secs(secs), &three),
