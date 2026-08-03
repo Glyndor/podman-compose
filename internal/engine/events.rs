@@ -224,7 +224,7 @@ fn format_event(value: &Value, json: bool) -> String {
 ///
 /// The civil-from-days conversion is Howard Hinnant's, shifted to a March-based
 /// year so the leap day lands at the end and no month-length table is needed.
-fn format_event_time(unix_secs: i64) -> String {
+pub(crate) fn format_event_time(unix_secs: i64) -> String {
 	let days = unix_secs.div_euclid(86_400);
 	let secs = unix_secs.rem_euclid(86_400);
 	// Shift the epoch to 0000-03-01, which puts February last.

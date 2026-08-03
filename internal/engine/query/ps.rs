@@ -7,6 +7,7 @@ use crate::libpod::types::container::{ContainerListEntry, ContainerPort};
 use crate::libpod::{urlencoded, API_PREFIX};
 
 use super::Engine;
+use crate::units::{format_duration, DurationFormat};
 
 /// Options for [`Engine::ps_with_options`], mirroring `docker compose ps`.
 #[derive(Default)]
@@ -45,11 +46,29 @@ fn display_status(c: &ContainerListEntry) -> &str {
 	}
 }
 
-/// Table STATUS cell. Podman's list endpoint reports an exited container with a
-/// bare `exited` state and no code, which is indistinguishable from a clean exit;
-/// surface the exit code the way `docker compose ps` does (`Exited (0)` /
-/// `Exited (7)`). For every other state fall back to [`display_status`].
-fn table_status(c: &ContainerListEntry) -> String {
+/// How `ps` renders a span: the shared default, three components.
+const SPAN_FORMAT: DurationFormat = DurationFormat::default_parts();
+
+/// Table STATUS cell, as of `now` (Unix seconds).
+///
+/// A running container says how long it has been up, which is what both
+/// reference tools do and what podup did not: `podman ps` renders `Up 13 hours
+/// (healthy)` and `docker compose ps` renders `Up 2 minutes`, while podup
+/// rendered the bare word `running`. The state alone answers "is it on"; the
+/// span answers "did it just restart", which is the question someone runs `ps`
+/// to settle.
+///
+/// The health suffix only appears when the container has a healthcheck —
+/// libpod leaves `Status` empty otherwise, measured on Podman 5.7.0, so there is
+/// nothing to append rather than an unknown to invent.
+///
+/// Podman's list endpoint reports an exited container with a bare `exited` state
+/// and no code, which is indistinguishable from a clean exit; surface the exit
+/// code the way `docker compose ps` does (`Exited (0)` / `Exited (7)`).
+///
+/// `now` is a parameter rather than a clock read so the rendering is pure and
+/// its tests are deterministic.
+fn table_status(c: &ContainerListEntry, now: i64) -> String {
 	let status = display_status(c);
 	let exited = c.state.eq_ignore_ascii_case("exited") || c.state.eq_ignore_ascii_case("dead");
 	// Only synthesize when the status text doesn't already carry the code, so a
@@ -57,7 +76,60 @@ fn table_status(c: &ContainerListEntry) -> String {
 	if exited && !status.contains("Exited (") {
 		return format!("Exited ({})", c.exit_code.unwrap_or(0));
 	}
-	status.to_string()
+	if !c.state.eq_ignore_ascii_case("running") {
+		return status.to_string();
+	}
+	let Some(uptime) = span_since(c.started_at, now) else {
+		return status.to_string();
+	};
+	// `health_from_status` answers with an empty string when the container has
+	// no healthcheck, which is the same case as libpod sending an empty
+	// `Status` — nothing to append rather than an unknown to invent.
+	match health_from_status(status) {
+		"" => format!("Up {uptime}"),
+		health => format!("Up {uptime} ({health})"),
+	}
+}
+
+/// Table CREATED cell, as of `now`: how long ago the container was created.
+///
+/// Empty when libpod sent no timestamp or one this cannot parse. A blank cell
+/// says podup could not tell; a cell holding a plausible wrong age does not, and
+/// the wrong age is the one a reader acts on.
+fn table_created(c: &ContainerListEntry, now: i64) -> String {
+	crate::timestamp::parse_rfc3339(&c.created)
+		.and_then(|created| span_since(created, now))
+		.unwrap_or_default()
+}
+
+/// Render the span from `then` to `now`, or `None` when there is nothing to
+/// render.
+///
+/// A zero `then` means the field was absent, not that the instant was the epoch.
+/// A `then` in the future is clock skew between this process and the server —
+/// clamped to zero rather than rendered as a negative age, since `Up 0s` on a
+/// container that just started is right and `Up -3s` is never right.
+fn span_since(then: i64, now: i64) -> Option<String> {
+	if then <= 0 {
+		return None;
+	}
+	let elapsed = now.saturating_sub(then).max(0);
+	Some(format_duration(
+		std::time::Duration::from_secs(elapsed as u64),
+		&SPAN_FORMAT,
+	))
+}
+
+/// The wall clock as Unix seconds, for the cells that render an age.
+///
+/// Before the epoch is not a state this can reach on any host that boots, so a
+/// failure floors at zero and every cell renders blank rather than the call
+/// site handling an error it cannot act on.
+pub(super) fn now_unix() -> i64 {
+	std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map(|d| d.as_secs() as i64)
+		.unwrap_or(0)
 }
 
 /// The container's display name (leading slash stripped).
@@ -203,6 +275,11 @@ fn ps_json_row(c: &ContainerListEntry) -> serde_json::Value {
 		"Health": health_from_status(display_status(c)),
 		"ExitCode": c.exit_code.unwrap_or(0),
 		"Publishers": publishers(&c.ports),
+		// The raw wire values, not a rendering. `docker compose ps --format
+		// json` passes the RFC 3339 string through too, and a machine consumer
+		// wants an instant it can compute with rather than `2mo 1d`.
+		"Created": c.created,
+		"StartedAt": c.started_at,
 		"ID": c.id,
 	})
 }
@@ -330,16 +407,20 @@ impl Engine {
 			return Ok(());
 		}
 
-		let mut table = crate::ui::Table::new(&["NAME", "IMAGE", "STATUS", "PORTS"])
+		// One clock read for the whole table, so two rows created in the same
+		// second cannot render different ages.
+		let now = now_unix();
+		let mut table = crate::ui::Table::new(&["NAME", "IMAGE", "CREATED", "STATUS", "PORTS"])
 			.cap(0, 48)
 			.cap(1, 48)
-			.status_col(2)
+			.status_col(3)
 			.identity_col(0);
 		for c in &containers {
 			table.push(vec![
 				name_of(c),
 				c.image.clone(),
-				table_status(c),
+				table_created(c, now),
+				table_status(c, now),
 				format_ports(&c.ports),
 			]);
 		}

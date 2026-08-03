@@ -262,7 +262,8 @@ Print the public binding for a port.
 ### `images`
 List images used by services.
 
-`SIZE` is the image's on-disk size, rendered in decimal units at three
+`CREATED` is how long ago the image was built, largest-first and up to three
+components (`2mo 27d 10h`). `SIZE` is the image's on-disk size, rendered in decimal units at three
 significant digits (`98.2MB`, `805kB`) so the column lines up with what `podman
 images` and `docker compose images` print. An image that is not present locally
 has an empty `SIZE` and an empty `IMAGE ID`. Under `--format json` the size is
@@ -272,6 +273,21 @@ the raw byte count, not the rendered string.
 |---|---|---|
 | `-q, --quiet` | Print image IDs only. | off |
 | `--format <FMT>` | `table` or `json`. | `table` |
+
+### `ps` columns
+
+`STATUS` reports how long a running container has been up (`Up 2h 5m 3s`), with
+its health in parentheses when it has a healthcheck (`Up 13h (healthy)`). A
+stopped container reports its exit code instead (`Exited (7)`).
+
+`CREATED` is how long ago the container was made. It differs from `STATUS` after
+a restart, which is the point of having both: a container created three days ago
+and started four seconds ago reads `3d` / `Up 4s`.
+
+Both spans are largest-first and up to three components, skipping units that are
+empty — `1y 2mo 3d`, `1h 5m 3s`, `5s`. A year is 365 days and a month is 30.
+Under `--format json` the raw wire values are passed through instead: `Created`
+is the RFC 3339 string and `StartedAt` is Unix seconds.
 
 ### `volumes [SERVICE...]`
 List the project's named volumes (a trailing service list narrows it to volumes
