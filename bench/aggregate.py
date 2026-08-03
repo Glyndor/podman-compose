@@ -114,6 +114,13 @@ def row_unit(cells, metric):
 		values += [v for v in (s["median"], s["p95"]) if v == v]
 	if values and max(values) < 1.0:
 		return ("ms", 1000.0, 1)
+	# Above a minute, seconds stop being readable at a glance: a scenario that
+	# takes two minutes printed as `120.000 s` makes the reader do the division.
+	# No published row reaches this yet — the slowest is `wide-level up` at 9.7 s
+	# for docker-compose — but the tier belongs here before a long scenario is
+	# added rather than after, when the fix competes with reading the results.
+	if values and max(values) >= 60.0:
+		return ("min", 1.0 / 60.0, 2)
 	return ("s", 1.0, 3)
 
 
@@ -272,6 +279,18 @@ def main():
 		# synthetic, so they are not measured against the real budget — but a gate
 		# nobody has watched fail is decoration, and this is the only place the
 		# shared-CI smoke run can watch it.
+		# The unit tiers, exercised rather than assumed: a row is rendered in one
+		# unit chosen from its largest value, and each boundary decides a report
+		# column nobody re-reads once it is published.
+		def unit_of(seconds):
+			return row_unit([{"seconds": {"median": seconds, "p95": seconds}}], "seconds")[0]
+
+		for value, want in ((0.5, "ms"), (1.0, "s"), (59.9, "s"), (60.0, "min"), (600.0, "min")):
+			got = unit_of(value)
+			if got != want:
+				print(f"self-test FAILED: {value}s rendered in {got}, expected {want}", file=sys.stderr)
+				return 1
+
 		under = {"podup": {"single": {"up": {"rss_mib": {"median": 1.0}}}}}
 		over = {"podup": {"single": {"up": {"rss_mib": {"median": 10_000.0}}}}}
 		if check_memory_budget(under) != 0:
