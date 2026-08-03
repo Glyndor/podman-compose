@@ -196,8 +196,58 @@ fn format_event(value: &Value, json: bool) -> String {
 		.or_else(|| value.get("id"))
 		.and_then(Value::as_str)
 		.unwrap_or("");
-	format_event_line(typ, action, name, crate::ui::stdout_colored() && !json)
+	// libpod sends `time` (seconds) alongside `timeNano`; seconds is the one the
+	// column needs. An event without it renders the field blank rather than
+	// inventing "now", which would be a timestamp that looks real and is not.
+	let time = value.get("time").and_then(Value::as_i64);
+	format_event_line(
+		time,
+		typ,
+		action,
+		name,
+		crate::ui::stdout_colored() && !json,
+	)
 }
+
+/// Render a Unix timestamp as `YYYY-MM-DD HH:MM:SS` in UTC.
+///
+/// UTC, not local, and the reason is not that it is cheaper. An event log exists
+/// to be correlated — against another host's log, against a metric, against the
+/// same file read next year — and a bare local timestamp carries no offset, so
+/// it is ambiguous across a DST boundary and unreadable anywhere else. docker
+/// compose prints local without an offset; this is the case its rendering is
+/// adequate rather than right.
+///
+/// It also avoids a dependency. podup has never formatted a wall-clock time and
+/// carries no date crate; local time would need the tz database and therefore
+/// one, for a single column.
+///
+/// The civil-from-days conversion is Howard Hinnant's, shifted to a March-based
+/// year so the leap day lands at the end and no month-length table is needed.
+fn format_event_time(unix_secs: i64) -> String {
+	let days = unix_secs.div_euclid(86_400);
+	let secs = unix_secs.rem_euclid(86_400);
+	// Shift the epoch to 0000-03-01, which puts February last.
+	let z = days + 719_468;
+	let era = z.div_euclid(146_097);
+	let doe = z.rem_euclid(146_097);
+	let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+	let y = yoe + era * 400;
+	let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+	let mp = (5 * doy + 2) / 153;
+	let d = doy - (153 * mp + 2) / 5 + 1;
+	let m = if mp < 10 { mp + 3 } else { mp - 9 };
+	let y = if m <= 2 { y + 1 } else { y };
+	format!(
+		"{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}",
+		secs / 3600,
+		(secs % 3600) / 60,
+		secs % 60
+	)
+}
+
+/// Display width of the `TIME` column: `YYYY-MM-DD HH:MM:SS` is nineteen.
+const TIME_WIDTH: usize = 19;
 
 /// Display width of the `TYPE` column. `container` is the longest type libpod
 /// emits (`network`, `volume`, `image`, `secret`, `pod` are all shorter).
@@ -216,8 +266,8 @@ const ACTION_WIDTH: usize = 14;
 /// fields were.
 fn events_header() -> String {
 	format!(
-		"{:<TYPE_WIDTH$} {:<ACTION_WIDTH$} {}",
-		"TYPE", "ACTION", "NAME"
+		"{:<TIME_WIDTH$} {:<TYPE_WIDTH$} {:<ACTION_WIDTH$} {}",
+		"TIME", "TYPE", "ACTION", "NAME"
 	)
 }
 
@@ -227,7 +277,13 @@ fn events_header() -> String {
 /// distinguishes a `start` from a `die`, and `NAME` is which container it
 /// happened to. The type (`container`, `network`) repeats on almost every line
 /// and is dimmed so it stops competing.
-fn format_event_line(typ: &str, action: &str, name: &str, colour: bool) -> String {
+fn format_event_line(
+	time: Option<i64>,
+	typ: &str,
+	action: &str,
+	name: &str,
+	colour: bool,
+) -> String {
 	use crate::ui::{fit_cell, identity_style, paint, Style};
 	// `fit_cell` pads *and* escapes. The escaping is not incidental here: an
 	// event's actor name comes from outside podup, this line painted it raw, and
@@ -235,9 +291,13 @@ fn format_event_line(typ: &str, action: &str, name: &str, colour: bool) -> Strin
 	// the colour work landed. A `\x1b[` in a container name repainted the
 	// reader's terminal and desynchronised podup's own resets for every line
 	// after it.
+	// Dimmed like the type: on a `--follow` wall of lines the seconds are what
+	// the eye needs, and the repeated date should not compete with the action.
+	let time_cell = fit_cell(&time.map(format_event_time).unwrap_or_default(), TIME_WIDTH);
 	let typ_cell = fit_cell(typ, TYPE_WIDTH);
 	let action_cell = fit_cell(action, ACTION_WIDTH);
 	let name_cell = fit_cell(name, 0);
+	let time_out = paint(Style::new().dimmed(), &time_cell, colour);
 	let typ_out = paint(Style::new().dimmed(), &typ_cell, colour);
 	let action_out = match crate::ui::action_or_status_style(action) {
 		Some(style) => paint(style, &action_cell, colour),
@@ -248,7 +308,7 @@ fn format_event_line(typ: &str, action: &str, name: &str, colour: bool) -> Strin
 		&name_cell,
 		colour && !name_cell.is_empty(),
 	);
-	format!("{typ_out} {action_out} {name_out}")
+	format!("{time_out} {typ_out} {action_out} {name_out}")
 		.trim_end()
 		.to_string()
 }
@@ -301,16 +361,24 @@ mod tests {
 			"Type": "container",
 			"Action": "start",
 			"Actor": { "Attributes": { "name": "web-1" } },
+			"time": 0,
 		});
-		// Columns are fixed-width now (#1248): `container` fills TYPE exactly,
-		// `start` is padded out to ACTION, and NAME is the trailing raw column.
-		assert_eq!(format_event(&ev, false), "container start          web-1");
+		// Columns are fixed-width now (#1248): TIME leads, `container` fills TYPE
+		// exactly, `start` is padded out to ACTION, and NAME is the trailing raw
+		// column.
+		assert_eq!(
+			format_event(&ev, false),
+			"1970-01-01 00:00:00 container start          web-1"
+		);
 	}
 
 	#[test]
 	fn formats_libpod_native_shape() {
-		let ev = json!({ "Type": "container", "status": "die", "id": "abc123" });
-		assert_eq!(format_event(&ev, false), "container die            abc123");
+		let ev = json!({ "Type": "container", "status": "die", "id": "abc123", "time": 0 });
+		assert_eq!(
+			format_event(&ev, false),
+			"1970-01-01 00:00:00 container die            abc123"
+		);
 	}
 
 	#[test]
@@ -324,15 +392,60 @@ mod tests {
 
 #[cfg(test)]
 mod event_colour_tests {
-	use super::format_event_line;
+	use super::{format_event_line, format_event_time};
+
+	/// Known instants, including the ones the arithmetic can get wrong: the epoch
+	/// itself, a leap day, the day after one, a century that is not a leap year
+	/// and one that is, and the end of a year. The conversion is a March-based
+	/// civil-from-days, so February and the year boundary are where it earns its
+	/// keep.
+	#[test]
+	fn format_event_time_pins_known_instants() {
+		assert_eq!(format_event_time(0), "1970-01-01 00:00:00");
+		assert_eq!(format_event_time(1), "1970-01-01 00:00:01");
+		// 1972 was a leap year: 29 February exists.
+		assert_eq!(format_event_time(68_169_600), "1972-02-29 00:00:00");
+		assert_eq!(format_event_time(68_256_000), "1972-03-01 00:00:00");
+		// 1900 is divisible by 4 and NOT a leap year; 2000 is divisible by 400
+		// and is one. The second is the case a naive rule gets wrong.
+		assert_eq!(format_event_time(951_782_400), "2000-02-29 00:00:00");
+		// Last second of a year, then the first of the next.
+		assert_eq!(format_event_time(1_735_689_599), "2024-12-31 23:59:59");
+		assert_eq!(format_event_time(1_735_689_600), "2025-01-01 00:00:00");
+		// The event this column was added for, captured from libpod.
+		assert_eq!(format_event_time(1_785_718_245), "2026-08-03 00:50:45");
+	}
+
+	/// Before the epoch. `div_euclid`/`rem_euclid` are used rather than `/` and
+	/// `%` precisely so a negative input floors instead of truncating toward
+	/// zero; with the plain operators this would render an hour of -1.
+	#[test]
+	fn format_event_time_handles_dates_before_the_epoch() {
+		assert_eq!(format_event_time(-1), "1969-12-31 23:59:59");
+		assert_eq!(format_event_time(-86_400), "1969-12-31 00:00:00");
+	}
+
+	/// An event with no `time` renders the column blank rather than inventing a
+	/// value. A timestamp that looks real and is not is worse than none.
+	#[test]
+	fn an_event_without_a_time_leaves_the_column_empty() {
+		let line = format_event_line(None, "container", "start", "web-1", false);
+		assert!(
+			line.starts_with("                    container"),
+			"expected a blank time cell, got: {line:?}"
+		);
+	}
 
 	/// Without a colour sink the line is byte-identical to what it always was,
 	/// so `--json`, a pipe and the output contract are untouched.
 	#[test]
 	fn plain_output_carries_no_escapes() {
-		let out = format_event_line("container", "start", "proj-web-1", false);
+		let out = format_event_line(Some(0), "container", "start", "proj-web-1", false);
 		assert!(!out.contains('\u{1b}'), "{out:?}");
-		assert_eq!(out, "container start          proj-web-1");
+		assert_eq!(
+			out,
+			"1970-01-01 00:00:00 container start          proj-web-1"
+		);
 	}
 
 	/// The three fields line up under the header, whatever their lengths, so
@@ -340,8 +453,8 @@ mod event_colour_tests {
 	#[test]
 	fn columns_align_under_the_header() {
 		let header = super::events_header();
-		let short = format_event_line("pod", "die", "a", false);
-		let long = format_event_line("container", "health_status", "b", false);
+		let short = format_event_line(None, "pod", "die", "a", false);
+		let long = format_event_line(None, "container", "health_status", "b", false);
 		let name_col = |line: &str| line.rfind(' ').map(|i| i + 1);
 		assert_eq!(
 			name_col(&header),
@@ -360,7 +473,7 @@ mod event_colour_tests {
 	/// name repainted the reader's terminal.
 	#[test]
 	fn an_actor_name_cannot_drive_the_terminal() {
-		let out = format_event_line("container", "start", "evil\u{1b}[31m\u{7}name", false);
+		let out = format_event_line(None, "container", "start", "evil\u{1b}[31m\u{7}name", false);
 		assert!(!out.contains('\u{1b}'), "{out:?}");
 		assert!(!out.contains('\u{7}'), "{out:?}");
 		assert!(out.contains("name"), "{out:?}");
@@ -370,8 +483,8 @@ mod event_colour_tests {
 	/// type, which repeats on nearly every line, is dimmed rather than absent.
 	#[test]
 	fn action_and_name_are_tinted_apart() {
-		let died = format_event_line("container", "die", "proj-web-1", true);
-		let started = format_event_line("container", "start", "proj-web-1", true);
+		let died = format_event_line(None, "container", "die", "proj-web-1", true);
+		let started = format_event_line(None, "container", "start", "proj-web-1", true);
 		assert_ne!(
 			died,
 			started.replace("start", "die"),
@@ -382,7 +495,7 @@ mod event_colour_tests {
 	/// An event with no container name must not emit a stray colour reset.
 	#[test]
 	fn an_empty_name_is_not_painted() {
-		let out = format_event_line("network", "create", "", true);
+		let out = format_event_line(None, "network", "create", "", true);
 		assert!(
 			out.ends_with("create\u{1b}[0m") || !out.ends_with("\u{1b}[0m "),
 			"{out:?}"
