@@ -60,6 +60,13 @@ pub struct ContainerListEntry {
 	/// state rather than on this being non-zero.
 	#[serde(rename = "StartedAt", default)]
 	pub started_at: i64,
+	/// On-disk size, present only when the request carried `size=true`.
+	///
+	/// `None` is the ordinary case: libpod leaves it out unless asked, because
+	/// producing it means walking the container's writable layer. Callers render
+	/// an empty cell rather than a zero, so "not asked" never reads as "empty".
+	#[serde(rename = "Size", default)]
+	pub size: Option<ContainerSize>,
 	/// When the container was created, as an RFC 3339 string.
 	///
 	/// Not the docker-compatible `CreatedAt`, which libpod also sends and leaves
@@ -67,6 +74,19 @@ pub struct ContainerListEntry {
 	/// blank column, the same trap as `Status` versus `State` above.
 	#[serde(rename = "Created", default)]
 	pub created: String,
+}
+
+/// A container's on-disk footprint, as `containers/json?size=true` reports it.
+#[derive(Deserialize, Clone, Copy, Debug)]
+pub struct ContainerSize {
+	/// Bytes the container has written on top of its image.
+	#[serde(rename = "rwSize", default)]
+	pub rw: u64,
+	/// The image's own size. This is what `podman ps -s` prints as `virtual`,
+	/// and it is **not** the sum of the two — verified against three containers
+	/// whose two readings differ at three significant digits.
+	#[serde(rename = "rootFsSize", default)]
+	pub root_fs: u64,
 }
 
 /// Port mapping entry in container list response.

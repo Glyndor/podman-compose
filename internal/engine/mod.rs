@@ -42,7 +42,8 @@ fn wants_interactive_with(no_tty: bool, detach: bool, stdin_tty: bool, stdout_tt
 }
 
 pub use query::{
-	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsFilterOptions, PsOptions,
+	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsDisplayOptions,
+	PsFilterOptions, PsOptions,
 };
 mod container_config;
 #[cfg(test)]
@@ -63,7 +64,7 @@ mod stats;
 pub use staging::is_safe_project_name;
 pub use stats::StatsOptions;
 mod volume;
-pub use volume::VolumesOptions;
+pub use volume::{VolumesDisplayOptions, VolumesOptions};
 mod volume_mounts;
 #[cfg(feature = "watch")]
 mod watch;

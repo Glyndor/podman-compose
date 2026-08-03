@@ -60,16 +60,22 @@ pub struct Client {
 	socket_path: String,
 }
 
-/// The decoded `X-Docker-Container-Path-Stat` header — a container path's Go
-/// file `mode` and `mtime`. `mtime` is an RFC3339 string compared only for
-/// equality (did a `cp` change the entry?), never parsed into a time. The
-/// runtime's JSON uses lowercase keys (`{"name":…,"size":…,"mode":…,"mtime":…}`).
-#[derive(serde::Deserialize, Default)]
-struct PathStat {
+/// The decoded `X-Docker-Container-Path-Stat` header — a container path's name,
+/// size, Go file `mode` and `mtime`.
+///
+/// `mtime` is an RFC3339 string compared only for equality, never parsed into a
+/// time. **Podman 6 reports it to whole seconds** — `2026-08-03T18:36:05Z`, no
+/// fractional part, measured on `podman-6.0.1-1.fc45` — which is why `size` is
+/// carried here too: two writes inside one second are indistinguishable by mtime
+/// alone. The runtime's JSON uses lowercase keys.
+#[derive(serde::Deserialize, Default, Clone, PartialEq, Eq, Debug)]
+pub(crate) struct PathStat {
 	#[serde(default)]
-	mode: u64,
+	pub(crate) size: u64,
 	#[serde(default)]
-	mtime: String,
+	pub(crate) mode: u64,
+	#[serde(default)]
+	pub(crate) mtime: String,
 }
 
 /// Attach the socket path and a way forward to a connection failure.
@@ -558,7 +564,7 @@ impl Client {
 	/// header, returning `Some(stat)` when the path exists or `None` on 404. The
 	/// header is base64 JSON carrying the Go file `mode`, `size` and `mtime`.
 	/// Shared by [`head_path_is_dir`](Self::head_path_is_dir) and
-	/// [`head_path_mtime`](Self::head_path_mtime).
+	/// [`head_path_stat`](Self::head_path_stat).
 	async fn head_container_path_stat(&self, path: &str) -> Result<Option<PathStat>> {
 		use base64::Engine as _;
 
@@ -606,13 +612,14 @@ impl Client {
 			.map(|s| s.mode & (1 << 31) != 0))
 	}
 
-	/// `HEAD` a container-archive path, returning its `mtime` string when it
-	/// exists or `None` on 404. `cp` uses this to tell a copy actually *landed*
-	/// (the entry's mtime changed to the source's) from a stale entry that was
-	/// already there, when the Podman-6 archive PUT closes without a response
-	/// (#1097). The value is compared as an opaque string, not parsed.
-	pub(crate) async fn head_path_mtime(&self, path: &str) -> Result<Option<String>> {
-		Ok(self.head_container_path_stat(path).await?.map(|s| s.mtime))
+	/// The full decoded stat for a container path, or `None` when it does not
+	/// exist.
+	///
+	/// `cp` needs the size as well as the mtime: Podman 6's mtime has
+	/// one-second resolution, so a second copy inside the same second cannot be
+	/// told from a failed one by mtime alone.
+	pub(crate) async fn head_path_stat(&self, path: &str) -> Result<Option<PathStat>> {
+		self.head_container_path_stat(path).await
 	}
 
 	/// `DELETE` → `Ok(true)` if the resource existed and was removed, `Ok(false)`

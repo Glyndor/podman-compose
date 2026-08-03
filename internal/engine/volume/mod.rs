@@ -15,7 +15,7 @@ use crate::libpod::{urlencoded, API_PREFIX};
 use super::Engine;
 
 mod list;
-pub use list::VolumesOptions;
+pub use list::{VolumesDisplayOptions, VolumesOptions};
 
 impl Engine {
 	/// Pre-create every declared (non-external) named volume before containers

@@ -110,3 +110,20 @@ repository `README.md`.
 The harness is reviewed by `podup-benchmark-fairness-auditor` (the harness is
 equitable) and `podup-benchmark-results-reviewer` (the published claims are
 supported and honest).
+
+## Budgets
+
+Two ceilings live here, both read by a gate rather than by a reader:
+
+| file | what it bounds | enforced by |
+|---|---|---|
+| `memory-budget-mib` | peak RSS of a benchmarked command | `aggregate.py`, which fails the run above it |
+| `binary-budget-mib` | the release binary on disk | `.github/workflows/binary-budget.yml`, on every pull request |
+
+Both exist because the releases standard asks for a size budget per artifact and
+treats unexplained growth as a regression to investigate rather than ship. Before
+them, drift was something someone noticed in a published table months later.
+
+**Moving a budget is allowed and is meant to be deliberate.** Raise the number in
+the same commit as the growth that needs it, and say in the message what the
+growth buys. A budget that is raised silently the moment it fires is not a gate.

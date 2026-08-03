@@ -39,12 +39,18 @@ fn the_offset_moves_the_instant_the_right_way() {
 	);
 }
 
-/// Round-trip against the formatter that already lives in the tree. This is the
-/// test the two functions exist to give each other: `format_event_time` walks
-/// civil-from-days and this walks days-from-civil, so for both to agree and both
-/// be wrong they would have to be wrong in the same direction.
+/// Round-trip through the formatter that lives beside this parser. The two are
+/// inverses — days-from-civil here, civil-from-days there — so for both to agree
+/// and both be wrong they would have to be wrong in the same direction.
+///
+/// **Zone-independent on purpose.** `format_local` renders the reader's wall
+/// clock, so pinning its exact output would pass on a machine at -05:00 and fail
+/// on a CI runner at UTC. Reading the rendered offset back and undoing it must
+/// return the instant that went in, on any machine, which is the stronger claim
+/// anyway: it checks the offset is applied in the right direction as well as
+/// that the calendar arithmetic holds.
 #[test]
-fn it_round_trips_against_the_event_formatter() {
+fn format_local_round_trips_on_any_machine() {
 	for unix in [
 		0_i64,
 		1,
@@ -55,14 +61,115 @@ fn it_round_trips_against_the_event_formatter() {
 		1_709_164_800, // 2024-02-29
 		1_735_689_599, // last second of 2024
 		1_735_689_600, // first of 2025
-		1_785_718_245, // the instant #1301 was built for
+		1_785_718_245, // the instant the TIME column was added for
 		4_102_444_800, // 2100-01-01, a century that is not a leap year
 	] {
-		let printed = crate::engine::events::format_event_time(unix);
-		let reparsed = parse_rfc3339(&format!("{printed}Z"))
-			.unwrap_or_else(|| panic!("could not reparse {printed:?} (from {unix})"));
-		assert_eq!(reparsed, unix, "{printed:?} did not round-trip");
+		let rendered = super::format_local(unix);
+		let reparsed = reparse(&rendered)
+			.unwrap_or_else(|| panic!("could not reparse {rendered:?} (from {unix})"));
+		assert_eq!(reparsed, unix, "{rendered:?} did not round-trip");
 	}
+}
+
+/// Turn what `format_local` prints back into an RFC 3339 string this module can
+/// parse: `YYYY-MM-DD HH:MM:SS ±HH:MM` differs from RFC 3339 only by the space
+/// before the offset, and `Z` needs no change at all.
+fn reparse(rendered: &str) -> Option<i64> {
+	let normalised = match rendered.rsplit_once(' ') {
+		Some((instant, zone)) if zone.starts_with(['+', '-']) => format!("{instant}{zone}"),
+		_ => rendered.to_string(),
+	};
+	parse_rfc3339(&normalised)
+}
+
+/// The rendered shape itself, which the round-trip above would tolerate being
+/// wrong about: twenty-six characters, and an offset that is `Z` or `±HH:MM`.
+/// The `events` TIME column is sized from this, so a change here that nothing
+/// notices truncates every row.
+#[test]
+fn format_local_renders_a_fixed_width_shape() {
+	let rendered = super::format_local(1_785_718_245);
+	assert_eq!(
+		rendered.len(),
+		26,
+		"{rendered:?} is not the width the TIME column is sized for"
+	);
+	let (instant, zone) = rendered.rsplit_once(' ').expect("no zone in {rendered:?}");
+	assert_eq!(instant.len(), 19, "{instant:?}");
+	assert!(
+		zone == "Z" || (zone.len() == 6 && zone.starts_with(['+', '-']) && &zone[3..4] == ":"),
+		"{zone:?} is not Z or ±HH:MM"
+	);
+}
+
+/// The rendering, pinned exactly. Possible because the offset is a parameter
+/// here rather than a reading of the machine's own zone, so these strings are
+/// the same on a laptop at -05:00 and a runner at UTC.
+#[test]
+fn the_rendering_is_pinned_for_every_offset_shape() {
+	let t = 1_785_718_245; // 2026-08-03 00:50:45 UTC
+	assert_eq!(
+		super::render_with_offset(t, Some(-5 * 3600)),
+		"2026-08-02 19:50:45 -05:00"
+	);
+	assert_eq!(
+		super::render_with_offset(t, Some(5 * 3600 + 30 * 60)),
+		"2026-08-03 06:20:45 +05:30"
+	);
+	assert_eq!(
+		super::render_with_offset(t, Some(0)),
+		"2026-08-03 00:50:45 +00:00"
+	);
+	// A negative offset with minutes, so the sign is not carried by the hours
+	// alone: -09:30 is a real zone (Marquesas).
+	assert_eq!(
+		super::render_with_offset(t, Some(-(9 * 3600 + 30 * 60))),
+		"2026-08-02 15:20:45 -09:30"
+	);
+}
+
+/// When the platform cannot say what the offset is, the value renders in UTC
+/// and says so. An unlabelled guess is the defect this whole change replaced,
+/// so the fallback must not quietly become one.
+///
+/// Only reachable at this level: on any machine whose libc resolves a zone,
+/// `format_local` never takes this branch.
+#[test]
+fn an_unknown_offset_renders_utc_and_labels_it() {
+	assert_eq!(
+		super::render_with_offset(1_785_718_245, None),
+		"2026-08-03 00:50:45Z"
+	);
+	assert_eq!(super::render_with_offset(0, None), "1970-01-01 00:00:00Z");
+}
+
+/// The calendar half, pinned absolutely because it has no zone in it. This is
+/// what the round-trip cannot check on its own: two inverse functions can agree
+/// while both being shifted by the same amount.
+#[test]
+fn the_civil_rendering_is_pinned_to_known_instants() {
+	assert_eq!(super::format_civil(0), "1970-01-01 00:00:00");
+	assert_eq!(super::format_civil(1), "1970-01-01 00:00:01");
+	// 1972 was a leap year: 29 February exists.
+	assert_eq!(super::format_civil(68_169_600), "1972-02-29 00:00:00");
+	assert_eq!(super::format_civil(68_256_000), "1972-03-01 00:00:00");
+	// 1900 is divisible by 4 and NOT a leap year; 2000 is divisible by 400 and
+	// is one. The second is the case a naive rule gets wrong.
+	assert_eq!(super::format_civil(951_782_400), "2000-02-29 00:00:00");
+	// Last second of a year, then the first of the next.
+	assert_eq!(super::format_civil(1_735_689_599), "2024-12-31 23:59:59");
+	assert_eq!(super::format_civil(1_735_689_600), "2025-01-01 00:00:00");
+	// The event the column was added for, captured from libpod.
+	assert_eq!(super::format_civil(1_785_718_245), "2026-08-03 00:50:45");
+}
+
+/// Before the epoch. `div_euclid`/`rem_euclid` are used rather than `/` and `%`
+/// precisely so a negative input floors instead of truncating toward zero; with
+/// the plain operators this renders an hour of -1.
+#[test]
+fn the_civil_rendering_handles_dates_before_the_epoch() {
+	assert_eq!(super::format_civil(-1), "1969-12-31 23:59:59");
+	assert_eq!(super::format_civil(-86_400), "1969-12-31 00:00:00");
 }
 
 /// Dates before the epoch parse to negative seconds rather than wrapping. The

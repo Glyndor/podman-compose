@@ -5,8 +5,8 @@ mod spec;
 
 #[allow(unused_imports)]
 pub use response::{
-	ContainerInspect, ContainerListEntry, ContainerPort, ContainerState, HealthState, HostBinding,
-	NetworkSettings, TopResponse,
+	ContainerInspect, ContainerListEntry, ContainerPort, ContainerSize, ContainerState,
+	HealthState, HostBinding, NetworkSettings, TopResponse,
 };
 #[allow(unused_imports)]
 pub use spec::{

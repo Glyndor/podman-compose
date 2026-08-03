@@ -176,6 +176,7 @@ List project containers.
 | `--status <STATE>` | Show only containers in this state. Repeatable; folded together with any `status=` from `--filter`. | all |
 | `--filter <KEY=VAL>` | `name=<NAME>` or `status=<STATE>`. An unknown key is an error. | none |
 | `--services` | Print service names only. | off |
+| `-s, --size` | Add a SIZE column with each container's on-disk footprint. | off |
 
 ### `ls`
 List podup compose projects on the host. Needs no compose file.
@@ -274,7 +275,7 @@ the raw byte count, not the rendered string.
 | `-q, --quiet` | Print image IDs only. | off |
 | `--format <FMT>` | `table` or `json`. | `table` |
 
-### `ps` columns
+### The ps CREATED and STATUS columns
 
 `STATUS` reports how long a running container has been up (`Up 2h 5m 3s`), with
 its health in parentheses when it has a healthcheck (`Up 13h (healthy)`). A
@@ -284,10 +285,56 @@ stopped container reports its exit code instead (`Exited (7)`).
 a restart, which is the point of having both: a container created three days ago
 and started four seconds ago reads `3d` / `Up 4s`.
 
+`SIZE` appears only with `-s/--size`. It reads `143kB (virtual 225MB)`: the bytes
+the container has written on top of its image, then the image's own size — the
+same shape `podman ps -s` and `docker ps -s` print, and `virtual` is the image
+size rather than the total of the two.
+
+It is opt-in because libpod has to walk each container's writable layer to
+answer, which costs real time as a project grows: measured across 59 containers
+on Podman 5.7.0, asking for it took the underlying call from 21 ms to 109 ms. On
+a small project the difference is below noise. Under `--format json` the field is
+`null` when the size was not requested, so a consumer can tell "not asked" from
+"empty".
+
 Both spans are largest-first and up to three components, skipping units that are
 empty — `1y 2mo 3d`, `1h 5m 3s`, `5s`. A year is 365 days and a month is 30.
 Under `--format json` the raw wire values are passed through instead: `Created`
 is the RFC 3339 string and `StartedAt` is Unix seconds.
+
+### Volume size accounting
+
+`SIZE` is what the volume occupies; `RECLAIMABLE` is what removing it would free.
+The two differ and both are worth seeing: a volume a container still uses reports
+its full size and **zero** reclaimable, which is the fact that matters when you
+are clearing disk space.
+
+A volume declared in the compose file but never created renders both cells empty
+rather than `0B` — an empty cell says it is not there, while `0B` would claim it
+exists and holds nothing.
+
+**It is opt-in because it is slow, not because it is verbose.** No libpod
+endpoint reports a single volume's size; the only one that knows is `system/df`,
+which accounts for every image, container and volume on the host. Measured on
+Podman 5.7.0 with 46 volumes: 1.2 s, against 10 ms for the plain list. podup
+makes that call once per table, never once per row.
+
+Under `--format json` each entry gains a `Usage` object with the raw byte counts
+and the container link count, and `Usage` is `null` when `--size` was not given.
+
+### Event timestamps
+
+The `TIME` column is the reader's own wall clock, with the offset that applied at
+that instant: `2026-08-02 23:43:35 -05:00`. That matches what `podman events`
+prints, so a podup line and a podman line for the same event read the same.
+
+The offset is resolved per event rather than once, so a `--since` window
+spanning a daylight-saving change renders each side correctly. If the platform
+cannot determine a zone, the time is shown in UTC and marked `Z` rather than
+left ambiguous.
+
+`--format json` is untouched: it passes libpod's own event object straight
+through.
 
 ### `volumes [SERVICE...]`
 List the project's named volumes (a trailing service list narrows it to volumes
@@ -298,6 +345,7 @@ neither creates nor deletes an external volume, so those are the ones a
 | Flag | Description | Default |
 |---|---|---|
 | `-q, --quiet` | Print volume names only. | off |
+| `-s, --size` | Add SIZE and RECLAIMABLE columns. Slow — see below. | off |
 | `--format <FMT>` | `table` or `json`. | `table` |
 
 ## Container operations

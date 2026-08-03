@@ -54,8 +54,9 @@ pub use engine::{
 	is_safe_project_name, list_projects, list_projects_filtered, resolve_image_digests,
 	retain_active_profiles, retain_active_profiles_with_targets, validate_stop_timeout,
 	AttachOutcome, BuildOptions, CommitOptions, CpOptions, Engine, EventsOptions, ExecOptions,
-	ImagesOptions, LogsDisplay, LogsOptions, LsOptions, ProjectLock, PsFilterOptions, PsOptions,
-	PullOptions, PushOptions, RunOptions, RunOverrides, StatsOptions, VolumesOptions,
+	ImagesOptions, LogsDisplay, LogsOptions, LsOptions, ProjectLock, PsDisplayOptions,
+	PsFilterOptions, PsOptions, PullOptions, PushOptions, RunOptions, RunOverrides, StatsOptions,
+	VolumesDisplayOptions, VolumesOptions,
 };
 /// The crate's error type and `Result` alias, surfaced so callers handle one
 /// error enum across parsing and engine calls.

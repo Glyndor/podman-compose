@@ -1,3 +1,50 @@
+podup (3.6.0) unstable; urgency=medium
+
+  Incompatible
+
+  * `events` prints its TIME column in the reader's own time zone with the
+    offset that applied at that instant — `2026-08-03 09:44:27 -05:00`, matching
+    `podman events`. It was UTC and said so nowhere, which is worse than either
+    alternative: a reader correlating a podup line against `podman events` or
+    `journalctl` read it as their own wall clock and was silently wrong by the
+    offset. The cell is twenty-six characters wide where it was nineteen, so a
+    script slicing it by position needs updating. `--format json` is unchanged
+    and passes libpod's own event object straight through.
+
+  Fixed
+
+  * `cp` and `watch sync` no longer report a failure for a copy that landed. On
+    Podman 6 the archive endpoint applies the upload and closes without a
+    response, and the confirmation asked whether the destination's mtime had
+    moved. That runtime reports the mtime to whole seconds, so two copies inside
+    one second were indistinguishable — three failures in six back-to-back
+    copies, measured — and re-copying an unchanged file could never be confirmed
+    at all, since the extracted file takes the source's own mtime. The
+    confirmation now asks whether the destination matches what was uploaded.
+    This matters most for `watch`, which fires on every write to a watched path.
+
+  Added
+
+  * `ps -s/--size` adds a SIZE column: what the container has written on top of
+    its image, then the image's own size — `143kB (virtual 225MB)`, the same
+    shape `podman ps -s` prints. Opt-in because the runtime walks each
+    container's writable layer to answer it.
+  * `volumes -s/--size` adds SIZE and RECLAIMABLE. A volume a container still
+    uses reports its full size and zero reclaimable, which is the number that
+    matters when clearing space. Opt-in and slow: the only endpoint carrying a
+    volume's size accounts for the whole host, measured at 1.2s against 10ms for
+    the plain list.
+
+  Internal
+
+  * The Debian lane now runs on test-only changes. It is the only caller that
+    builds the test targets with the packaging feature set, and its path filter
+    excluded `tests/`, which hid a broken branch across twenty pull requests.
+  * The release binary has a size budget, and `push` is exercised against a real
+    registry rather than only against an unreachable one.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Mon, 03 Aug 2026 14:50:25 -0500
+
 podup (3.5.0) unstable; urgency=medium
 
   Incompatible
