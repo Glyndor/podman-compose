@@ -95,6 +95,15 @@ jobs:
                 # flawless 155-pass run and clear the floor comfortably.
                 export PODUP_REQUIRE_PODMAN=1
                 cd "$HOME/podup" || exit 90
+                # Coverage runs on the scheduled and manual paths only — never on a
+                # pull request. The number is worth having where the integration
+                # tests can actually run (#1326: the CI coverage job sees 79% because
+                # every integration test skips itself without Podman, while the full
+                # suite covers 91.5%), but instrumenting doubles nothing here for
+                # free: it is a second full build inside the VM. Gating on it is
+                # deliberately NOT done yet — a threshold set from a number never
+                # observed in this environment is how a phantom check gets born.
+                COVERAGE=__COVERAGE__
                 # Capture the FULL output: the per-failure detail (where the flake
                 # marker lives) precedes the summary, so a `tail` on the console
                 # would truncate it and hide why a test failed.
@@ -163,6 +172,19 @@ jobs:
                 FLAKY=$(grep -cE "$DROPPED" /tmp/cargo.log)
                 echo "PODUP_TESTS_RC=$RC"
                 echo "PODUP_SUMMARY pass=${PASS:-0} fail=${FAIL:-0} flaky=${FLAKY:-0}"
+                # Coverage, measured where the integration tests can actually run.
+                # Reported, never gated — see the note where COVERAGE is set. A
+                # failure here must not redden the leg: this is an observation, and
+                # the suite's own result above is what gates.
+                if [ "$COVERAGE" = "1" ]; then
+                  if cargo install cargo-llvm-cov --locked >/dev/console 2>&1; then
+                    PCT=$(cargo llvm-cov --all-features --summary-only 2>/dev/console \
+                          | awk '$1=="TOTAL" { for (i=1;i<=NF;i++) if ($i ~ /%$/) { print $i; exit } }')
+                    echo "PODUP_COVERAGE=${PCT:-unknown}"
+                  else
+                    echo "PODUP_COVERAGE=install-failed"
+                  fi
+                fi
                 # Emit the IDENTITIES of the failing tests, not just the count.
                 # The floor gate can only tighten to a per-test known-flaky
                 # allowlist once the flaky set is small and stable (#1039), and
@@ -176,7 +198,7 @@ jobs:
                 echo "PODUP_FAILED_TESTS=${FAILED_TESTS}"
           runcmd:
             - bash -c 'F=$(findmnt -no FSTYPE /); case $F in btrfs) btrfs filesystem resize max / ;; xfs) xfs_growfs / ;; ext4) resize2fs $(findmnt -no SOURCE /) ;; esac >/dev/console 2>&1; echo "DISK=$(df -h / | tail -1)" >/dev/console'
-            - bash -c 'dnf install -y podman rust cargo gcc git >/dev/console 2>&1'
+            - bash -c 'dnf install -y podman rust cargo gcc git llvm >/dev/console 2>&1'
             # Prove the driver took, so a silently-ignored config cannot put the
             # logs tests back to passing without reading anything.
             - bash -c 'echo "LOGDRIVER=$(podman info --format {{.Host.LogDriver}} 2>/dev/null)" >/dev/console'
@@ -193,6 +215,13 @@ jobs:
           [ "${{ matrix.podman }}" = "6" ] && THREADS=1
           echo "test-threads for Podman ${{ matrix.podman }}: $THREADS"
           sed -i "s/__THREADS__/$THREADS/" "$RUNNER_TEMP/user-data"
+          # Coverage on the scheduled and manual paths only. A pull request must
+          # not pay for a second instrumented build, and must not be able to fail
+          # for a reason that has nothing to do with its own change.
+          COVERAGE=0
+          case "${{ github.event_name }}" in schedule|workflow_dispatch) COVERAGE=1 ;; esac
+          echo "coverage pass for Podman ${{ matrix.podman }}: $COVERAGE"
+          sed -i "s/__COVERAGE__/$COVERAGE/" "$RUNNER_TEMP/user-data"
           cloud-localds "$RUNNER_TEMP/seed.iso" "$RUNNER_TEMP/user-data"
       - name: Boot VM (9p = repo only) + capture
         run: |
@@ -235,6 +264,16 @@ jobs:
           # log (the console here is tail-truncated, so don't recount from it).
           SUM=$(grep -oE 'PODUP_SUMMARY pass=[0-9]+ fail=[0-9]+ flaky=[0-9]+' "$L" | tail -1)
           [ -n "$SUM" ] || { echo "::error::no PODUP_SUMMARY from VM on Podman $VER — suite did not report"; exit 1; }
+          # Coverage, when this run asked for it. Reported into the job summary and
+          # never gated: the org standard's 90% floor belongs here rather than on
+          # the Podman-less job that can only see 79% (#1326), but a threshold set
+          # from a number never observed in THIS environment would be a phantom
+          # check. Observe first, then gate, in a separate change.
+          COV=$(grep -oE 'PODUP_COVERAGE=[^ ]+' "$L" | tail -1 | cut -d= -f2)
+          if [ -n "$COV" ]; then
+            echo "coverage on Podman $VER (full suite, integration tests included): $COV"
+            echo "- **Podman $VER coverage:** $COV" >> "$GITHUB_STEP_SUMMARY"
+          fi
           PASS=$(echo "$SUM" | grep -oE 'pass=[0-9]+' | cut -d= -f2)
           FAIL=$(echo "$SUM" | grep -oE 'fail=[0-9]+' | cut -d= -f2)
           FLAKY=$(echo "$SUM" | grep -oE 'flaky=[0-9]+' | cut -d= -f2)
