@@ -38,6 +38,10 @@ async fn read_stream(reply: FakeReply) -> (Vec<serde_json::Value>, Option<String
 		FakeReply::ChunkedEnd(c) => FakeReply::ChunkedEnd(c.clone()),
 		FakeReply::ChunkedTruncated(c) => FakeReply::ChunkedTruncated(c.clone()),
 		FakeReply::ChunkedCutMidPayload(c) => FakeReply::ChunkedCutMidPayload(c.clone()),
+		// Not a stream *ending* — it never becomes a stream. `get_stream` fails
+		// at the response head rather than reaching the parser this measures, so
+		// this shape belongs to the lifecycle re-check tests instead.
+		FakeReply::ClosedWithoutResponse => FakeReply::ClosedWithoutResponse,
 	});
 	let client = fake.client();
 	let resp = client

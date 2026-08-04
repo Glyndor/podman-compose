@@ -772,4 +772,6 @@ pub(super) fn container_rm_path(name: &str, remove_volumes: bool) -> String {
 }
 
 #[cfg(test)]
+mod drop_recheck_tests;
+#[cfg(test)]
 mod tests;
