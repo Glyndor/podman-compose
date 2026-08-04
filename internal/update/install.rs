@@ -248,6 +248,16 @@ fn write_temp(tmp: &Path, new_bytes: &[u8], target: &Path) -> crate::Result<()> 
 		// `create_new` (O_EXCL) + O_NOFOLLOW: never follow or clobber a pre-planted
 		// symlink in a shared/attacker-writable install directory, so the verified
 		// bytes can only land in our own freshly created file.
+		//
+		// **Neither flag is reachable from a test, and that is a property of what
+		// they guard rather than a gap.** The `remove_file` above already unlinks
+		// any symlink planted beforehand — measured: after it, the link is gone
+		// and its victim is untouched — so what is left for these flags is the
+		// window *between* that unlink and this open. Closing a race is exactly
+		// the thing an in-process test cannot enter. Mutations removing either
+		// one survive the suite; the third property of this call, the 0600 mode,
+		// is reachable and is pinned by
+		// `write_temp_creates_the_file_private_to_this_user`.
 		std::fs::OpenOptions::new()
 			.write(true)
 			.create_new(true)
@@ -388,6 +398,50 @@ mod tests {
 
 		install_at(&target, b"new version").unwrap();
 		assert_eq!(std::fs::read(&target).unwrap(), b"new version");
+	}
+
+	/// A special bit on the target is never propagated onto the new binary.
+	///
+	/// `write_temp` copies the target's permissions so an install keeps whatever
+	/// mode the operator chose, and masks with `& 0o777` on the way. Without the
+	/// mask, a target that had been made setuid — by tampering, or by an
+	/// operator who did it on purpose once — would hand the freshly installed
+	/// podup the same bit, on a binary that has just been fetched over the
+	/// network. That is a privilege-escalation footgun, and it is the one
+	/// property of this function a test can actually observe.
+	///
+	/// The other three are window guards and cannot be reached in process: the
+	/// 0600 create mode is overwritten by this very copy before the function
+	/// returns, and `O_EXCL`/`O_NOFOLLOW` close a race between the unlink above
+	/// and the open. Their comments say so where they live.
+	#[cfg(unix)]
+	#[test]
+	fn write_temp_never_propagates_a_special_bit_from_the_target() {
+		use std::os::unix::fs::PermissionsExt;
+		let dir = tempfile::tempdir().unwrap();
+		let target = dir.path().join("podup");
+		std::fs::write(&target, b"old").unwrap();
+		std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o4755)).unwrap();
+		// Only meaningful if the filesystem kept the bit; some do not.
+		let target_mode = std::fs::metadata(&target).unwrap().permissions().mode();
+		if target_mode & 0o4000 == 0 {
+			return;
+		}
+
+		let tmp = dir.path().join("podup.tmp");
+		super::write_temp(&tmp, b"freshly downloaded", &target).unwrap();
+
+		let mode = std::fs::metadata(&tmp).unwrap().permissions().mode();
+		assert_eq!(
+			mode & 0o7000,
+			0,
+			"a special bit rode from the target onto the new binary: {mode:o}"
+		);
+		assert_eq!(
+			mode & 0o777,
+			0o755,
+			"the ordinary permission bits should still be carried over: {mode:o}"
+		);
 	}
 
 	#[test]
