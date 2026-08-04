@@ -445,6 +445,36 @@ impl Engine {
 		self.list_project_container_names(None).await
 	}
 
+	/// The network aliases a container answers to, flattened across every
+	/// network it is attached to.
+	///
+	/// The seam that lets a test check **podup's** contribution to service-name
+	/// resolution — registering the compose service name as an alias — without
+	/// depending on the runtime's DNS server being up to answer for it. Those
+	/// are two layers, and a test that only measures the second blames podup for
+	/// the first's failures (#1330).
+	pub async fn test_container_aliases(&self, container: &str) -> Result<Vec<String>> {
+		let path = format!(
+			"{}/containers/{}/json",
+			crate::libpod::API_PREFIX,
+			crate::libpod::urlencoded(container)
+		);
+		let inspect: crate::libpod::types::container::ContainerInspect = self
+			.client
+			.get_json(&path)
+			.await
+			.map_err(crate::error::ComposeError::Podman)?;
+		Ok(inspect
+			.network_settings
+			.map(|n| {
+				n.networks
+					.into_values()
+					.flat_map(|a| a.aliases)
+					.collect::<Vec<_>>()
+			})
+			.unwrap_or_default())
+	}
+
 	/// Run a command in the named container and return its captured stdout.
 	///
 	/// Integration tests use this to observe the effect of a watch action (e.g.
