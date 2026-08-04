@@ -1,14 +1,10 @@
 //! Niche-command CLI integration tests (wait/export/commit), split for the
 //! source line limit.
 use std::fs;
-use std::process::Command;
 use tempfile::tempdir;
 
 use super::*;
 
-fn run(args: &[&str]) -> std::process::Output {
-	Command::new(bin()).args(args).output().unwrap()
-}
 #[tokio::test]
 async fn cli_wait_names_the_container_and_its_exit_code() {
 	if super::podman().await.is_none() {
@@ -24,7 +20,7 @@ async fn cli_wait_names_the_container_and_its_exit_code() {
 	.unwrap();
 	let c = compose.to_str().unwrap();
 
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	let out = run(&["-f", c, "-p", &proj, "wait", "job"]);
 	assert!(out.status.success(), "wait failed: {:?}", out.stderr);
 	// One line per container, naming it (#1248). This used to assert a line
@@ -56,7 +52,7 @@ async fn cli_export_writes_tar() {
 	let c = compose.to_str().unwrap();
 	let tar = dir.path().join("rootfs.tar");
 
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	let out = run(&[
 		"-f",
 		c,
@@ -89,7 +85,7 @@ async fn cli_commit_creates_image() {
 	.unwrap();
 	let c = compose.to_str().unwrap();
 
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	let out = run(&["-f", c, "-p", &proj, "commit", "web", &img]);
 	run(&["-f", c, "-p", &proj, "down"]);
 	let exists = std::process::Command::new("podman")
@@ -126,7 +122,7 @@ async fn cli_attach_streams_output_until_exit() {
 	.unwrap();
 	let c = compose.to_str().unwrap();
 
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	let out = run(&["-f", c, "-p", &proj, "attach", "web"]);
 	run(&["-f", c, "-p", &proj, "down"]);
 	assert!(out.status.success(), "attach failed: {:?}", out.stderr);

@@ -18,6 +18,7 @@ use crate::engine::Engine;
 use crate::error::{ComposeError, Result};
 use crate::libpod::{urlencoded, API_PREFIX};
 
+use super::drop_recheck::LifecycleGoal;
 use super::targets::{stop_deadline, stop_timeout_param};
 
 /// Upper bound on the number of same-level services a lifecycle command acts on
@@ -181,7 +182,7 @@ impl Engine {
 				urlencoded(&container_name),
 			);
 			if let Err(e) = self
-				.run_lifecycle_op(&path, &container_name, "Started")
+				.run_lifecycle_op(&path, &container_name, "Started", LifecycleGoal::Running)
 				.await
 			{
 				first_err.get_or_insert(e);
@@ -210,7 +211,7 @@ impl Engine {
 				stop_timeout_param(grace),
 			);
 			match self
-				.run_lifecycle_op(&restart_path, &container_name, done)
+				.run_lifecycle_op(&restart_path, &container_name, done, LifecycleGoal::Running)
 				.await
 			{
 				Ok(true) => acted.store(true, std::sync::atomic::Ordering::Relaxed),
@@ -239,7 +240,7 @@ impl Engine {
 				urlencoded(signal),
 			);
 			match self
-				.run_lifecycle_op(&path, &container_name, "Killed")
+				.run_lifecycle_op(&path, &container_name, "Killed", LifecycleGoal::NotRunning)
 				.await
 			{
 				Ok(true) => acted.store(true, std::sync::atomic::Ordering::Relaxed),
@@ -382,6 +383,13 @@ impl Engine {
 				Ok(())
 			}
 			Err(e) if e.is_status(404) => Ok(()),
+			// The other state-changing call the drops were measured on (#1339).
+			// `Gone` rather than `NotRunning`: a stopped-but-present container
+			// would satisfy the latter and read a failed removal as a success.
+			Err(e) if e.is_incomplete_message() => self
+				.confirm_lost_response(container_name, "Removed", LifecycleGoal::Gone, e)
+				.await
+				.map(|_| ()),
 			Err(e) => {
 				tracing::warn!("could not remove {container_name}: {e}");
 				Err(ComposeError::Podman(e))

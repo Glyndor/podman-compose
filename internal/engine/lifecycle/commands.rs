@@ -3,6 +3,7 @@
 use crate::compose::types::ComposeFile;
 use crate::error::{ComposeError, Result};
 
+use super::drop_recheck::LifecycleGoal;
 use super::filter_services;
 use super::parallel::{
 	filter_levels, first_error, join_bounded, restart_service_set, retain_levels,
@@ -81,6 +82,7 @@ impl Engine {
 		path: &str,
 		container: &str,
 		done: &str,
+		goal: LifecycleGoal,
 	) -> Result<bool> {
 		match self.client.post_empty_ok(path).await {
 			Ok(()) => {
@@ -90,6 +92,21 @@ impl Engine {
 			Err(e) if e.is_status(304) || e.is_status(404) || e.is_kill_of_stopped() => {
 				tracing::debug!("{container}: {done} skipped ({e})");
 				Ok(false)
+			}
+			// The server closed before completing the response. That is not an
+			// answer: the operation may have run to completion and lost only its
+			// reply. Measured on Podman 6 under concurrency, where the drops land
+			// on exactly these state-changing POSTs and follow a slow one — a
+			// restart that burned its full stop grace, then a drop on the next
+			// (#1339). It is not a client deadline (READ_TIMEOUT is 120s) and not
+			// a pooled-connection race (there is no pool; every request gets a
+			// fresh socket), so the transport genuinely cannot say.
+			//
+			// Resolve it the way `cp` and `stats` already do: ask the observable
+			// the transport cannot see. If the container reached the state the
+			// operation was for, it succeeded.
+			Err(e) if e.is_incomplete_message() => {
+				self.confirm_lost_response(container, done, goal, e).await
 			}
 			Err(e) => Err(ComposeError::Podman(e)),
 		}
@@ -148,6 +165,13 @@ impl Engine {
 				tracing::debug!("{container}: stop skipped ({e})");
 				Ok(())
 			}
+			// `stop` is one of the four state-changing calls the drops were
+			// measured on (#1339), and it does not go through `run_lifecycle_op`,
+			// so it needs the re-check on its own.
+			Err(e) if e.is_incomplete_message() => self
+				.confirm_lost_response(container, "Stopped", LifecycleGoal::NotRunning, e)
+				.await
+				.map(|_| ()),
 			Err(e) if e.is_timeout() => {
 				tracing::warn!(
 					"{container}: stop did not complete within the grace window; escalating to SIGKILL"

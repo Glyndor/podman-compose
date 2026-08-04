@@ -187,6 +187,23 @@ pub struct NetworkSettings {
 	/// exposed but not published.
 	#[serde(rename = "Ports", default)]
 	pub ports: HashMap<String, Option<Vec<HostBinding>>>,
+	/// Per-network attachment details, keyed by the on-host network name.
+	///
+	/// Carried for the aliases: a compose service is reachable by its service
+	/// name because podup registers that name as a network alias, and that
+	/// registration is the part podup owns. Whether a lookup for it then
+	/// *answers* is the container runtime's DNS, which is a different layer and
+	/// fails for its own reasons (#1330).
+	#[serde(rename = "Networks", default)]
+	pub networks: HashMap<String, NetworkAttachment>,
+}
+
+/// One network a container is attached to.
+#[derive(Deserialize, Default, Clone)]
+pub struct NetworkAttachment {
+	/// Names this container answers to on the network, when DNS is working.
+	#[serde(rename = "Aliases", default, deserialize_with = "null_default")]
+	pub aliases: Vec<String>,
 }
 
 /// Host port binding from container inspect network settings.

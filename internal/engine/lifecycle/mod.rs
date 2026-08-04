@@ -2,6 +2,7 @@
 
 mod commands;
 mod down_label;
+mod drop_recheck;
 mod images;
 // Visible within the engine, not beyond it: the secret pre-creation stage
 // (#1219) fans out against the same `MAX_LIFECYCLE_CONCURRENCY` ceiling rather
@@ -771,5 +772,7 @@ pub(super) fn container_rm_path(name: &str, remove_volumes: bool) -> String {
 	)
 }
 
+#[cfg(test)]
+mod drop_recheck_tests;
 #[cfg(test)]
 mod tests;

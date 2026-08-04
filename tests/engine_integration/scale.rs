@@ -18,10 +18,6 @@ fn running_count(compose: &str, proj: &str) -> usize {
 		.count()
 }
 
-fn run(args: &[&str]) -> std::process::Output {
-	Command::new(bin()).args(args).output().unwrap()
-}
-
 /// Podman container id for `name`, or empty when it does not exist.
 fn container_id(name: &str) -> String {
 	let out = Command::new("podman")
@@ -80,7 +76,7 @@ async fn scale_subcommand_scales_up_then_down() {
 	.unwrap();
 	let c = compose.to_str().unwrap();
 
-	run(&["-f", c, "-p", &proj, "up", "--detach"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "--detach"]);
 	assert_eq!(running_count(c, &proj), 1);
 
 	let up = run(&["-f", c, "-p", &proj, "scale", "worker=3"]);
