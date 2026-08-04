@@ -1,3 +1,22 @@
+podup (3.6.1) unstable; urgency=medium
+
+  Fixed
+
+  * A lifecycle operation whose response the daemon drops is no longer reported
+    as a failure when it actually completed. `restart`, `start`, `kill`, `stop`
+    and `rm` now confirm the container reached the state the command was for,
+    and only then report success; a container that did not reach it, or a state
+    that cannot be re-read, still fails. Podman 6 severs these responses under
+    concurrency, which made `up`, `down` and `restart` fail on multi-service
+    projects for a reason that was never the command.
+  * `exec` retries once when the daemon drops the response to its session
+    create. That request is where the drops land most, and it cannot be resolved
+    by re-checking the container, because what is lost is the session id.
+    Retrying is safe: an exec that is created and never started allocates no
+    process and is discarded with the container.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Tue, 04 Aug 2026 04:35:55 -0500
+
 podup (3.6.0) unstable; urgency=medium
 
   Incompatible
