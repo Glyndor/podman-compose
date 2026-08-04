@@ -129,11 +129,18 @@ jobs:
                 # this hypothesis dies too and the search moves elsewhere.
                 #
                 # `--test-threads` caps how many streaming tests hit the libpod
-                # socket at once. The nested-virt (VM-in-runner) transport is what
-                # drops connections mid-stream — measured: on a single-level VM
-                # (Podman 5.8.1 and 6.0.1) the same suite never drops a byte, so the
-                # flake is the double-virt socket under concurrent load, not a podup
-                # or libpod bug. Fewer concurrent streams means less peak pressure,
+                # socket at once.
+                #
+                # This used to say the drops were specific to the nested-virt
+                # (VM-in-runner) transport, and that a single-level VM "never
+                # drops a byte". **That is measured false** (2026-08-03, #1322):
+                # on a plain KVM guest with Podman 6.0.1, the same suite fails
+                # 17 of 27 at eight test threads and 3 at one — a clean
+                # dose-response curve in thread count, reproducible across
+                # repetitions. Nesting makes it worse; it does not cause it.
+                #
+                # What holds is the lever: fewer concurrent streams means less
+                # peak pressure,
                 # which is the lever to shrink Podman 6's variable flaky tail toward
                 # a small, stable set that an identity list can gate (#1039). Kept at
                 # 2 rather than 1 so the suite still fits the VM's time budget.

@@ -519,9 +519,17 @@ async fn sibling_resolves_service_by_name_on_shared_network() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
-	// The client must reach the server by its compose service name (`server`),
-	// not only by the container name — the service name has to be registered as
-	// a network alias. Retry briefly while the server's httpd comes up.
+	// Two layers, asserted separately (#1330).
+	//
+	// **podup's layer**: the compose service name is registered as a network
+	// alias. That is the whole of podup's contribution to service-name
+	// resolution and it is checkable without any DNS.
+	let aliases = engine
+		.test_container_aliases(&format!("{proj}-server-1"))
+		.await
+		.expect("could not read the server's network aliases");
+	// **The runtime's layer**: a lookup for that alias actually answers. Retry
+	// briefly while the server's httpd comes up.
 	let out = engine
 		.test_exec_capture(
 			&format!("{proj}-client-1"),
@@ -533,10 +541,16 @@ async fn sibling_resolves_service_by_name_on_shared_network() {
 		)
 		.await;
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		aliases.iter().any(|a| a == "server"),
+		"podup did not register the service name as a network alias: {aliases:?}"
+	);
 	let out = out.expect("exec in client container failed");
 	assert!(
 		out.contains("ok"),
-		"service `server` was not reachable by its service name: {out:?}"
+		"the alias `server` is registered but the lookup did not answer, so the \
+		 container runtime's DNS is what failed here, not podup: {out:?}"
 	);
 }
 
@@ -568,6 +582,12 @@ async fn sibling_resolves_service_by_name_without_networks_block() {
 	let file = parse_files_with_env_files(&[compose], &[]).unwrap();
 
 	engine.up(&file).await.unwrap();
+	// Same two-layer split as the shared-network case above (#1330): the alias
+	// is podup's, the lookup answering is the runtime's.
+	let aliases = engine
+		.test_container_aliases(&format!("{proj}-server-1"))
+		.await
+		.expect("could not read the server's network aliases");
 	let out = engine
 		.test_exec_capture(
 			&format!("{proj}-client-1"),
@@ -579,10 +599,17 @@ async fn sibling_resolves_service_by_name_without_networks_block() {
 		)
 		.await;
 	engine.down(&file).await.unwrap();
+
+	assert!(
+		aliases.iter().any(|a| a == "server"),
+		"podup did not register the service name as an alias on the synthesized \
+		 default network: {aliases:?}"
+	);
 	let out = out.expect("exec in client container failed");
 	assert!(
 		out.contains("ok"),
-		"service `server` was not reachable by name without a networks: block: {out:?}"
+		"the alias `server` is registered but the lookup did not answer, so the \
+		 container runtime's DNS is what failed here, not podup: {out:?}"
 	);
 }
 
