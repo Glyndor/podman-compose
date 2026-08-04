@@ -177,10 +177,26 @@ jobs:
                 # failure here must not redden the leg: this is an observation, and
                 # the suite's own result above is what gates.
                 if [ "$COVERAGE" = "1" ]; then
-                  if cargo install cargo-llvm-cov --locked >/dev/console 2>&1; then
-                    PCT=$(cargo llvm-cov --all-features --summary-only 2>/dev/console \
-                          | awk '$1=="TOTAL" { for (i=1;i<=NF;i++) if ($i ~ /%$/) { print $i; exit } }')
-                    echo "PODUP_COVERAGE=${PCT:-unknown}"
+                  # Nothing here redirects to /dev/console. This script runs as
+                  # `tester`, which may not open that device, and a denied
+                  # redirection aborts the command it was attached to and is
+                  # reported as that command's own failure. The first run said
+                  # `install-failed` for exactly that reason: cargo never ran.
+                  # stdout and stderr already point at the console, inherited
+                  # from the root caller that launched this script.
+                  if cargo install cargo-llvm-cov --locked; then
+                    cargo llvm-cov --all-features --summary-only >/tmp/cov.log 2>&1
+                    PCT=$(awk '$1=="TOTAL" { for (i=1;i<=NF;i++) if ($i ~ /%$/) { print $i; exit } }' /tmp/cov.log)
+                    if [ -n "$PCT" ]; then
+                      echo "PODUP_COVERAGE=$PCT"
+                    else
+                      # Ran, produced nothing parseable. Print what it actually
+                      # said: a second 15-minute boot is an expensive way to
+                      # find out, and each distinct marker below names one
+                      # cause instead of collapsing every failure into one word.
+                      echo "PODUP_COVERAGE=no-total-line"
+                      tail -30 /tmp/cov.log
+                    fi
                   else
                     echo "PODUP_COVERAGE=install-failed"
                   fi
