@@ -23,7 +23,16 @@ jobs:
     runs-on: ubuntu-24.04
     # Raised for the one-thread experiment: serialising the suite costs wall
     # clock, and a run that dies on the timeout answers nothing (#1039).
-    timeout-minutes: 75
+    #
+    # Raised again for the coverage path. Capping the coverage run to the same
+    # thread count as the gating run (#1338) means the Podman 6 leg now runs two
+    # serialised suites, and it came in at 66m27s of the 75 on run 30879785232 —
+    # 89% of the budget. That is not a failure yet, which is the only useful
+    # moment to change it: a slower runner or a heavier rawhide image tips it
+    # over, and the run that dies tells you nothing about the coverage it was
+    # measuring. Costs nothing on the pull-request path, where coverage is off
+    # and the leg finishes in about half this.
+    timeout-minutes: 95
     strategy:
       fail-fast: false
       matrix:
