@@ -18,7 +18,7 @@ use crate::engine::Engine;
 use crate::error::{ComposeError, Result};
 use crate::libpod::{urlencoded, API_PREFIX};
 
-use super::commands::LifecycleGoal;
+use super::drop_recheck::LifecycleGoal;
 use super::targets::{stop_deadline, stop_timeout_param};
 
 /// Upper bound on the number of same-level services a lifecycle command acts on
@@ -383,6 +383,13 @@ impl Engine {
 				Ok(())
 			}
 			Err(e) if e.is_status(404) => Ok(()),
+			// The other state-changing call the drops were measured on (#1339).
+			// `Gone` rather than `NotRunning`: a stopped-but-present container
+			// would satisfy the latter and read a failed removal as a success.
+			Err(e) if e.is_incomplete_message() => self
+				.confirm_lost_response(container_name, "Removed", LifecycleGoal::Gone, e)
+				.await
+				.map(|_| ()),
 			Err(e) => {
 				tracing::warn!("could not remove {container_name}: {e}");
 				Err(ComposeError::Podman(e))
