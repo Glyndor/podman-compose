@@ -208,7 +208,16 @@ jobs:
                     # own wording several minutes and one full build later.
                     echo "PODUP_COVERAGE=llvm-tools-missing"
                   elif cargo install cargo-llvm-cov --locked; then
-                    cargo llvm-cov --all-features --summary-only >/tmp/cov.log 2>&1
+                    # Same thread cap as the gating run above. cargo-llvm-cov
+                    # drives its own `cargo test` and does NOT inherit it, which
+                    # is measurable rather than theoretical: on the Podman 6 leg
+                    # the gating run took 1743s and passed 178/178, and the
+                    # coverage run of the same code in the same boot took 441s —
+                    # four times faster because it was parallel — and failed 5
+                    # with hyper IncompleteMessage. Uncapped, this step measures
+                    # a different suite than the one that gates.
+                    cargo llvm-cov --all-features --summary-only \
+                      -- --test-threads=__THREADS__ >/tmp/cov.log 2>&1
                     PCT=$(awk '$1=="TOTAL" { for (i=1;i<=NF;i++) if ($i ~ /%$/) { print $i; exit } }' /tmp/cov.log)
                     if [ -n "$PCT" ]; then
                       echo "PODUP_COVERAGE=$PCT"
