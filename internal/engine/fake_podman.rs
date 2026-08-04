@@ -42,6 +42,19 @@ pub(super) enum FakeReply {
 	/// closes. The other place a severed stream can land, and — measured — hyper
 	/// classifies the two differently, which is why both exist here.
 	ChunkedCutMidPayload(String),
+	/// The request is read and accepted, and then the connection closes with **no
+	/// response at all** — not even a status line.
+	///
+	/// This is the shape `PodmanError::is_incomplete_message` names: hyper's
+	/// `IncompleteMessage` is about the message *head*, so it is the one reply
+	/// here that produces it, and the severed-body variants above do not.
+	///
+	/// It is what libpod does on Podman 6 to the container-archive PUT (#1097,
+	/// applies the archive then hangs up) and to state-changing POSTs under
+	/// concurrency (#1339). Both are handled by re-checking the observable out of
+	/// band, and until this existed neither discriminator had a test that could
+	/// reach it.
+	ClosedWithoutResponse,
 }
 
 /// A test's routing rule: `(method, target) -> reply`, where `target` is the
@@ -180,6 +193,9 @@ async fn serve_one(
 				.write_all(format!("{:x}\r\n{}", chunk.len(), &chunk[..half]).as_bytes())
 				.await?;
 			stream.flush().await?;
+		}
+		FakeReply::ClosedWithoutResponse => {
+			// Write nothing. The shutdown below is the entire reply.
 		}
 	}
 	stream.shutdown().await?;
