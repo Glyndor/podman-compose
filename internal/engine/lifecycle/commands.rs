@@ -3,6 +3,7 @@
 use crate::compose::types::ComposeFile;
 use crate::error::{ComposeError, Result};
 
+use super::drop_recheck::LifecycleGoal;
 use super::filter_services;
 use super::parallel::{
 	filter_levels, first_error, join_bounded, restart_service_set, retain_levels,
@@ -18,30 +19,6 @@ use crate::libpod::API_PREFIX;
 /// typical `<project>-<service>-<n>`; a longer name truncates the way every
 /// other capped column in the binary does.
 const WAIT_NAME_WIDTH: usize = 32;
-
-/// What a lifecycle operation was trying to achieve.
-///
-/// The transport cannot say whether a dropped response means the operation
-/// failed or completed and lost only its reply — the two are indistinguishable
-/// at HTTP (#1104). This names the observable that answers it out of band.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum LifecycleGoal {
-	/// `start`, `restart` — the container should be running afterwards.
-	Running,
-	/// `kill` — the container should not be running afterwards.
-	NotRunning,
-}
-
-impl LifecycleGoal {
-	/// Whether libpod's `State` satisfies this goal. `None` means the container
-	/// no longer exists, which reaches `NotRunning` and fails `Running`.
-	pub(super) fn reached(self, state: Option<&str>) -> bool {
-		match self {
-			Self::Running => state == Some("running"),
-			Self::NotRunning => state != Some("running"),
-		}
-	}
-}
 
 /// `wait`'s header row.
 fn wait_header() -> String {
@@ -129,67 +106,10 @@ impl Engine {
 			// the transport cannot see. If the container reached the state the
 			// operation was for, it succeeded.
 			Err(e) if e.is_incomplete_message() => {
-				match self.container_state(container).await {
-					Ok(state) if goal.reached(state.as_deref()) => {
-						tracing::warn!(
-							"{container}: {done} lost its response [{}] but the container \
-							 reached {goal:?}, so the operation landed",
-							e.stream_end_kind()
-						);
-						crate::ui::progress_line("Container", container, done);
-						Ok(true)
-					}
-					// Fail closed on both remaining shapes: a container that did
-					// not reach the goal, and a re-check that could not be read.
-					// Neither is confirmation, and reporting success without one
-					// is the failure this exists to prevent.
-					Ok(state) => {
-						tracing::warn!(
-							"{container}: {done} lost its response [{}] and the container \
-							 is {state:?}, not {goal:?}",
-							e.stream_end_kind()
-						);
-						Err(ComposeError::Podman(e))
-					}
-					Err(recheck) => {
-						tracing::warn!(
-							"{container}: {done} lost its response [{}] and the state \
-							 could not be re-checked: {recheck}",
-							e.stream_end_kind()
-						);
-						Err(ComposeError::Podman(e))
-					}
-				}
+				self.confirm_lost_response(container, done, goal, e).await
 			}
 			Err(e) => Err(ComposeError::Podman(e)),
 		}
-	}
-
-	/// libpod's `State` for one container, or `None` when it no longer exists.
-	///
-	/// Listed rather than inspected: the list carries `State` directly and the
-	/// inspect response is several times the size for the one field wanted here
-	/// (#1298). libpod's `name` filter matches on substring, so the exact name is
-	/// picked out of the results rather than trusted from the query.
-	pub(super) async fn container_state(&self, container: &str) -> Result<Option<String>> {
-		let filters = serde_json::json!({ "name": [container] });
-		let path = format!(
-			"{API_PREFIX}/containers/json?all=true&filters={}",
-			crate::libpod::urlencoded(&filters.to_string()),
-		);
-		let entries = self
-			.client
-			.get_json::<Vec<crate::libpod::types::container::ContainerListEntry>>(&path)
-			.await
-			.map_err(ComposeError::Podman)?;
-		Ok(entries
-			.into_iter()
-			.find(|e| {
-				e.names
-					.iter()
-					.any(|n| n.trim_start_matches('/') == container)
-			})
-			.map(|e| e.state))
 	}
 
 	/// Like [`Self::run_lifecycle_op`] but also treats a "container state
@@ -245,6 +165,13 @@ impl Engine {
 				tracing::debug!("{container}: stop skipped ({e})");
 				Ok(())
 			}
+			// `stop` is one of the four state-changing calls the drops were
+			// measured on (#1339), and it does not go through `run_lifecycle_op`,
+			// so it needs the re-check on its own.
+			Err(e) if e.is_incomplete_message() => self
+				.confirm_lost_response(container, "Stopped", LifecycleGoal::NotRunning, e)
+				.await
+				.map(|_| ()),
 			Err(e) if e.is_timeout() => {
 				tracing::warn!(
 					"{container}: stop did not complete within the grace window; escalating to SIGKILL"

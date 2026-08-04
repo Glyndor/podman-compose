@@ -10,7 +10,7 @@
 //! These pin the three answers: the container reached the goal, it did not, and
 //! the re-check itself could not be read. Only the first is success.
 
-use super::commands::LifecycleGoal;
+use super::drop_recheck::LifecycleGoal;
 
 #[test]
 fn a_goal_is_reached_only_by_the_state_that_satisfies_it() {
@@ -27,20 +27,25 @@ fn a_goal_is_reached_only_by_the_state_that_satisfies_it() {
 
 #[cfg(unix)]
 mod over_the_wire {
-	use super::super::commands::LifecycleGoal;
+	use super::super::drop_recheck::LifecycleGoal;
 	use crate::engine::fake_podman::{self, FakeReply};
 	use crate::engine::Engine;
 	use crate::libpod::API_PREFIX;
 
-	fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
+	pub(super) fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
 		Engine::with_base_dir(client, project.into(), std::env::temp_dir())
 	}
 
 	/// Drop the response to the lifecycle POST, and answer the state re-check
 	/// with `state`. `None` reports the container as absent.
-	fn fake_dropping_the_op(state: Option<&'static str>) -> fake_podman::FakePodman {
+	pub(super) fn fake_dropping_the_op(state: Option<&'static str>) -> fake_podman::FakePodman {
 		fake_podman::start_replying(move |method, target| {
-			if method == "POST" && target.contains("/proj-web-1/") {
+			// Both shapes the drops were measured on: the state-changing POSTs
+			// and the container DELETE. Dropping only the POSTs let a removal
+			// fall through to the 404 arm and be read as an idempotent no-op,
+			// which is a test that measures nothing.
+			let touches_it = target.contains("/proj-web-1");
+			if touches_it && (method == "POST" || method == "DELETE") {
 				// Accept, then hang up without a response — the one shape that
 				// produces hyper's `IncompleteMessage`.
 				return FakeReply::ClosedWithoutResponse;
@@ -132,5 +137,65 @@ mod over_the_wire {
 			.await
 			.expect("the container is gone, so the kill landed");
 		assert!(acted);
+	}
+}
+
+/// `Gone` is not `NotRunning`. A removal that lost its response must not be read
+/// as success just because the container stopped — it has to be absent.
+#[test]
+fn gone_needs_absence_not_merely_a_stopped_container() {
+	assert!(LifecycleGoal::Gone.reached(None));
+	assert!(!LifecycleGoal::Gone.reached(Some("exited")));
+	assert!(!LifecycleGoal::Gone.reached(Some("running")));
+	// The distinction that matters: `exited` satisfies NotRunning and not Gone.
+	assert!(LifecycleGoal::NotRunning.reached(Some("exited")));
+}
+
+#[cfg(unix)]
+mod stop_and_remove {
+	use super::over_the_wire::{engine_with, fake_dropping_the_op};
+
+	/// `stop` does not go through `run_lifecycle_op`, so it carries the re-check
+	/// itself. A container that is no longer running confirms the stop landed.
+	#[tokio::test]
+	async fn a_lost_stop_response_succeeds_when_the_container_is_not_running() {
+		let fake = fake_dropping_the_op(Some("exited"));
+		let engine = engine_with(fake.client(), "proj");
+		engine
+			.stop_container("proj-web-1", 10)
+			.await
+			.expect("the container is not running, so the stop landed");
+	}
+
+	#[tokio::test]
+	async fn a_lost_stop_response_fails_while_the_container_still_runs() {
+		let fake = fake_dropping_the_op(Some("running"));
+		let engine = engine_with(fake.client(), "proj");
+		engine
+			.stop_container("proj-web-1", 10)
+			.await
+			.expect_err("still running is not a stop");
+	}
+
+	/// And removal, which needs the container **absent** — a stopped-but-present
+	/// container would satisfy `NotRunning` and read a failed removal as success.
+	#[tokio::test]
+	async fn a_lost_removal_response_fails_when_the_container_is_merely_stopped() {
+		let fake = fake_dropping_the_op(Some("exited"));
+		let engine = engine_with(fake.client(), "proj");
+		engine
+			.teardown_one_container("proj-web-1", 10, &[], false)
+			.await
+			.expect_err("a container that is still there was not removed");
+	}
+
+	#[tokio::test]
+	async fn a_lost_removal_response_succeeds_when_the_container_is_gone() {
+		let fake = fake_dropping_the_op(None);
+		let engine = engine_with(fake.client(), "proj");
+		engine
+			.teardown_one_container("proj-web-1", 10, &[], false)
+			.await
+			.expect("the container is absent, so the removal landed");
 	}
 }

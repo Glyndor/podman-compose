@@ -2,6 +2,7 @@
 
 mod commands;
 mod down_label;
+mod drop_recheck;
 mod images;
 // Visible within the engine, not beyond it: the secret pre-creation stage
 // (#1219) fans out against the same `MAX_LIFECYCLE_CONCURRENCY` ceiling rather
