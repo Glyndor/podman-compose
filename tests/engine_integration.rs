@@ -136,6 +136,8 @@ mod build_resources;
 mod commands_networking;
 #[path = "engine_integration/cp_flags.rs"]
 mod cp_flags;
+#[path = "engine_integration/dns_resolution.rs"]
+mod dns_resolution;
 #[path = "engine_integration/exec_flags.rs"]
 mod exec_flags;
 #[path = "engine_integration/health_targeting.rs"]
