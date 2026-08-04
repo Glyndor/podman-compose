@@ -184,7 +184,30 @@ jobs:
                   # `install-failed` for exactly that reason: cargo never ran.
                   # stdout and stderr already point at the console, inherited
                   # from the root caller that launched this script.
-                  if cargo install cargo-llvm-cov --locked; then
+                  # cargo-llvm-cov looks for the `llvm-tools-preview` rustup
+                  # component, and there is no rustup here — Rust comes from dnf.
+                  # It accepts the two tools directly instead, and Fedora's `llvm`
+                  # package (already installed above) carries both. Taking them
+                  # from the distribution is also what keeps the versions in step:
+                  # rustc and llvm are built for the same Fedora release, so the
+                  # profile format matches, which a separately-pinned LLVM would
+                  # not guarantee.
+                  #
+                  # Exactly ONE PODUP_COVERAGE line is emitted on every path. Two
+                  # would be worse than none: whoever greps the log gets an answer
+                  # either way and no reason to suspect there was another.
+                  export LLVM_COV=/usr/bin/llvm-cov
+                  export LLVM_PROFDATA=/usr/bin/llvm-profdata
+                  # Print both versions unconditionally. A profile-format mismatch
+                  # is the next thing likely to go wrong here, and it is only
+                  # diagnosable against the pair of numbers that produced it.
+                  echo "llvm tools: $("$LLVM_COV" --version 2>&1 | grep -i version | head -1)"
+                  echo "rustc llvm: $(rustc --version --verbose | grep -i '^LLVM')"
+                  if [ ! -x "$LLVM_COV" ] || [ ! -x "$LLVM_PROFDATA" ]; then
+                    # Say so here rather than letting cargo-llvm-cov fail with its
+                    # own wording several minutes and one full build later.
+                    echo "PODUP_COVERAGE=llvm-tools-missing"
+                  elif cargo install cargo-llvm-cov --locked; then
                     cargo llvm-cov --all-features --summary-only >/tmp/cov.log 2>&1
                     PCT=$(awk '$1=="TOTAL" { for (i=1;i<=NF;i++) if ($i ~ /%$/) { print $i; exit } }' /tmp/cov.log)
                     if [ -n "$PCT" ]; then
