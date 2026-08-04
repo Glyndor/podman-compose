@@ -72,6 +72,40 @@ fn bin() -> &'static str {
 	env!("CARGO_BIN_EXE_podup")
 }
 
+/// Run the built `podup` and hand back whatever it did, checking nothing.
+///
+/// For calls whose outcome the test does not depend on — teardown, mostly. When
+/// a later assertion depends on this command having worked, use [`run_ok`].
+#[allow(dead_code)]
+fn run(args: &[&str]) -> std::process::Output {
+	std::process::Command::new(bin())
+		.args(args)
+		.output()
+		.unwrap()
+}
+
+/// Run the built `podup` and fail with its own words if it did not succeed.
+///
+/// Setting a test up with [`run`] and then asserting on the effect throws away
+/// the evidence of what went wrong. `create_makes_containers_without_starting_them`
+/// discarded an `up -d` and reported `left: 0, right: 1` — true, and unable to
+/// say whether `up` failed or whether it worked and the container died (#1340).
+///
+/// The failure is invisible while the environment is healthy and surfaces
+/// exactly when something else is already broken, which is when the diagnosis
+/// is worth the most.
+#[allow(dead_code)]
+fn run_ok(args: &[&str]) -> std::process::Output {
+	let out = run(args);
+	assert!(
+		out.status.success(),
+		"podup {args:?} exited {}: {}",
+		out.status,
+		String::from_utf8_lossy(&out.stderr)
+	);
+	out
+}
+
 /// Poll until reading `path` inside `container` yields exactly `expect` once
 /// trimmed, or `secs` elapse. Returns whether it matched.
 ///

@@ -60,10 +60,6 @@ async fn cli_logs_tail_limits_output() {
 		.unwrap();
 }
 
-fn run(args: &[&str]) -> std::process::Output {
-	Command::new(bin()).args(args).output().unwrap()
-}
-
 fn ps_all_count(compose: &str, proj: &str) -> usize {
 	String::from_utf8_lossy(&run(&["-f", compose, "-p", proj, "ps", "-a", "-q"]).stdout)
 		.lines()
@@ -89,7 +85,7 @@ async fn cli_down_remove_orphans_drops_undeclared_containers() {
 	fs::write(&one, format!("services:\n  web:\n    {svc}\n")).unwrap();
 	let (two, one) = (two.to_str().unwrap(), one.to_str().unwrap());
 
-	run(&["-f", two, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", two, "-p", &proj, "up", "-d"]);
 	assert_eq!(ps_all_count(two, &proj), 2);
 
 	// Down against the one-service file: --remove-orphans must also drop `extra`.
@@ -117,7 +113,7 @@ async fn cli_restart_no_deps_succeeds() {
 	.unwrap();
 	let c = compose.to_str().unwrap();
 
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	let restart = run(&["-f", c, "-p", &proj, "restart", "--no-deps", "web"]);
 	assert!(
 		restart.status.success(),
@@ -170,7 +166,7 @@ async fn cli_up_pull_never_starts_present_image() {
 	.unwrap();
 	let c = compose.to_str().unwrap();
 	// Ensure the image is present, then `--pull never` must still start it.
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	run(&["-f", c, "-p", &proj, "down"]);
 	let up = run(&["-f", c, "-p", &proj, "up", "-d", "--pull", "never"]);
 	assert!(
@@ -220,7 +216,7 @@ async fn cli_down_rmi_all_succeeds_and_removes_containers() {
 	.unwrap();
 	let c = compose.to_str().unwrap();
 
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	let down = run(&["-f", c, "-p", &proj, "down", "--rmi", "all"]);
 	assert!(
 		down.status.success(),
@@ -259,7 +255,7 @@ async fn cli_rm_volumes_removes_container() {
 	.unwrap();
 	let c = compose.to_str().unwrap();
 
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	run(&["-f", c, "-p", &proj, "stop"]);
 	let rm = run(&["-f", c, "-p", &proj, "rm", "-v", "-f"]);
 	assert!(rm.status.success(), "rm -v failed: {:?}", rm.stderr);
@@ -284,7 +280,7 @@ async fn cli_kill_remove_orphans_drops_undeclared() {
 	fs::write(&one, format!("services:\n  web:\n    {svc}\n")).unwrap();
 	let (two, one) = (two.to_str().unwrap(), one.to_str().unwrap());
 
-	run(&["-f", two, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", two, "-p", &proj, "up", "-d"]);
 	let kill = run(&["-f", one, "-p", &proj, "kill", "--remove-orphans"]);
 	assert!(kill.status.success(), "kill failed: {:?}", kill.stderr);
 	// The orphan `extra` is removed; the declared `web` is killed but remains.
@@ -367,7 +363,7 @@ async fn cli_rm_stop_removes_running_container() {
 	.unwrap();
 	let c = compose.to_str().unwrap();
 
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	assert_eq!(ps_all_count(c, &proj), 1, "container should exist after up");
 
 	// `rm -s` (no -f) must stop the running container first, then remove it.
@@ -399,7 +395,7 @@ async fn cli_start_wait_returns_after_starting() {
 
 	// Create the container without starting, then `start --wait` must start it
 	// and return (no healthcheck → ready once started).
-	run(&["-f", c, "-p", &proj, "up", "--no-start"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "--no-start"]);
 	let start = run(&[
 		"-f",
 		c,

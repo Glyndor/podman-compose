@@ -1,14 +1,9 @@
 //! Integration tests for `create` (containers without starting) and `ls`
 //! (project discovery) against a real Podman daemon. Skip when unreachable.
 use std::fs;
-use std::process::Command;
 use tempfile::tempdir;
 
 use super::*;
-
-fn run(args: &[&str]) -> std::process::Output {
-	Command::new(bin()).args(args).output().unwrap()
-}
 
 /// Count non-empty lines of a `-q` listing.
 fn count(out: &std::process::Output) -> usize {
@@ -48,7 +43,7 @@ async fn create_makes_containers_without_starting_them() {
 	);
 
 	// `up` then starts the already-created container.
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	assert_eq!(count(&run(&["-f", c, "-p", &proj, "ps", "-q"])), 1);
 
 	run(&["-f", c, "-p", &proj, "down"]);
@@ -69,7 +64,7 @@ async fn ls_lists_running_projects() {
 	.unwrap();
 	let c = compose.to_str().unwrap();
 
-	run(&["-f", c, "-p", &proj, "up", "-d"]);
+	run_ok(&["-f", c, "-p", &proj, "up", "-d"]);
 	// `ls -q` (running only) lists the project by name.
 	let names = String::from_utf8_lossy(&run(&["-p", &proj, "ls", "-q"]).stdout).into_owned();
 	assert!(
