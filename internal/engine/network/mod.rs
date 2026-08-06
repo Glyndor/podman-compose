@@ -79,8 +79,12 @@ impl Engine {
 				Ok(_) => crate::ui::progress_line("Network", &network_name, "Created"),
 				// An existing network is not an error on re-`up`; accept any
 				// already-exists conflict (network-create returns 409, but share
-				// the same predicate as volume-create for consistency).
-				Err(ref e) if e.is_already_exists() => {}
+				// the same predicate as volume-create for consistency). The row
+				// still needs to close — without an explicit closing verb the
+				// live board leaves it spinning on `Creating` (#1347).
+				Err(ref e) if e.is_already_exists() => {
+					crate::ui::progress_line("Network", &network_name, "Exists");
+				}
 				Err(e) => return Err(ComposeError::Podman(e)),
 			}
 		}

@@ -382,7 +382,13 @@ impl Engine {
 				crate::ui::progress_line("Container", container_name, "Removed");
 				Ok(())
 			}
-			Err(e) if e.is_status(404) => Ok(()),
+			// The container was already gone (404) — nothing to do, but the row
+			// has to close, or the live board leaves it spinning on `Stopping`
+			// forever (#1347).
+			Err(e) if e.is_status(404) => {
+				crate::ui::progress_line("Container", container_name, "Absent");
+				Ok(())
+			}
 			// The other state-changing call the drops were measured on (#1339).
 			// `Gone` rather than `NotRunning`: a stopped-but-present container
 			// would satisfy the latter and read a failed removal as a success.
@@ -392,6 +398,9 @@ impl Engine {
 				.map(|_| ()),
 			Err(e) => {
 				tracing::warn!("could not remove {container_name}: {e}");
+				// A `down` whose container removal genuinely failed previously
+				// hid the failure behind a spinner (#1347).
+				crate::ui::progress_line("Container", container_name, "Failed");
 				Err(ComposeError::Podman(e))
 			}
 		}

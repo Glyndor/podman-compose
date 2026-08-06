@@ -19,6 +19,13 @@ pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦"
 /// Marker for a finished row.
 const DONE_MARK: &str = "✔";
 
+/// Marker for a row that finished in error. Distinct from [`DONE_MARK`] so a
+/// failed row cannot be mistaken for a successful one at a glance — the verb
+/// already says "Failed", but the row before the user shows the green checkmark
+/// of a row that closed cleanly, which is the contradiction #1347 introduced
+/// when the missing-close sites started sending `"Failed"` as the closing verb.
+const FAILED_MARK: &str = "✘";
+
 /// Marker for a row nothing has happened to yet.
 const PENDING_MARK: &str = "⠿";
 
@@ -34,9 +41,15 @@ const TIME_WIDTH: usize = 6;
 /// Colour here is state, not identity: a finished row is green because something
 /// now exists, a pending one is dim because nothing has happened to it. The name
 /// beside it keeps its identity colour, which is why the marker must not reuse
-/// that palette.
+/// that palette. A failed row breaks the green-equals-success tie by carrying
+/// the verb "Failed" — the marker reads it too, so a failure and a success do
+/// not share a glyph.
 fn marker(row: &Row, frame: usize) -> (&'static str, Style) {
-	match row.state {
+	match &row.state {
+		State::Done(verb) if verb.to_ascii_lowercase().starts_with("fail") => (
+			FAILED_MARK,
+			Style::new().fg_color(Some(AnsiColor::Red.into())),
+		),
 		State::Done(_) => (
 			DONE_MARK,
 			Style::new().fg_color(Some(AnsiColor::Green.into())),
