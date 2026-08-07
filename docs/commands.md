@@ -194,7 +194,7 @@ View container output for the named services (or all).
 | Flag | Description | Default |
 |---|---|---|
 | `-f, --follow` | Stream new output. | off |
-| `-n, --tail <N>` | Show the last N lines. | all |
+| `-n, --tail <N>` | Show the last N lines. `all` opts back into the full stream. | 100 |
 | `--since <TIME>` | Show logs since a timestamp or relative time (e.g. `10m`). | start |
 | `--until <TIME>` | Show logs before a timestamp or relative time. | end |
 | `-t, --timestamps` | Prefix each line with an RFC3339 timestamp. | off |

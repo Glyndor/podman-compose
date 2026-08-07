@@ -516,7 +516,7 @@ pub(crate) enum Commands {
 		/// Follow log output.
 		#[arg(short, long)]
 		follow: bool,
-		/// Number of lines to show from the end of the logs (default: all).
+		/// Number of lines to show from the end of the logs (default: 100; `all` for the full stream).
 		#[arg(short = 'n', long)]
 		tail: Option<String>,
 		/// Show logs since a timestamp or relative time (e.g.
