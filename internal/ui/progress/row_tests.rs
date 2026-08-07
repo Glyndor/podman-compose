@@ -74,6 +74,32 @@ fn each_state_gets_its_own_marker() {
 	assert!(pending.contains(PENDING_MARK), "{pending:?}");
 }
 
+/// A row that closed with the verb "Failed" is not a successful row. The marker
+/// is the first thing the eye lands on, so a failure without `✘` — a row that
+/// says "Failed" with a green `✔` — is the same contradiction the missing-close
+/// fix (#1347) introduced: the verb now says "Failed", and the marker has to
+/// match.
+#[test]
+fn a_failed_row_uses_the_failed_marker_and_not_the_done_marker() {
+	let now = Instant::now();
+	let line = plain(&render(&row(State::Done("Failed".into())), 20, 0, now, 80));
+	assert!(line.contains(FAILED_MARK), "{line:?}");
+	assert!(!line.contains(DONE_MARK), "{line:?}");
+}
+
+/// Verb case-insensitive: any verb that begins with `fail` is a failure, so a
+/// future caller using `"failed"` (lower) or `"Failing"` does not silently
+/// regress to the green checkmark.
+#[test]
+fn a_failed_row_recognises_the_fail_prefix_case_insensitively() {
+	let now = Instant::now();
+	for verb in ["Failed", "failed", "Failing", "FAIL"] {
+		let line = plain(&render(&row(State::Done(verb.into())), 20, 0, now, 80));
+		assert!(line.contains(FAILED_MARK), "{verb:?} → {line:?}");
+		assert!(!line.contains(DONE_MARK), "{verb:?} → {line:?}");
+	}
+}
+
 /// The spinner advances with the frame, or a slow pull looks like a hang.
 #[test]
 fn the_working_marker_advances_with_the_frame() {
