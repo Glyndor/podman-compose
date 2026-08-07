@@ -75,10 +75,36 @@ pub(super) fn build_restart_policy(service: &Service) -> (Option<String>, Option
 // Logging
 // ---------------------------------------------------------------------------
 
-pub(super) fn build_log_config(logging: Option<&LoggingConfig>) -> Option<LogConfig> {
-	logging.map(|l| LogConfig {
-		driver: l.driver.clone(),
-		options: l.options.clone(),
+/// Default log rotation applied when a compose file does not carry a
+/// `logging:` block. `k8s-file` is the libpod default since Podman 4; pinning
+/// it explicitly here stops the answer from drifting between podman versions
+/// and distros, and the 10 MB / 5-file shape gives ~50 MB per container —
+/// enough for a week of typical service output, small enough that a runaway
+/// loop will not exhaust the host. The user can override by writing their
+/// own `logging:` in compose.
+pub(crate) fn default_log_config() -> LogConfig {
+	LogConfig {
+		driver: Some("k8s-file".into()),
+		options: [
+			("max-size".to_string(), "10m".to_string()),
+			("max-file".to_string(), "5".to_string()),
+		]
+		.into_iter()
+		.collect(),
+	}
+}
+
+/// Resolve the `logging:` block into libpod's `LogConfig`. An absent compose
+/// `logging:` maps to [`default_log_config`] so every container podup creates
+/// has a rotation policy without the user having to set one. The user's
+/// `Some(LoggingConfig)` value is passed through unchanged.
+pub(crate) fn build_log_config(logging: Option<&LoggingConfig>) -> Option<LogConfig> {
+	Some(match logging {
+		Some(l) => LogConfig {
+			driver: l.driver.clone(),
+			options: l.options.clone(),
+		},
+		None => default_log_config(),
 	})
 }
 
@@ -324,8 +350,13 @@ mod tests {
 	// --- log config ---
 
 	#[test]
-	fn log_config_none_when_absent() {
-		assert!(build_log_config(None).is_none());
+	fn log_config_applies_the_default_when_absent() {
+		// A service with no `logging:` block gets the rotation default so
+		// containers cannot run with unbounded log growth (#1354).
+		let cfg = build_log_config(None).expect("absent -> default, not None");
+		assert_eq!(cfg.driver.as_deref(), Some("k8s-file"));
+		assert_eq!(cfg.options.get("max-size").map(String::as_str), Some("10m"));
+		assert_eq!(cfg.options.get("max-file").map(String::as_str), Some("5"));
 	}
 
 	#[test]
