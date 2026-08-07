@@ -132,6 +132,7 @@ impl ConnPool {
 					return Ok(PoolGuard {
 						conn: Some(conn),
 						pool: self.clone(),
+						transient: false,
 					});
 				}
 				if inner.live_count < self.cap {
@@ -153,6 +154,7 @@ impl ConnPool {
 								poisoned: false,
 							}),
 							pool: self.clone(),
+							transient: false,
 						});
 					}
 					Err(e) => {
@@ -167,7 +169,35 @@ impl ConnPool {
 				}
 			}
 
-			// At cap. Wait for the next release to wake us.
+			// At cap. The cap is a hint for reuse, not a cap on concurrency:
+			// open a transient connection that is NOT tracked in the pool
+			// (no `live_count` increment, no slot to release into). A parallel
+			// caller that exceeds the cap is not throttled — it just does not
+			// reuse a socket. This is the same shape as Go's `http.Transport`,
+			// where `MaxIdleConnsPerHost` caps the idle pool while active
+			// requests can exceed it.
+			match open_one(&self.socket_path).await {
+				Ok((sender, driver)) => {
+					return Ok(PoolGuard {
+						conn: Some(PooledConn {
+							sender,
+							driver,
+							poisoned: false,
+						}),
+						pool: self.clone(),
+						transient: true,
+					});
+				}
+				Err(e) => {
+					// Transient open failed too. Fall through to the wait
+					// path below; a release on the pool side may free a slot
+					// before we re-check.
+					let _ = e;
+				}
+			}
+
+			// Both pool and transient paths exhausted: wait for the next
+			// release to wake us and try again.
 			waiter.as_mut().await;
 		}
 	}
@@ -217,11 +247,20 @@ impl ConnPool {
 	}
 }
 
-/// A pooled connection handed out to a buffered caller. On drop the connection
-/// is returned to the pool (healthy) or discarded (poisoned).
+/// A buffered connection handed out to a caller. On drop the connection is
+/// either returned to the pool (healthy, not transient) or discarded
+/// (poisoned or transient).
+///
+/// `transient` is `true` when the pool was at its cap and the acquire fell
+/// through to a fresh connection that is NOT tracked in the pool's idle
+/// queue. A transient guard is dropped directly — there is no release to
+/// the pool, no count decrement, no wake-up. The cap is a hint for reuse,
+/// not a cap on concurrency: a parallel caller that exceeds it is not
+/// throttled, it just does not get to reuse an idle socket.
 pub(super) struct PoolGuard {
 	conn: Option<PooledConn>,
 	pool: Arc<ConnPool>,
+	transient: bool,
 }
 
 impl PoolGuard {
@@ -243,6 +282,13 @@ impl PoolGuard {
 impl Drop for PoolGuard {
 	fn drop(&mut self) {
 		if let Some(conn) = self.conn.take() {
+			// A transient connection was opened because the pool was at cap;
+			// it was never tracked in `live_count` and there is no slot to
+			// release into. Drop it directly. The background `driver` task
+			// aborts when the socket closes; the `SendRequest` is dropped.
+			if self.transient {
+				return;
+			}
 			self.pool.release(conn);
 		}
 	}
