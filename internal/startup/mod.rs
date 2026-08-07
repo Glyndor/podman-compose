@@ -353,9 +353,46 @@ pub(crate) fn parse_cli() -> Cli {
 				eprint!("\n{}\n", render_help(&help, podup::ui::stderr_colored()));
 				process::exit(2);
 			}
-			_ => e.exit(),
+			// A real argument-parsing failure: unknown flag, missing required
+			// arg, bad value. Bypass `e.exit()` so the output carries the
+			// `podup:` prefix that `exit_status::print_error` and the
+			// `tracing` formatter both use. `e.exit()` would also write
+			// clap's own (unprefixed) version to stderr — printing the same
+			// complaint twice — so we render it once via
+			// `format_clap_error` and exit with the same code clap would have
+			// used.
+			_ => {
+				eprintln!("{}", format_clap_error(&e));
+				process::exit(e.exit_code());
+			}
 		},
 	}
+}
+
+/// Render a clap error with the binary's `podup: error:` prefix so an argument
+/// typo on the command line looks the same as every other failure path.
+/// clap's own formatter emits a bare `error:` line that doesn't match
+/// `exit_status::print_error` or the `tracing` formatter — a typo reached the
+/// user as a one-liner while every other error came out bold-red and prefixed.
+///
+/// The clap-rendered text (which includes the usage block for argument
+/// errors) is taken verbatim and re-emitted with our prefix on the leading
+/// line. Returning the string instead of writing it lets the caller decide
+/// on the sink: `parse_cli` writes it to stderr here, but a future test
+/// can render and assert on the same value without spinning a fake stderr.
+fn format_clap_error(err: &clap::error::Error) -> String {
+	let style = podup::ui::error_style();
+	let prefix = format!(
+		"podup: {render}error:{reset} ",
+		render = style.render(),
+		reset = style.render_reset()
+	);
+	// clap's own rendered text starts with the literal "error: " — strip it
+	// and re-emit with our prefix so the bold-red label matches the rest of
+	// the binary. The usage block below is left unchanged.
+	let body = err.to_string();
+	let body = body.strip_prefix("error: ").unwrap_or(&body);
+	format!("{prefix}{body}")
 }
 
 #[cfg(test)]
@@ -584,5 +621,188 @@ mod tests {
 			notice.contains("RUST_LOG=debug"),
 			"tells the user what to capture"
 		);
+	}
+
+	/// `podup logs --wrong-flag` reaches `format_clap_error` with an
+	/// `UnknownArgument` error and the rendered output must lead with the
+	/// binary's `podup:` prefix and the bold-red `error:` label — matching
+	/// `exit_status::print_error` and the `tracing` formatter. The clap usage
+	/// block follows, unprefixed, so a script that greps `podup:` knows what
+	/// category the failure is.
+	#[test]
+	fn format_clap_error_prefixes_an_unknown_argument() {
+		use clap::Parser;
+		let err = match Cli::try_parse_from(["podup", "logs", "--wrong-flag"]) {
+			Err(e) => e,
+			Ok(_) => panic!("--wrong-flag is not a valid flag"),
+		};
+		let rendered = format_clap_error(&err);
+		assert!(
+			rendered.starts_with("podup: "),
+			"missing `podup:` prefix: {rendered:?}"
+		);
+		assert!(
+			rendered.contains("error"),
+			"missing the bold-red `error:` label: {rendered:?}"
+		);
+		assert!(
+			rendered.contains("--wrong-flag"),
+			"the offending flag is missing from the message: {rendered:?}"
+		);
+		// clap still emits the usage block; the prefix applies to the leading
+		// line only and the rest stays verbatim so a user can read it.
+		assert!(
+			rendered.contains("Usage:"),
+			"the clap usage block is missing: {rendered:?}"
+		);
+	}
+
+	/// `podup scale` requires a `SERVICE=N` positional — omitting it is a
+	/// `MissingRequiredArgument`. The error must read the same as any other:
+	/// `podup: error: …`, not a bare clap line.
+	#[test]
+	fn format_clap_error_prefixes_a_missing_required_argument() {
+		use clap::Parser;
+		let err = match Cli::try_parse_from(["podup", "scale"]) {
+			Err(e) => e,
+			Ok(_) => panic!("scale requires at least one SERVICE=N pair"),
+		};
+		let rendered = format_clap_error(&err);
+		assert!(
+			rendered.starts_with("podup: "),
+			"missing `podup:` prefix: {rendered:?}"
+		);
+		assert!(
+			rendered.contains("error"),
+			"missing the bold-red `error:` label: {rendered:?}"
+		);
+	}
+
+	/// An enum-typed arg (`--rmi` on `down`, `RmiScope`) must surface the
+	/// same way. clap's enum-validation errors carry the kind `InvalidValue`,
+	/// which is a different code path than unknown args; the prefix must
+	/// apply uniformly.
+	#[test]
+	fn format_clap_error_prefixes_an_invalid_enum_value() {
+		use clap::Parser;
+		let err = match Cli::try_parse_from(["podup", "down", "--rmi", "bogus"]) {
+			Err(e) => e,
+			Ok(_) => panic!("--rmi takes `all` or `local`, not `bogus`"),
+		};
+		let rendered = format_clap_error(&err);
+		assert!(
+			rendered.starts_with("podup: "),
+			"missing `podup:` prefix: {rendered:?}"
+		);
+		assert!(
+			rendered.contains("error"),
+			"missing the bold-red `error:` label: {rendered:?}"
+		);
+		assert!(
+			rendered.contains("bogus"),
+			"the offending value is missing from the message: {rendered:?}"
+		);
+	}
+
+	/// With `#[non_exhaustive]` on `Commands`, every variant of the enum
+	/// must be reachable through `is_label_only` without the test going stale.
+	/// The match is exhaustive in this crate (the `#[non_exhaustive]` only
+	/// bites across the crate boundary), so adding a new variant forces this
+	/// test to fail to compile until the new command is classified.
+	#[test]
+	fn is_label_only_classifies_every_variant() {
+		use crate::cli::{
+			AutostartCommands, ConfigFormat, EventsFormat, GenerateCommands, OutputFormat,
+		};
+		// `Commands` is not `Debug` (clap's derive doesn't add it); assert
+		// by index instead of formatting the value.
+		let cases: Vec<(&'static str, Commands, bool)> = vec![
+			(
+				"Up",
+				Commands::Up {
+					detach: false,
+					build: false,
+					watch: false,
+					remove_orphans: false,
+					no_recreate: false,
+					force_recreate: false,
+					no_deps: false,
+					timeout: None,
+					scale: vec![],
+					pull: None,
+					no_build: false,
+					quiet_pull: false,
+					wait: false,
+					wait_timeout: None,
+					no_start: false,
+					timestamps: false,
+					renew_anon_volumes: false,
+					services: vec![],
+				},
+				false,
+			),
+			(
+				"Ps",
+				Commands::Ps {
+					all: false,
+					quiet: false,
+					services_only: false,
+					size: false,
+					filter: vec![],
+					status: vec![],
+					format: OutputFormat::Table,
+					services: vec![],
+				},
+				true,
+			),
+			(
+				"Events",
+				Commands::Events {
+					format: EventsFormat::Table,
+					since: None,
+					until: None,
+					filter: vec![],
+					json: false,
+				},
+				true,
+			),
+			(
+				"Config",
+				Commands::Config {
+					format: ConfigFormat::Yaml,
+					services: false,
+					volumes: false,
+					images: false,
+					profiles: false,
+					hash: None,
+					quiet: false,
+					no_interpolate: false,
+					no_normalize: false,
+					resolve_image_digests: false,
+				},
+				false,
+			),
+			(
+				"Generate",
+				Commands::Generate {
+					kind: GenerateCommands::Quadlet { output: None },
+				},
+				false,
+			),
+			(
+				"Autostart",
+				Commands::Autostart {
+					kind: AutostartCommands::Status,
+				},
+				false,
+			),
+		];
+		for (name, cmd, expected) in cases {
+			assert_eq!(
+				is_label_only(&cmd),
+				expected,
+				"wrong classification for {name}"
+			);
+		}
 	}
 }

@@ -13,6 +13,7 @@ use super::types::{
 };
 
 #[derive(Subcommand)]
+#[non_exhaustive]
 pub(crate) enum Commands {
 	/// Create and start all services.
 	Up {
