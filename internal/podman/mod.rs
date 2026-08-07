@@ -25,6 +25,14 @@ const DEFAULT_PIPE: &str = "//./pipe/podman-machine-default";
 /// 3. The conventional path for this platform, so a failed connection
 ///    reports the location podup expected.
 pub fn connect(socket_path: Option<&str>) -> Result<Client> {
+	connect_with_pool_size(socket_path, Client::DEFAULT_POOL_SIZE)
+}
+
+/// As [`connect`], with a caller-chosen HTTP/1.1 connection-pool size. The
+/// pool is keyed by socket path, so the cap controls the number of
+/// concurrent connections a single [`Client`] will keep open to the socket.
+/// `pool_size` is floored at 1 by [`Client::with_pool_size`].
+pub fn connect_with_pool_size(socket_path: Option<&str>, pool_size: usize) -> Result<Client> {
 	let default_path = default_socket_path();
 	let raw = socket_path.unwrap_or(&default_path);
 	if let Some(scheme) = remote_scheme(raw) {
@@ -38,7 +46,7 @@ pub fn connect(socket_path: Option<&str>) -> Result<Client> {
 		.strip_prefix("unix://")
 		.or_else(|| raw.strip_prefix("npipe://"))
 		.unwrap_or(raw);
-	Ok(Client::new(path))
+	Ok(Client::with_pool_size(path, pool_size))
 }
 
 /// Detect a non-local socket scheme (`tcp://`, `ssh://`, `http(s)://`, `fd://`).
@@ -53,11 +61,17 @@ fn remote_scheme(raw: &str) -> Option<&'static str> {
 /// `npipe://` scheme is stripped by [`connect`]; a remote scheme is rejected
 /// there with a clear error.
 pub fn connect_from_env() -> Result<Client> {
+	connect_from_env_with_pool_size(Client::DEFAULT_POOL_SIZE)
+}
+
+/// As [`connect_from_env`], with a caller-chosen HTTP/1.1 connection-pool
+/// size (see [`connect_with_pool_size`]).
+pub fn connect_from_env_with_pool_size(pool_size: usize) -> Result<Client> {
 	let socket = std::env::var("PODMAN_SOCKET")
 		.or_else(|_| std::env::var("DOCKER_HOST"))
 		.ok();
 
-	connect(socket.as_deref())
+	connect_with_pool_size(socket.as_deref(), pool_size)
 }
 
 #[cfg(not(windows))]
