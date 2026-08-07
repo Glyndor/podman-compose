@@ -46,6 +46,7 @@ pub use query::{
 	PsFilterOptions, PsOptions, DEFAULT_LOG_TAIL,
 };
 mod container_config;
+pub(crate) use container_config::build_log_config;
 #[cfg(test)]
 mod fake_podman;
 mod health;
