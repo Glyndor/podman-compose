@@ -11,6 +11,10 @@ pub enum PodmanError {
 	Hyper(hyper::Error),
 	/// JSON serialization or deserialization error.
 	Json(serde_json::Error),
+	/// A daemon-controlled stream exceeded the client-side byte limit.
+	StreamTooLarge,
+	/// A newline-delimited stream ended with an unterminated record.
+	StreamEndedEarly,
 	/// Podman API returned an error response (4xx/5xx).
 	Api { status: u16, message: String },
 	/// The reachable Podman server speaks a libpod API version below the minimum
@@ -25,6 +29,8 @@ impl fmt::Display for PodmanError {
 			Self::Connect(e) => write!(f, "podman socket connection error: {e}"),
 			Self::Hyper(e) => write!(f, "http error: {e}"),
 			Self::Json(e) => write!(f, "json error: {e}"),
+			Self::StreamTooLarge => write!(f, "stream exceeds the 1048576 byte limit"),
+			Self::StreamEndedEarly => write!(f, "stream ended early"),
 			Self::Api { status, message } => match conflict_hint(message) {
 				Some(hint) => write!(f, "{hint} (podman: {message})"),
 				None => write!(f, "podman API error (HTTP {status}): {message}"),
@@ -91,7 +97,10 @@ impl std::error::Error for PodmanError {
 			Self::Connect(e) => Some(e),
 			Self::Hyper(e) => Some(e),
 			Self::Json(e) => Some(e),
-			Self::Api { .. } | Self::IncompatibleApiVersion { .. } => None,
+			Self::StreamTooLarge
+			| Self::StreamEndedEarly
+			| Self::Api { .. }
+			| Self::IncompatibleApiVersion { .. } => None,
 		}
 	}
 }
@@ -176,6 +185,8 @@ impl PodmanError {
 				_ => "io-other",
 			},
 			Self::Json(_) => "malformed-frame",
+			Self::StreamTooLarge => "stream-too-large",
+			Self::StreamEndedEarly => "stream-ended-early",
 			_ => "other",
 		}
 	}
