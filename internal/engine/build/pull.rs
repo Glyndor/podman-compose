@@ -294,7 +294,15 @@ impl Engine {
 		}
 
 		match pull_err {
-			Some(e) => Err(ComposeError::Build(format!("pull {image} failed: {e}"))),
+			Some(e) => {
+				// Close the row before returning: an unfinished `start` on the
+				// failure path leaves the live board spinning on `Pulling` forever
+				// even though the operation is over (#1347).
+				if !quiet {
+					crate::ui::progress_line("Image", &image, "Failed");
+				}
+				Err(ComposeError::Build(format!("pull {image} failed: {e}")))
+			}
 			None => {
 				if !quiet {
 					crate::ui::progress_line("Image", &image, "Pulled");

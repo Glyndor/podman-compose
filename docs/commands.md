@@ -63,6 +63,15 @@ yellow rather than green — it is not healthy or unhealthy, it is the one podup
 will not delete — and why `autostart status` reports an uninstalled unit dim
 throughout instead of colouring systemd's `not-found` red.
 
+## Defaults
+
+Defaults podup applies when a compose file does not specify them. Override
+each with the compose-spec field shown.
+
+| Compose key | Default | Notes |
+|---|---|---|
+| `logging` | `driver: k8s-file` + `max-size: 10m` + `max-file: 5` | Rotation policy on every container podup creates. Without an explicit `logging:` block, libpod logs would grow unbounded and eventually fill the host. To delegate rotation to journald instead: `logging: { driver: journald }`. To opt out of rotation: `logging: { driver: k8s-file, options: { max-file: "0" } }`. The same default is applied by `generate quadlet`, so a generated unit behaves the same as an `up`-managed container. |
+
 ## Lifecycle
 
 ### `up`
@@ -194,7 +203,7 @@ View container output for the named services (or all).
 | Flag | Description | Default |
 |---|---|---|
 | `-f, --follow` | Stream new output. | off |
-| `-n, --tail <N>` | Show the last N lines. | all |
+| `-n, --tail <N>` | Show the last N lines. `all` opts back into the full stream. | 100 |
 | `--since <TIME>` | Show logs since a timestamp or relative time (e.g. `10m`). | start |
 | `--until <TIME>` | Show logs before a timestamp or relative time. | end |
 | `-t, --timestamps` | Prefix each line with an RFC3339 timestamp. | off |

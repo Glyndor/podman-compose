@@ -219,9 +219,15 @@ fn action_style(action: &str) -> Style {
 	// either way — a container resuming is a thing becoming active, which is what
 	// green means here — but only by falling through, and adding `unpause` to the
 	// yellow arm's prefixes would silently invert it. Naming it pins the intent.
+	// `fail` joins the red arm so a row closing with verb "Failed" reads as a
+	// failure in colour, not just in word (#1347).
 	if a.starts_with("unpaus") {
 		Style::new().fg_color(Some(AnsiColor::Green.into()))
-	} else if a.starts_with("remov") || a.starts_with("kill") || a.starts_with("delet") {
+	} else if a.starts_with("remov")
+		|| a.starts_with("kill")
+		|| a.starts_with("delet")
+		|| a.starts_with("fail")
+	{
 		Style::new().fg_color(Some(AnsiColor::Red.into()))
 	} else if a.starts_with("stop") || a.starts_with("paus") || a.starts_with("restart") {
 		Style::new().fg_color(Some(AnsiColor::Yellow.into()))

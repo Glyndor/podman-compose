@@ -653,9 +653,15 @@ impl Engine {
 			crate::ui::progress::start("Network", &network_name, "Removing");
 			match self.client.delete_existed(&net_path).await {
 				Ok(true) => crate::ui::progress_line("Network", &network_name, "Removed"),
-				Ok(false) => {}
+				// The network was already gone (404) — nothing to do, but the row
+				// has to close, or the live board leaves it spinning on
+				// `Removing` forever (#1347).
+				Ok(false) => crate::ui::progress_line("Network", &network_name, "Absent"),
 				Err(e) => {
 					tracing::warn!("could not remove network {network_name}: {e}");
+					// Close the row visibly — a `down` whose removal genuinely
+					// failed previously hid the failure behind a spinner (#1347).
+					crate::ui::progress_line("Network", &network_name, "Failed");
 					first_err.get_or_insert(crate::error::ComposeError::Podman(e));
 				}
 			}
@@ -694,9 +700,15 @@ impl Engine {
 				crate::ui::progress::start("Volume", &volume_name, "Removing");
 				match self.client.delete_existed(&vol_path).await {
 					Ok(true) => crate::ui::progress_line("Volume", &volume_name, "Removed"),
-					Ok(false) => {}
+					// The volume was already gone (404) — nothing to do, but the
+					// row has to close, or the live board leaves it spinning on
+					// `Removing` forever (#1347).
+					Ok(false) => crate::ui::progress_line("Volume", &volume_name, "Absent"),
 					Err(e) => {
 						tracing::warn!("could not remove volume {volume_name}: {e}");
+						// A `down -v` whose volume removal genuinely failed
+						// previously hid the failure behind a spinner (#1347).
+						crate::ui::progress_line("Volume", &volume_name, "Failed");
 						first_err.get_or_insert(crate::error::ComposeError::Podman(e));
 					}
 				}

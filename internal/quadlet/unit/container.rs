@@ -3,6 +3,7 @@
 use indexmap::IndexMap;
 
 use crate::compose::types::{RestartPolicy, SecretConfig, Service};
+use crate::engine::build_log_config;
 use crate::ports::parse_ports;
 use crate::size::parse_duration_secs;
 
@@ -336,11 +337,16 @@ pub(crate) fn container_unit(
 	for opt in &service.security_opt {
 		map_security_opt(opt, &mut container, name, warnings);
 	}
-	if let Some(logging) = &service.logging {
+	// `build_log_config` substitutes the rotation default when `service.logging`
+	// is None, so an absent `logging:` block in compose still produces a
+	// `LogDriver=` / `LogOpt=` set on the generated unit (#1354). The render
+	// path is the same as the live engine's, so `up` and `generate quadlet`
+	// produce equivalent rotation policy.
+	if let Some(logging) = build_log_config(service.logging.as_ref()) {
 		if let Some(driver) = &logging.driver {
 			container.add("LogDriver", driver.clone());
 		}
-		for (key, val) in sorted_label_pairs(logging.options.clone()) {
+		for (key, val) in sorted_label_pairs(logging.options) {
 			container.add("LogOpt", format!("{key}={val}"));
 		}
 	}

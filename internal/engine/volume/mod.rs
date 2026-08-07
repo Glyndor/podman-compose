@@ -77,8 +77,12 @@ impl Engine {
 				Ok(_) => crate::ui::progress_line("Volume", &volume_name, "Created"),
 				// Podman's libpod volume-create returns 500 (not 409) for an
 				// existing name; treat an already-exists conflict as success so a
-				// re-`up` over an existing named volume stays idempotent.
-				Err(ref e) if e.is_already_exists() => {}
+				// re-`up` over an existing named volume stays idempotent. The
+				// row still needs to close — without an explicit closing verb
+				// the live board leaves it spinning on `Creating` (#1347).
+				Err(ref e) if e.is_already_exists() => {
+					crate::ui::progress_line("Volume", &volume_name, "Exists");
+				}
 				Err(e) => return Err(ComposeError::Podman(e)),
 			}
 		}

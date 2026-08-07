@@ -4,11 +4,22 @@
 //! Reached via the catch-all arm in [`super::dispatch`]; the arms here move
 //! their fields exactly as before.
 
-use podup::{Engine, StatsOptions};
+use podup::{Engine, StatsOptions, DEFAULT_LOG_TAIL};
 
 use crate::cli::*;
 
 use super::profile_filtered;
+
+/// Substitute the CLI default for `--tail` when the user did not pass one.
+///
+/// `docker compose logs` defaults to "all lines from the start"; podup's CLI
+/// defaults to the last [`DEFAULT_LOG_TAIL`] lines (see the constant's doc for
+/// why). The library `LogsOptions` stays at "None = all" so helmly-agent and
+/// any other direct caller keeps its current behaviour; the change happens at
+/// the CLI boundary. `--tail all` is the user's explicit opt-in to "all".
+fn cli_logs_tail_default(tail: Option<String>) -> Option<String> {
+	Some(tail.unwrap_or_else(|| DEFAULT_LOG_TAIL.to_string()))
+}
 
 /// Handle the commands not matched in [`super::dispatch`]. Behaviour-preserving
 /// continuation of the same match (the arms are a verbatim move).
@@ -236,7 +247,7 @@ pub(super) async fn dispatch_rest(
 					&services,
 					podup::LogsOptions {
 						follow,
-						tail,
+						tail: cli_logs_tail_default(tail),
 						since,
 						until,
 						timestamps,
@@ -312,4 +323,30 @@ pub(super) async fn dispatch_rest(
 	}
 
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::cli_logs_tail_default;
+
+	/// The CLI default is bounded. Without `--tail`, the dispatch substitutes
+	/// the constant so the wire query carries `&tail=100`. Library callers that
+	/// build `LogsOptions` directly keep `None` (= all) — see the issue.
+	#[test]
+	fn cli_logs_tail_default_substitutes_the_bounded_default_when_missing() {
+		assert_eq!(cli_logs_tail_default(None).as_deref(), Some("100"));
+	}
+
+	/// `--tail all` and `--tail <N>` are user intent and pass through unchanged.
+	#[test]
+	fn cli_logs_tail_default_preserves_an_explicit_value() {
+		assert_eq!(
+			cli_logs_tail_default(Some("all".into())).as_deref(),
+			Some("all")
+		);
+		assert_eq!(
+			cli_logs_tail_default(Some("42".into())).as_deref(),
+			Some("42")
+		);
+	}
 }

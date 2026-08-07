@@ -43,9 +43,10 @@ fn wants_interactive_with(no_tty: bool, detach: bool, stdin_tty: bool, stdout_tt
 
 pub use query::{
 	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsDisplayOptions,
-	PsFilterOptions, PsOptions,
+	PsFilterOptions, PsOptions, DEFAULT_LOG_TAIL,
 };
 mod container_config;
+pub(crate) use container_config::build_log_config;
 #[cfg(test)]
 mod fake_podman;
 mod health;
