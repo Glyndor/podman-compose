@@ -296,3 +296,67 @@ async fn open_one(socket_path: &str) -> Result<(http1::SendRequest<BoxBody>, Joi
 
 #[cfg(test)]
 mod tests;
+
+// ---------------------------------------------------------------------------
+// Client construction / introspection
+// ---------------------------------------------------------------------------
+//
+// These methods live here (not in `mod.rs`) so the `Client` impl block in
+// the parent module stays within the 500-line file cap. They are part of the
+// public libpod API; re-exporting them on `Client` is intentional.
+
+use super::Client;
+
+impl Client {
+	/// Default per-socket pool size used by [`Client::new`](Self::new). See
+	/// [`Client::with_pool_size`](Self::with_pool_size) to tune.
+	pub const DEFAULT_POOL_SIZE: usize = DEFAULT_POOL_SIZE;
+
+	/// Create a client bound to the given Podman socket path (or named pipe),
+	/// using the default connection pool size
+	/// ([`Client::DEFAULT_POOL_SIZE`](Self::DEFAULT_POOL_SIZE)).
+	pub fn new(socket_path: impl Into<String>) -> Self {
+		Self::with_pool_size(socket_path, Self::DEFAULT_POOL_SIZE)
+	}
+
+	/// Create a client bound to the given Podman socket path, holding up to
+	/// `pool_size` concurrent HTTP/1.1 connections for reuse. Streaming
+	/// endpoints always take a dedicated connection outside this cap.
+	///
+	/// `pool_size` is floored at 1; a zero value would deadlock the first
+	/// acquire rather than fail loud.
+	pub fn with_pool_size(socket_path: impl Into<String>, pool_size: usize) -> Self {
+		let socket_path = socket_path.into();
+		let pool = ConnPool::new(socket_path.clone(), pool_size);
+		Self {
+			socket_path,
+			pool,
+			streaming: Mutex::new(Vec::new()),
+		}
+	}
+
+	/// The configured maximum number of live (idle + in-use) buffered
+	/// connections kept to the socket. Streaming connections are tracked on
+	/// the same socket but do not count against this cap.
+	pub fn pool_size(&self) -> usize {
+		// Exposed via the public `ConnPool` so the field stays `pub(crate)`;
+		// callers asking for the cap should not need internal access.
+		self.pool_cap()
+	}
+
+	/// Internal accessor for the pool cap. Kept separate so the public
+	/// `pool_size` does not have to expose the pool type.
+	fn pool_cap(&self) -> usize {
+		// `ConnPool::cap` is set at construction and never mutated, so a
+		// relaxed read of the field through `Arc` is sufficient.
+		self.pool.cap()
+	}
+
+	/// Test-only access to the underlying [`ConnPool`]. Lets the pool's tests
+	/// exercise `acquire` / `poison` directly without routing a real request.
+	#[cfg(any(test, feature = "test-helpers"))]
+	#[allow(dead_code)]
+	pub(crate) fn pool_for_tests(&self) -> &Arc<ConnPool> {
+		&self.pool
+	}
+}
