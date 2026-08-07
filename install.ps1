@@ -136,27 +136,42 @@ try {
 		if ($python) {
 			$pyScript = Join-Path $TmpDir 'verify_ed25519.py'
 			# Python source - indentation is significant, keep as-is.
+			# Exit codes: 0 verified, 1 signature present but INVALID (tampered),
+			# 2 unused on this path (no python3/cryptography already handled
+			# above), 3 the configured release key is malformed (a configuration
+			# problem, kept distinct from rc=1 so the caller can report it
+			# without scaring the user about the release).
 			$pySource = @'
-import base64, sys
+import base64, binascii, sys
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
 sig_file, data_file = sys.argv[1], sys.argv[2]
 sig = open(sig_file, "rb").read()
 data = open(data_file, "rb").read()
-for pubkey_b64 in sys.argv[3:]:
+for slot, pubkey_b64 in enumerate(sys.argv[3:]):
     try:
-        Ed25519PublicKey.from_public_bytes(base64.b64decode(pubkey_b64 + "==")).verify(sig, data)
+        # Pad to a 4-byte boundary the way sign.py does: the installer stores
+        # the key unpadded, and a stricter decoder would reject a fixed two-"="
+        # suffix when the key is already a multiple of four chars long.
+        raw = base64.b64decode(pubkey_b64 + "=" * (-len(pubkey_b64) % 4))
+        Ed25519PublicKey.from_public_bytes(raw).verify(sig, data)
         sys.exit(0)
-    except (InvalidSignature, ValueError):
+    except (binascii.Error, ValueError) as exc:
+        print("configured release key slot %d is malformed: %s" % (slot, exc), file=sys.stderr)
+        sys.exit(3)
+    except InvalidSignature:
         continue
 sys.exit(1)
 '@
 			Set-Content -Path $pyScript -Value $pySource -Encoding ASCII
 			$pyArgs = $python.Pre + @($pyScript, $sigPath, $sumsPath) + $PubKeys
 			& $python.Exe @pyArgs
-			if ($LASTEXITCODE -eq 0) {
+			$pyExit = $LASTEXITCODE
+			if ($pyExit -eq 0) {
 				Write-LogOk 'SHA256SUMS signature verified'
 				$verified = $true
+			} elseif ($pyExit -eq 3) {
+				Fail 'Configured release key is malformed - check PODUP_RELEASE_PUBKEY_B64 / PODUP_RELEASE_PUBKEY2_B64 environment variables and re-run'
 			} else {
 				Fail 'SHA256SUMS signature verification failed - release may be tampered'
 			}

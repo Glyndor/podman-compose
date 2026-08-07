@@ -121,30 +121,48 @@ PUBKEYS=()
 
 # Verify the Ed25519 signature over SHA256SUMS.
 #   ed25519_verify <sig-file> <data-file>
-# Exit: 0 verified, 1 signature present but INVALID (tampered), 2 cannot verify.
+# Exit: 0 verified, 1 signature present but INVALID (tampered),
+#       2 cannot verify (no python3/cryptography, no key configured),
+#       3 the configured release key is malformed (a configuration problem,
+#         not a release-tampering problem - kept distinct from rc=1 so the
+#         caller can report it without scaring the user about the release).
 ed25519_verify() {
 	[[ ${#PUBKEYS[@]} -gt 0 ]] || return 2
 	command -v python3 >/dev/null 2>&1 || return 2
 	python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" 2>/dev/null || return 2
-	if python3 - "$1" "$2" "${PUBKEYS[@]}" <<'PYEOF'
-import base64, sys
+	python3 - "$1" "$2" "${PUBKEYS[@]}" <<'PYEOF'
+import base64, binascii, sys
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
 sig_file, data_file = sys.argv[1], sys.argv[2]
 sig = open(sig_file, "rb").read()
 data = open(data_file, "rb").read()
-for pubkey_b64 in sys.argv[3:]:
+for slot, pubkey_b64 in enumerate(sys.argv[3:]):
     try:
-        Ed25519PublicKey.from_public_bytes(base64.b64decode(pubkey_b64 + "==")).verify(sig, data)
+        # Pad to a 4-byte boundary the way sign.py does: the installer stores
+        # the key unpadded, and a stricter decoder would reject a fixed two-"="
+        # suffix when the key is already a multiple of four chars long.
+        raw = base64.b64decode(pubkey_b64 + "=" * (-len(pubkey_b64) % 4))
+        Ed25519PublicKey.from_public_bytes(raw).verify(sig, data)
         sys.exit(0)
-    except (InvalidSignature, ValueError):
+    except (binascii.Error, ValueError) as exc:
+        # The key is set but cannot be decoded into 32 bytes. This is a
+        # configuration problem (a bad PODUP_RELEASE_PUBKEY*_B64 override), not
+        # a release-tampering problem - do not lump it in with rc=1.
+        print(f"configured release key slot {slot} is malformed: {exc}", file=sys.stderr)
+        sys.exit(3)
+    except InvalidSignature:
         continue
 sys.exit(1)
 PYEOF
-	then
-		return 0
-	fi
-	return 1
+	# Preserve the Python exit code: 0 verified, 3 malformed key, 1 mismatch.
+	# An `if/then/return 1` wrapper would fold rc=3 into rc=1, defeating the
+	# L7 distinction the install.ps1 side already exposes.
+	case $? in
+		0) return 0 ;;
+		3) return 3 ;;
+		*) return 1 ;;
+	esac
 }
 
 # Confirm a downloaded file matches its entry in SHA256SUMS.
@@ -193,6 +211,7 @@ install_apt() {
 		0) log_ok "Keyring signature verified" ;;
 		1) fail "Keyring signature verification failed - aborting (package may be tampered)" ;;
 		2) fail "Cannot verify keyring signature: install python3 with the 'cryptography' package (and a configured release key) - aborting" ;;
+		3) fail "Configured release key is malformed - check PODUP_RELEASE_PUBKEY_B64 / _PUBKEY2_B64 values and re-run" ;;
 	esac
 
 	run_root dpkg -i "${TMP_DIR}/${kr}"
@@ -235,6 +254,7 @@ install_binary() {
 release signature against the pinned key. Install it and re-run."
 			fi
 			;;
+		3) fail "Configured release key is malformed - check PODUP_RELEASE_PUBKEY_B64 / _PUBKEY2_B64 values and re-run" ;;
 	esac
 
 	# Build-provenance attestation: proves the binary was produced by this repo's
