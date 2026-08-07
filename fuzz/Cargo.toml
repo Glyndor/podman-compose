@@ -49,3 +49,10 @@ path = "fuzz_targets/stream_frame.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "stream_ndjson"
+path = "fuzz_targets/stream_ndjson.rs"
+test = false
+doc = false
+bench = false

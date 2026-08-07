@@ -77,6 +77,12 @@ impl Client {
 /// swallow part of the command's output into its own buffer, and that output
 /// belongs to the caller. Slow, but the head is a few hundred bytes and it only
 /// happens once per exec.
+///
+/// A peer that never sends the head terminator is drained up to
+/// [`MAX_HEAD_BYTES`] and reported with the bytes it actually sent, rather
+/// than failing the read at the first byte. That keeps a hostile or buggy
+/// daemon from forcing the per-byte rejection path while the bytes it sent
+/// stay in the diagnostic.
 async fn read_response_head<S: AsyncRead + Unpin>(stream: &mut S) -> Result<u16> {
 	use tokio::io::AsyncReadExt;
 
@@ -86,17 +92,24 @@ async fn read_response_head<S: AsyncRead + Unpin>(stream: &mut S) -> Result<u16>
 		if head.len() >= MAX_HEAD_BYTES {
 			return Err(PodmanError::Api {
 				status: 0,
-				message: "exec start response head exceeded its limit".to_string(),
+				message: format!(
+					"exec start response head exceeded its limit ({} bytes read)",
+					head.len()
+				),
 			});
 		}
-		let n = stream.read(&mut byte).await?;
-		if n == 0 {
-			return Err(PodmanError::Api {
-				status: 0,
-				message: "connection closed before the exec start response".to_string(),
-			});
+		match stream.read(&mut byte).await? {
+			0 => {
+				return Err(PodmanError::Api {
+					status: 0,
+					message: format!(
+						"connection closed before the exec start response ({} bytes read)",
+						head.len()
+					),
+				});
+			}
+			_ => head.push(byte[0]),
 		}
-		head.push(byte[0]);
 	}
 
 	let text = String::from_utf8_lossy(&head);
@@ -157,5 +170,29 @@ mod tests {
 
 		let client = Client::new(sock.to_string_lossy().to_string());
 		assert!(client.post_hijack("/exec/abc/start", b"{}").await.is_err());
+	}
+
+	/// A peer that never sends the head terminator is drained up to
+	/// [`MAX_HEAD_BYTES`] and reported, not just rejected at the first byte.
+	#[tokio::test]
+	async fn a_head_without_terminator_drains_then_errors() {
+		let dir = tempfile::tempdir().unwrap();
+		let sock = dir.path().join("s.sock");
+		let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+		let payload = vec![b'A'; MAX_HEAD_BYTES];
+		tokio::spawn(async move {
+			if let Ok((mut c, _)) = listener.accept().await {
+				use tokio::io::AsyncWriteExt;
+				let _ = c.write_all(&payload).await;
+			}
+		});
+
+		let client = Client::new(sock.to_string_lossy().to_string());
+		let err = client
+			.post_hijack("/exec/abc/start", b"{}")
+			.await
+			.expect_err("an endless head must not yield a stream");
+		assert!(err.is_status(0), "got {err:?}");
+		assert!(format!("{err}").contains("response head exceeded its limit"));
 	}
 }

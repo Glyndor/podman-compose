@@ -148,7 +148,52 @@ async fn cli_logs_keeps_container_stdout_and_stderr_apart() {
 	);
 }
 
-/// `attach_logs_streams_container_output` names the content and cannot read it.
+/// The wire-format correction from #1365: the libpod log stream is the 8-byte
+/// `[stream_type][3 pad bytes][size_big_endian: u32]` frame Docker uses, and a
+/// `logs` invocation must demultiplex both streams from a real daemon. Reading
+/// just the visible line is the easy half; checking the service prefix is the
+/// harder half and the one the parser only gets right when the size field is
+/// interpreted as a `u32`, not the four bytes it would have read as before.
+#[tokio::test]
+async fn cli_logs_demuxes_eight_byte_frames_from_a_real_daemon() {
+	if super::podman().await.is_none() {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("docker-compose.yml");
+	let proj = format!("t{}-lgframe", std::process::id());
+	fs::write(
+		&compose,
+		"services:\n  chatty:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"printf 'on-stdout\\\\n'; printf 'on-stderr\\\\n' 1>&2; sleep infinity\"]\n",
+	)
+	.unwrap();
+	let c = compose.to_str().unwrap();
+
+	Command::new(bin())
+		.args(["-f", c, "-p", &proj, "up", "--detach"])
+		.output()
+		.unwrap();
+	let logs = Command::new(bin())
+		.args(["-f", c, "-p", &proj, "logs"])
+		.output()
+		.unwrap();
+	Command::new(bin())
+		.args(["-f", c, "-p", &proj, "down"])
+		.output()
+		.unwrap();
+
+	assert!(logs.status.success(), "logs failed: {:?}", logs.stderr);
+	let out = String::from_utf8_lossy(&logs.stdout);
+	let err = String::from_utf8_lossy(&logs.stderr);
+	assert!(
+		out.contains("chatty-1 | on-stdout"),
+		"a stdout frame landed somewhere other than podup's stdout: {out:?}"
+	);
+	assert!(
+		err.contains("chatty-1 | on-stderr"),
+		"a stderr frame landed somewhere other than podup's stderr: {err:?}"
+	);
+}
 /// An attached `up` (no `--detach`) is where that content is reachable.
 #[tokio::test]
 async fn cli_attached_up_carries_the_container_output() {

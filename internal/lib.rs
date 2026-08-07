@@ -72,5 +72,8 @@ pub use libpod::Client;
 #[cfg(feature = "test-helpers")]
 pub mod fuzz_api {
 	pub use crate::dotenv::parse as dotenv_parse;
-	pub use crate::libpod::types::stream::{parse_frame, take_json_line};
+	pub use crate::libpod::types::stream::{
+		parse_frame, record_stream_bytes, take_json_line, MAX_STREAM_BUF,
+	};
+	pub use crate::libpod::PodmanError;
 }
