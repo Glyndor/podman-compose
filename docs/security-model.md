@@ -123,6 +123,37 @@ The `podup update` mechanism and its release trust chain — the embedded Ed2551
 keys, the verify-before-install flow, key rotation, and independent/offline
 verification — are documented in [self-update.md](self-update.md).
 
+### Installer error classification
+
+`install.sh` and `install.ps1` distinguish two failure modes that share the
+same high-level symptom (a signature check that didn't pass) but have
+different remedies:
+
+- **Release-tampering (rc=1 / `Fail`)**: every embedded key rejected the
+  signature. Treat as a release-side problem: do not retry, do not bypass.
+- **Configuration problem (rc=3 / `Fail`)**: at least one embedded key was
+  set but could not be decoded into a 32-byte Ed25519 point — a malformed
+  `PODUP_RELEASE_PUBKEY_B64` / `PODUP_RELEASE_PUBKEY2_B64` (or, with a
+  third rotation slot, `PODUP_RELEASE_PUBKEY3_B64`) override, a stray
+  whitespace, a non-base64 character. The release itself may be fine; the
+  user-side configuration needs correcting.
+
+Both fail closed. The split exists so a configuration problem isn't reported
+as "release may be tampered", which would push a fork maintainer to debug the
+wrong side. The release-time verifier in `.github/scripts/verify-signing-key.py`
+uses the same exit-code scheme.
+
+### Per-asset .sig verification
+
+Every detached signature in a release is verified against the keys
+`install.sh` ships — not just `SHA256SUMS.sig`. Per-binary, per-deb, per-SBOM
+and per-installer signatures are checked at release time (CI step "Verify every
+signature against the keys consumers embed") and the installers themselves
+verify the per-asset signature of whatever they fetch. A per-binary
+substitution is the failure mode `SHA256SUMS` cannot catch: the manifest can be
+re-signed to match the swapped binary, so trusting `SHA256SUMS.sig` alone
+leaves a hole. The per-asset loop closes it.
+
 ## Reporting
 
 Report vulnerabilities privately via the repository's **Security tab → Report a

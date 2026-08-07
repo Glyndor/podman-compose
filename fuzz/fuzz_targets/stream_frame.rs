@@ -9,12 +9,24 @@ use bytes::BytesMut;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-	// Multiplexed frame parsing over arbitrary bytes: drain every complete
-	// frame the input contains, mirroring the streaming reassembly loop.
 	let mut frame_buf = BytesMut::from(data);
-	while podup::fuzz_api::parse_frame(&mut frame_buf).is_some() {}
+	loop {
+		match podup::fuzz_api::parse_frame(&mut frame_buf) {
+			Ok(Some(_)) => {}
+			Ok(None) => break,
+			Err(podup::fuzz_api::PodmanError::StreamTooLarge) => break,
+			Err(error) => panic!("unexpected stream parser error: {error:?}"),
+		}
+	}
 
-	// Line splitter: drain every complete line the input contains.
+	let mut oversized_header = BytesMut::from(&[
+		0x01, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+	][..]);
+	assert!(matches!(
+		podup::fuzz_api::parse_frame(&mut oversized_header),
+		Err(podup::fuzz_api::PodmanError::StreamTooLarge)
+	));
+
 	let mut buf = BytesMut::from(data);
 	while podup::fuzz_api::take_json_line(&mut buf).is_some() {}
 });
