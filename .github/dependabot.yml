@@ -16,3 +16,18 @@ updates:
     labels: ["type:deps"]
     open-pull-requests-limit: 10
     target-branch: "develop"
+
+  - package-ecosystem: "pip"
+    directory: "/.github/scripts"
+    # The release-signing scripts (`.github/scripts/sign.py`,
+    # `verify-signing-key.py`) pull `cryptography` from this manifest. Without
+    # this entry, Dependabot only surfaces the ecosystem via the manual
+    # GitHub security-scan alert -- GitHub found `cryptography 48.0.1` only
+    # because CVE-2026-69247 matched a fingerprint, not because Dependabot
+    # tracks the file. Adding the ecosystem here brings it in the daily
+    # rotation that the cargo and github-actions ecosystems already have.
+    schedule:
+      interval: "daily"
+    labels: ["type:deps", "type:ci"]
+    open-pull-requests-limit: 10
+    target-branch: "develop"
