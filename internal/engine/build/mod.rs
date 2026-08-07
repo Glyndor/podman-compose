@@ -283,17 +283,20 @@ impl Engine {
 		let cachefrom = if build.cache_from().is_empty() {
 			None
 		} else {
-			Some(serde_json::to_string(build.cache_from()).unwrap_or_default())
+			Some(super::to_query_json(
+				"build.cache_from",
+				&build.cache_from(),
+			)?)
 		};
 		let buildargs_json = if build_args.is_empty() {
 			None
 		} else {
-			Some(serde_json::to_string(&build_args).unwrap_or_default())
+			Some(super::to_query_json("build.args", &build_args)?)
 		};
 		let labels_json = if labels.is_empty() {
 			None
 		} else {
-			Some(serde_json::to_string(&labels).unwrap_or_default())
+			Some(super::to_query_json("build.labels", &labels)?)
 		};
 
 		let mut qs = format!(
@@ -330,11 +333,11 @@ impl Engine {
 			qs.push_str(&format!("&target={}", urlencoded(target)));
 		}
 		if !secret_specs.is_empty() {
-			let json = serde_json::to_string(&secret_specs).unwrap_or_default();
+			let json = super::to_query_json("build.secrets", &secret_specs)?;
 			qs.push_str(&format!("&secrets={}", urlencoded(&json)));
 		}
 		if !build.cache_to().is_empty() {
-			let json = serde_json::to_string(build.cache_to()).unwrap_or_default();
+			let json = super::to_query_json("build.cache_to", &build.cache_to())?;
 			qs.push_str(&format!("&cacheto={}", urlencoded(&json)));
 		}
 		for (name, value) in build.additional_contexts() {
