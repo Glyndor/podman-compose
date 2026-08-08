@@ -311,9 +311,11 @@ fn generate_quadlet_no_warn_suppresses_the_warnings() {
 
 #[test]
 fn generate_quadlet_no_warn_without_modes_is_silent() {
-	// Sanity: `--no-warn` against a clean compose file produces no warning
-	// output at all, so the suppression does not introduce a regression for
-	// the no-host-mode case.
+	// Sanity: `--no-warn` against a clean compose file produces no
+	// host-binding / privilege-escalation warning. (The Quadlet path also
+	// emits an unrelated platform advisory on non-Linux hosts — that is not
+	// gated on `--no-warn` and is intentionally left alone, so the assertion
+	// filters to the host-binding lines only.)
 	let (_dir, file) = compose_file(
 		"compose.yaml",
 		"services:\n  web:\n    image: alpine:3.19\n",
@@ -331,8 +333,19 @@ fn generate_quadlet_no_warn_without_modes_is_silent() {
 		.expect("run podup --no-warn generate quadlet");
 	assert!(out.status.success(), "{:?}", out.stderr);
 	let stderr = String::from_utf8_lossy(&out.stderr);
-	assert!(
-		!stderr.contains("podup: warning:"),
-		"a clean compose + --no-warn must be silent on stderr; got:\n{stderr}"
-	);
+	for needle in [
+		"network_mode: host",
+		"privileged: true",
+		"pid: host",
+		"ipc: host",
+		"uts: host",
+		"cgroup: host",
+		"userns_mode: host",
+		"container:",
+	] {
+		assert!(
+			!stderr.contains(needle),
+			"--no-warn must silence the {needle} warning; got stderr:\n{stderr}"
+		);
+	}
 }
