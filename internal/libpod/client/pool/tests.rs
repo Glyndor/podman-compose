@@ -101,12 +101,14 @@ impl Drop for CountingServer {
 	}
 }
 
-/// Sequential requests on a single Client must ride the same connection — the
-/// pool's whole reason to exist. 100 calls → 1 accepted connection.
+/// With the pool enabled (cap > 0), sequential requests ride a single
+/// connection — the pool's whole reason to exist. 100 calls → 1 accepted
+/// connection. The default cap is 0 (no pool), so this test constructs
+/// the client with a non-zero cap to exercise the reuse path.
 #[tokio::test]
 async fn sequential_requests_reuse_a_single_connection() {
 	let server = CountingServer::start().await;
-	let client = crate::libpod::Client::new(server.sock_str());
+	let client = crate::libpod::Client::with_pool_size(server.sock_str(), 8);
 	for _ in 0..100 {
 		let _: serde_json::Value = client.get_json("/libpod/_ping").await.unwrap();
 	}
@@ -233,11 +235,13 @@ async fn pool_size_reflects_the_configured_cap() {
 	assert_eq!(c2.pool_size(), crate::libpod::Client::DEFAULT_POOL_SIZE);
 }
 
-/// A pool size of zero is floored to one so the first acquire cannot deadlock.
+/// A pool size of zero is the default and means "no pool": every acquire
+/// opens a fresh connection. This is the previous, proven behaviour
+/// and is what the live-Podman lane regression test relies on.
 #[tokio::test]
-async fn zero_pool_size_is_floored_to_one() {
+async fn zero_pool_size_means_no_pool() {
 	let c = crate::libpod::Client::with_pool_size("/tmp/none.sock", 0);
-	assert_eq!(c.pool_size(), 1);
+	assert_eq!(c.pool_size(), 0);
 }
 
 /// Forcibly drop a pooled connection by poisoning it, then verify the next

@@ -33,10 +33,14 @@ use super::stream::SocketStream;
 use super::{BoxBody, PodmanError, Result};
 
 /// Default cap on the number of live (idle + in-use) buffered connections held
-/// to a single libpod socket. Tunable via
-/// [`Client::with_pool_size`](super::Client::with_pool_size) or the
-/// `--connection-pool-size` CLI flag.
-pub(super) const DEFAULT_POOL_SIZE: usize = 8;
+/// to a single libpod socket. **The pool is opt-in**: a cap of `0` (the
+/// default) means "no pool", and every acquire opens a fresh connection.
+/// This is the previous behaviour and is what the live-Podman lane
+/// regression test relied on. To opt in to connection reuse, set the
+/// `--connection-pool-size` CLI flag or `PODUP_LIBCOD_POOL` env to a
+/// positive value. Tunable via
+/// [`Client::with_pool_size`](super::Client::with_pool_size).
+pub(super) const DEFAULT_POOL_SIZE: usize = 0;
 
 /// One pooled HTTP/1.1 connection.
 ///
@@ -75,16 +79,16 @@ pub(crate) struct ConnPool {
 
 impl ConnPool {
 	/// Build a fresh pool bound to `socket_path` that may hold up to `cap`
-	/// concurrent buffered connections.
+	/// concurrent buffered connections. A cap of `0` means "no pool": every
+	/// acquire opens a fresh connection and drops it on release. The cap is
+	/// a hint for reuse, not a cap on concurrency: a parallel caller that
+	/// exceeds it is not throttled.
 	pub(super) fn new(socket_path: String, cap: usize) -> Arc<Self> {
-		// A zero cap would deadlock the first acquire. Floor it at one so a
-		// pathological tuning value cannot make the client unusable.
-		let cap = cap.max(1);
 		Arc::new(Self {
 			socket_path,
 			cap,
 			inner: Mutex::new(PoolInner {
-				idle: VecDeque::with_capacity(cap),
+				idle: VecDeque::with_capacity(cap.max(1)),
 				live_count: 0,
 				closed: false,
 			}),
@@ -98,10 +102,34 @@ impl ConnPool {
 		self.cap
 	}
 
-	/// Acquire a buffered connection: hand out an idle one if available, open
-	/// a fresh one if the pool is below the cap, or wait for a release
-	/// otherwise.
+	/// Acquire a buffered connection. Three paths:
+	///
+	/// - `cap == 0` (the default, "no pool"): open a fresh connection and
+	///   return a transient guard that drops on release. This is the
+	///   pre-pool behaviour: every request opens a connection, every
+	///   release drops it.
+	/// - `cap > 0` and an idle connection is available: hand it out.
+	/// - `cap > 0` and no idle connection: open a fresh one and track it
+	///   in the pool. If the pool is at its cap, open a transient
+	///   connection (not tracked) instead — the cap is a hint for idle
+	///   reuse, not a cap on concurrency.
 	pub(super) async fn acquire(self: &Arc<Self>) -> Result<PoolGuard> {
+		// No-pool short-circuit. The pool is opt-in (a cap of 0 means
+		// disabled). Every acquire opens a fresh connection that is dropped
+		// on release — the previous, proven behaviour.
+		if self.cap == 0 {
+			let (sender, driver) = open_one(&self.socket_path).await?;
+			return Ok(PoolGuard {
+				conn: Some(PooledConn {
+					sender,
+					driver,
+					poisoned: false,
+				}),
+				pool: self.clone(),
+				transient: true,
+			});
+		}
+
 		loop {
 			// Register interest BEFORE checking state so a release that fires
 			// while we hold the lock cannot miss us: `Notify::notified` returns
