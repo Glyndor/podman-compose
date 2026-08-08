@@ -146,7 +146,15 @@ impl Engine {
 	/// and we send `kill?signal=SIGKILL` so podup never depends solely on the
 	/// server honouring `?t`. 304/404 are idempotent no-ops, as in
 	/// [`run_lifecycle_op`](Self::run_lifecycle_op).
-	pub(super) async fn stop_container(&self, container: &str, grace: i32) -> Result<()> {
+	///
+	/// Returns `Ok(true)` when the container actually transitioned (or its
+	/// state was re-confirmed via the drop-recheck path) and `Ok(false)` when
+	/// libpod said it was already stopped/gone. The bool lets
+	/// [`Self::stop_one_service`] keep its `acted` flag accurate now that it no
+	/// longer filters by per-container state itself — the bulk container-list
+	/// helper returns names without states, so the transition bit has to come
+	/// from the response (#1363).
+	pub(super) async fn stop_container(&self, container: &str, grace: i32) -> Result<bool> {
 		let path = format!(
 			"{API_PREFIX}/containers/{}/stop?t={}",
 			crate::libpod::urlencoded(container),
@@ -159,19 +167,19 @@ impl Engine {
 		{
 			Ok(()) => {
 				crate::ui::progress_line("Container", container, "Stopped");
-				Ok(())
+				Ok(true)
 			}
 			Err(e) if e.is_status(304) || e.is_status(404) => {
 				tracing::debug!("{container}: stop skipped ({e})");
-				Ok(())
+				Ok(false)
 			}
 			// `stop` is one of the four state-changing calls the drops were
 			// measured on (#1339), and it does not go through `run_lifecycle_op`,
 			// so it needs the re-check on its own.
-			Err(e) if e.is_incomplete_message() => self
-				.confirm_lost_response(container, "Stopped", LifecycleGoal::NotRunning, e)
-				.await
-				.map(|_| ()),
+			Err(e) if e.is_incomplete_message() => {
+				self.confirm_lost_response(container, "Stopped", LifecycleGoal::NotRunning, e)
+					.await
+			}
 			Err(e) if e.is_timeout() => {
 				tracing::warn!(
 					"{container}: stop did not complete within the grace window; escalating to SIGKILL"
@@ -187,12 +195,12 @@ impl Engine {
 							container,
 							"Killed (after stop timeout)",
 						);
-						Ok(())
+						Ok(true)
 					}
 					// Already gone / not running between the timeout and the kill.
 					Err(e) if e.is_status(404) || e.is_status(409) => {
 						tracing::debug!("{container}: SIGKILL skipped ({e})");
-						Ok(())
+						Ok(false)
 					}
 					Err(e) => Err(ComposeError::Podman(e)),
 				}
@@ -231,6 +239,12 @@ impl Engine {
 			restart_set.contains(n)
 		});
 
+		// Prefetch every project container once and group by service, instead of
+		// one container-list round-trip per service (S+1 → 1 for the level walk;
+		// #1363). The bulk helper returns all project containers, not just the
+		// running ones, so a restart that lands on a stopped replica starts it.
+		let live_by_service = self.live_project_replicas().await?;
+
 		// Attempt every service and surface the first error (in service order) at
 		// the end rather than aborting mid-batch and leaving later services
 		// unrestarted.
@@ -239,12 +253,14 @@ impl Engine {
 		for level in &levels {
 			let futs = level.iter().map(|name| {
 				let service = &file.services[name];
+				let grace = self.grace_period_secs(service);
 				let done = if targets.contains(name) {
 					"Restarted"
 				} else {
 					"Restarted (dependency)"
 				};
-				self.restart_one_service(name, service, done, &acted)
+				let names = live_by_service.get(name).cloned().unwrap_or_default();
+				self.restart_one_service(names, grace, done, &acted)
 			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				first_err.get_or_insert(e);
@@ -374,16 +390,25 @@ impl Engine {
 		levels.reverse();
 		let levels = filter_levels(file, levels, target_services)?;
 
-		// Enumerate only the containers Podman actually has (no static-name
-		// fallback): a defined-but-never-created service is a quiet no-op rather
-		// than a phantom stop. Report "stopped" solely for containers actually
-		// running/paused — stopping a Created/Exited one is a harmless no-op and
-		// must not claim it stopped (#876), matching docker compose.
+		// Prefetch every project container once and group by service, instead of
+		// one container-list round-trip per service (S+1 → 1 for the level walk;
+		// #1363). The bulk helper returns every project's containers regardless
+		// of state (with `all=true`); the per-container `acted` flag still has to
+		// come from the `stop` response itself now that we no longer filter
+		// running/paused client-side.
+		let live_by_service = self.live_project_replicas().await?;
+
+		// Report "stopped" solely for containers actually running/paused —
+		// stopping a Created/Exited one is a harmless no-op and must not claim
+		// it stopped (#876), matching docker compose. `stop_container` returns
+		// `Ok(false)` for libpod's 304/404 idempotent no-ops, which is how this
+		// flag stays accurate with the bulk listing.
 		let acted = std::sync::atomic::AtomicBool::new(false);
 		for level in &levels {
 			let futs = level.iter().map(|name| {
 				let grace = self.grace_period_secs(&file.services[name]);
-				self.stop_one_service(name, grace, &acted)
+				let names = live_by_service.get(name).cloned().unwrap_or_default();
+				self.stop_one_service(names, grace, &acted)
 			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				return Err(e);
@@ -403,17 +428,22 @@ impl Engine {
 		let levels = crate::compose::resolve_levels(file)?;
 		let levels = filter_levels(file, levels, target_services)?;
 
-		// Only act on containers Podman actually has. Acting on the static
-		// fallback names would POST `/start` to containers that were never
-		// created, 404 (swallowed as a no-op), and exit 0 silently — masking that
+		// Prefetch every project container once and group by service, instead of
+		// one container-list round-trip per service (S+1 → 1 for the level walk;
+		// #1363). Only act on containers Podman actually has — acting on the
+		// static fallback names would POST `/start` to containers that were never
+		// created, 404 (swallowed as a no-op), and exit 0 silently, masking that
 		// the project was never created. Attempt every live container and
 		// aggregate errors rather than aborting on the first.
+		let live_by_service = self.live_project_replicas().await?;
+
 		let any_live = std::sync::atomic::AtomicBool::new(false);
 		let mut first_err: Option<ComposeError> = None;
 		for level in &levels {
-			let futs = level
-				.iter()
-				.map(|name| self.start_one_service(name, &any_live));
+			let futs = level.iter().map(|name| {
+				let names = live_by_service.get(name).cloned().unwrap_or_default();
+				self.start_one_service(names, &any_live)
+			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				first_err.get_or_insert(e);
 			}
@@ -445,11 +475,15 @@ impl Engine {
 		let levels = crate::compose::resolve_levels(file)?;
 		let levels = filter_levels(file, levels, target_services)?;
 
+		// Prefetch every project container once and group by service (#1363).
+		let live_by_service = self.live_project_replicas().await?;
+
 		let acted = std::sync::atomic::AtomicBool::new(false);
 		for level in &levels {
-			let futs = level
-				.iter()
-				.map(|name| self.kill_one_service(name, &file.services[name], signal, &acted));
+			let futs = level.iter().map(|name| {
+				let names = live_by_service.get(name).cloned().unwrap_or_default();
+				self.kill_one_service(names, signal, &acted)
+			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				return Err(e);
 			}
@@ -487,11 +521,15 @@ impl Engine {
 		levels.reverse();
 		let levels = filter_levels(file, levels, target_services)?;
 
+		// Prefetch every project container once and group by service (#1363).
+		let live_by_service = self.live_project_replicas().await?;
+
 		let acted = std::sync::atomic::AtomicBool::new(false);
 		let mut first_err: Option<ComposeError> = None;
 		for level in &levels {
 			let futs = level.iter().map(|name| {
-				self.rm_one_service(name, &file.services[name], force, remove_volumes, &acted)
+				let names = live_by_service.get(name).cloned().unwrap_or_default();
+				self.rm_one_service(names, force, remove_volumes, &acted)
 			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				first_err.get_or_insert(e);
@@ -511,6 +549,9 @@ impl Engine {
 		let levels = crate::compose::resolve_levels(file)?;
 		let levels = filter_levels(file, levels, target_services)?;
 
+		// Prefetch every project container once and group by service (#1363).
+		let live_by_service = self.live_project_replicas().await?;
+
 		// Idempotent + best-effort: re-pausing an already-paused (or stopped)
 		// container is a no-op, and one state-mismatched service must not abort the
 		// batch and leave the rest in an inconsistent partial state. Services in a
@@ -519,7 +560,8 @@ impl Engine {
 		let mut first_err: Option<ComposeError> = None;
 		for level in &levels {
 			let futs = level.iter().map(|name| {
-				self.idempotent_state_service(name, &file.services[name], "pause", "Paused", &acted)
+				let names = live_by_service.get(name).cloned().unwrap_or_default();
+				self.idempotent_state_service(names, "pause", "Paused", &acted)
 			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				first_err.get_or_insert(e);
@@ -539,6 +581,9 @@ impl Engine {
 		let levels = crate::compose::resolve_levels(file)?;
 		let levels = filter_levels(file, levels, target_services)?;
 
+		// Prefetch every project container once and group by service (#1363).
+		let live_by_service = self.live_project_replicas().await?;
+
 		// Idempotent + best-effort, mirroring `pause`: unpausing a not-paused
 		// container is a no-op, and a single mismatch must not abort the batch.
 		// Services in a level are unpaused concurrently (#757).
@@ -546,13 +591,8 @@ impl Engine {
 		let mut first_err: Option<ComposeError> = None;
 		for level in &levels {
 			let futs = level.iter().map(|name| {
-				self.idempotent_state_service(
-					name,
-					&file.services[name],
-					"unpause",
-					"Unpaused",
-					&acted,
-				)
+				let names = live_by_service.get(name).cloned().unwrap_or_default();
+				self.idempotent_state_service(names, "unpause", "Unpaused", &acted)
 			});
 			if let Some(e) = first_error(join_bounded(futs).await) {
 				first_err.get_or_insert(e);

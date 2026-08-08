@@ -554,7 +554,7 @@ impl Engine {
 
 		// Prefetch every project container once and group by service, instead of
 		// one container-list round-trip per service (S+1 → 1 for the level walk).
-		let live_by_service = self.list_project_containers_by_service().await?;
+		let live_by_service = self.live_project_replicas().await?;
 
 		// Seed from the containers Podman actually has, walked in the same
 		// reversed level order the teardown below uses, so the board predicts
@@ -786,5 +786,7 @@ pub(super) fn container_rm_path(name: &str, remove_volumes: bool) -> String {
 
 #[cfg(test)]
 mod drop_recheck_tests;
+#[cfg(test)]
+mod scale_tests;
 #[cfg(test)]
 mod tests;

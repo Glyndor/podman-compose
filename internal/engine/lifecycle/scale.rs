@@ -26,12 +26,17 @@ pub(crate) struct LiveContainer {
 /// actually transition it. A `running` or `paused` container is stopped; a
 /// `created`/`exited`/`dead`/… one is already not running, so stopping it is a
 /// no-op that must not be reported as "stopped" (#876). Pure for unit testing.
+///
+/// Unused in production since the per-service lifecycle commands stopped
+/// filtering by state themselves (#1363) — kept here for the unit test that
+/// pins its truth table.
+#[allow(dead_code)]
 pub(crate) fn state_is_active(state: &str) -> bool {
 	matches!(state, "running" | "paused")
 }
 
 /// The default ceiling on a service's replica count.
-const DEFAULT_MAX_REPLICAS: u32 = 256;
+pub(super) const DEFAULT_MAX_REPLICAS: u32 = 256;
 
 /// The replica ceiling, overridable via the `PODUP_MAX_REPLICAS` environment
 /// variable (a host operator's escape hatch). A missing, unparseable, or zero
@@ -268,11 +273,20 @@ impl Engine {
 			.collect())
 	}
 
-	/// All live project containers grouped by their `podup.service` label, in a
-	/// single API call. Lets a whole-project command (e.g. `down`) avoid one
-	/// per-service container-list round-trip; callers fall back to the static
-	/// [`Engine::replica_names`] for a service absent from the map.
-	pub(crate) async fn list_project_containers_by_service(
+	/// All project containers grouped by their `podup.service` label, in a single
+	/// API call. Lets a whole-project command (`stop`/`start`/`restart`/`kill`/
+	/// `rm`/`pause`/`unpause`/`down`) avoid one per-service container-list
+	/// round-trip (#1363): every per-service lifecycle command prefetches the
+	/// project's containers once via this helper and then reads its per-service
+	/// slice from the in-memory map, collapsing S+1 GETs into 1.
+	///
+	/// `all=true` is set explicitly: libpod's container-list defaults to a
+	/// `runningOnly` filter when no `status` filter is supplied, so a bare
+	/// project GET would silently drop the very containers `start`/`restart`/
+	/// `kill`/`rm`/`pause`/`unpause` need to act on (#1363 validation).
+	/// Callers fall back to the static [`Engine::replica_names`] for a service
+	/// absent from the map.
+	pub(crate) async fn live_project_replicas(
 		&self,
 	) -> Result<std::collections::HashMap<String, Vec<String>>> {
 		let filters = serde_json::json!({ "label": [format!("podup.project={}", self.project)] });
@@ -384,287 +398,5 @@ impl Engine {
 			.collect();
 		sort_replica_names(&mut running);
 		Ok(running)
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	#[cfg(unix)]
-	use crate::engine::fake_podman;
-	#[cfg(unix)]
-	use crate::engine::Engine;
-	#[cfg(unix)]
-	use crate::error::ComposeError;
-
-	#[cfg(unix)]
-	fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
-		Engine::with_base_dir(client, project.into(), std::env::temp_dir())
-	}
-
-	/// #598: a `scale`/`up --scale` down-sizing that can't remove a surplus
-	/// replica (e.g. an active exec session) must not exit 0 with it left
-	/// running — but a sibling replica that removes cleanly must still be
-	/// reclaimed.
-	#[tokio::test]
-	#[cfg(unix)]
-	async fn remove_surplus_replicas_propagates_a_real_rm_failure_after_completing_the_rest() {
-		let live = r#"[{"Names":["/proj-web-1"]},{"Names":["/proj-web-2"]}]"#;
-		let fake = fake_podman::start(move |method, target| {
-			if method == "GET" && target.contains("/containers/json") {
-				(200, live.to_string())
-			} else if (method == "POST" && target.contains("/stop"))
-				|| (method == "DELETE" && target.contains("/proj-web-1?force=true"))
-			{
-				(200, String::new())
-			} else if method == "DELETE" && target.contains("/proj-web-2?force=true") {
-				(500, r#"{"message":"device or resource busy"}"#.to_string())
-			} else {
-				(404, r#"{"message":"not found"}"#.to_string())
-			}
-		});
-		let e = engine_with(fake.client(), "proj");
-
-		// target = 0 desired replicas, so every live container is surplus
-		// (mirrors the `replica_names_for_zero_scale_is_empty` contract).
-		let err = e
-			.remove_surplus_replicas("web", &crate::compose::types::Service::default(), 0)
-			.await
-			.expect_err("a real surplus-removal failure must propagate");
-		assert!(
-			matches!(err, ComposeError::Podman(ref pe) if pe.is_status(500)),
-			"got {err:?}"
-		);
-
-		let seen = fake.requests.lock().unwrap();
-		assert!(
-			seen.iter()
-				.any(|r| r.contains("DELETE") && r.contains("/proj-web-1?force=true")),
-			"expected proj-web-1 to still be removed despite proj-web-2 failing: {seen:?}"
-		);
-	}
-
-	/// Surplus replicas that are already gone (404 on removal) stay an
-	/// idempotent no-op — a re-run of `scale` down must still exit 0.
-	#[tokio::test]
-	#[cfg(unix)]
-	async fn remove_surplus_replicas_tolerates_already_gone() {
-		let live = r#"[{"Names":["/proj-web-1"]}]"#;
-		let fake = fake_podman::start(move |method, target| {
-			if method == "GET" && target.contains("/containers/json") {
-				(200, live.to_string())
-			} else {
-				(404, r#"{"message":"not found"}"#.to_string())
-			}
-		});
-		let e = engine_with(fake.client(), "proj");
-		e.remove_surplus_replicas("web", &crate::compose::types::Service::default(), 0)
-			.await
-			.expect("an already-gone surplus replica must still exit 0");
-	}
-
-	/// libpod's `/containers/json` does not guarantee order; `logs` and every
-	/// other by-service lifecycle/query command must still see a scaled
-	/// service's replicas in the same ascending `-1, -2, -3` order the static
-	/// `replica_names_for` path always produces, even when the fake (like a
-	/// real libpod) hands them back shuffled.
-	#[tokio::test]
-	#[cfg(unix)]
-	async fn live_replica_names_sorts_shuffled_replicas_ascending() {
-		let containers = r#"[
-			{"Names":["/proj-web-3"]},
-			{"Names":["/proj-web-1"]},
-			{"Names":["/proj-web-2"]}
-		]"#;
-		let fake = fake_podman::start(move |method, target| {
-			if method == "GET" && target.contains("/containers/json") {
-				(200, containers.to_string())
-			} else {
-				(404, r#"{"message":"not found"}"#.to_string())
-			}
-		});
-		let e = engine_with(fake.client(), "proj");
-
-		let names = e
-			.live_replica_names("web", &crate::compose::types::Service::default())
-			.await
-			.expect("live_replica_names should succeed");
-
-		assert_eq!(
-			names,
-			vec![
-				"proj-web-1".to_string(),
-				"proj-web-2".to_string(),
-				"proj-web-3".to_string(),
-			]
-		);
-	}
-
-	/// #1250: `top` aborted on a project with a stopped service because it asked
-	/// every container that exists for its process list, and libpod answers a
-	/// non-running one with an HTTP 500. The exited replica must be dropped
-	/// before the call, and the survivors must keep the ascending order every
-	/// other by-service command produces — so this asserts both, on a listing
-	/// that is shuffled and mixed-state at once.
-	#[tokio::test]
-	#[cfg(unix)]
-	async fn running_replica_names_drops_non_running_and_keeps_ascending_order() {
-		let containers = r#"[
-			{"Names":["/proj-web-3"],"State":"running"},
-			{"Names":["/proj-web-4"],"State":"created"},
-			{"Names":["/proj-web-1"],"State":"running"},
-			{"Names":["/proj-web-5"],"State":"paused"},
-			{"Names":["/proj-web-2"],"State":"exited"}
-		]"#;
-		let fake = fake_podman::start(move |method, target| {
-			if method == "GET" && target.contains("/containers/json") {
-				(200, containers.to_string())
-			} else {
-				(404, r#"{"message":"not found"}"#.to_string())
-			}
-		});
-		let e = engine_with(fake.client(), "proj");
-
-		let names = e
-			.running_replica_names("web")
-			.await
-			.expect("running_replica_names should succeed");
-
-		assert_eq!(
-			names,
-			vec!["proj-web-1".to_string(), "proj-web-3".to_string()],
-			"only the running replicas, in ascending order"
-		);
-	}
-
-	/// The sibling half of the rule above: a service that exists in the compose
-	/// file but was never created has nothing running, so `top` must render
-	/// nothing for it rather than fall back to a statically-derived name and
-	/// then have to swallow the 404 that name earns.
-	#[tokio::test]
-	#[cfg(unix)]
-	async fn running_replica_names_does_not_fall_back_to_static_names() {
-		let fake = fake_podman::start(|method, target| {
-			if method == "GET" && target.contains("/containers/json") {
-				(200, "[]".to_string())
-			} else {
-				(404, r#"{"message":"not found"}"#.to_string())
-			}
-		});
-		let e = engine_with(fake.client(), "proj");
-
-		let names = e
-			.running_replica_names("web")
-			.await
-			.expect("running_replica_names should succeed");
-
-		assert!(
-			names.is_empty(),
-			"a never-created service yields no names, got {names:?}"
-		);
-	}
-
-	use super::{
-		check_fixed_name_scale, check_replica_limit, check_scale_port_conflict, state_is_active,
-		DEFAULT_MAX_REPLICAS,
-	};
-
-	#[test]
-	fn state_is_active_only_for_running_and_paused() {
-		// `stop` actually transitions only a running or paused container; for any
-		// other state it is a no-op that must not be reported as "stopped" (#876).
-		assert!(state_is_active("running"));
-		assert!(state_is_active("paused"));
-		assert!(!state_is_active("created"));
-		assert!(!state_is_active("exited"));
-		assert!(!state_is_active("stopped"));
-		assert!(!state_is_active("dead"));
-		assert!(!state_is_active("configured"));
-		assert!(!state_is_active(""));
-	}
-
-	#[test]
-	fn replica_limit_default_and_env_override() {
-		// One test owns the shared `PODUP_MAX_REPLICAS` env var for its whole body
-		// so a sibling test running in parallel can never race it.
-		let max = DEFAULT_MAX_REPLICAS as usize;
-
-		// Default ceiling: at-limit allowed, over-limit rejected.
-		std::env::remove_var("PODUP_MAX_REPLICAS");
-		assert!(check_replica_limit("web", 1).is_ok());
-		assert!(check_replica_limit("web", max).is_ok());
-		let err = check_replica_limit("web", max + 1).unwrap_err();
-		assert!(matches!(
-			err,
-			crate::error::ComposeError::ReplicaLimitExceeded { .. }
-		));
-		assert!(check_replica_limit("web", 100_000).is_err());
-
-		// Env override lowers the ceiling.
-		std::env::set_var("PODUP_MAX_REPLICAS", "2");
-		assert!(check_replica_limit("web", 2).is_ok());
-		assert!(check_replica_limit("web", 3).is_err());
-
-		// A zero/garbage override falls back to the default ceiling.
-		std::env::set_var("PODUP_MAX_REPLICAS", "0");
-		assert!(check_replica_limit("web", max).is_ok());
-		std::env::set_var("PODUP_MAX_REPLICAS", "nope");
-		assert!(check_replica_limit("web", max).is_ok());
-		std::env::remove_var("PODUP_MAX_REPLICAS");
-	}
-
-	fn service(yaml: &str) -> crate::compose::types::Service {
-		let file = crate::parse_str(yaml).unwrap();
-		file.services.into_iter().next().unwrap().1
-	}
-
-	#[test]
-	fn single_replica_never_conflicts() {
-		let svc = service("services:\n  web:\n    image: x\n    ports:\n      - \"8080:80\"\n");
-		assert!(check_scale_port_conflict("web", &svc, 1).is_ok());
-	}
-
-	#[test]
-	fn scaled_fixed_host_port_conflicts() {
-		let svc = service("services:\n  web:\n    image: x\n    ports:\n      - \"8080:80\"\n");
-		let err = check_scale_port_conflict("web", &svc, 3).unwrap_err();
-		assert!(matches!(
-			err,
-			crate::error::ComposeError::ScalePortConflict { .. }
-		));
-		assert!(err.to_string().contains("8080"));
-	}
-
-	#[test]
-	fn scaled_random_host_port_is_allowed() {
-		// A container-only port (`"80"`) gets a runtime-assigned host port per
-		// replica, so scaling is fine.
-		let svc = service("services:\n  web:\n    image: x\n    ports:\n      - \"80\"\n");
-		assert!(check_scale_port_conflict("web", &svc, 3).is_ok());
-	}
-
-	#[test]
-	fn scaled_no_ports_is_allowed() {
-		let svc = service("services:\n  worker:\n    image: x\n");
-		assert!(check_scale_port_conflict("worker", &svc, 5).is_ok());
-	}
-
-	#[test]
-	fn fixed_container_name_single_replica_is_allowed() {
-		let svc = service("services:\n  app:\n    image: x\n    container_name: myapp\n");
-		assert!(check_fixed_name_scale("app", &svc, 1).is_ok());
-	}
-
-	#[test]
-	fn fixed_container_name_scaled_above_one_is_rejected() {
-		let svc = service("services:\n  app:\n    image: x\n    container_name: myapp\n");
-		let err = check_fixed_name_scale("app", &svc, 3).unwrap_err();
-		assert!(matches!(err, crate::error::ComposeError::Unsupported(_)));
-		assert!(err.to_string().contains("container_name"));
-	}
-
-	#[test]
-	fn unnamed_service_scales_freely() {
-		let svc = service("services:\n  app:\n    image: x\n");
-		assert!(check_fixed_name_scale("app", &svc, 5).is_ok());
 	}
 }
