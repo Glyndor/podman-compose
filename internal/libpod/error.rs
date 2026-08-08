@@ -17,6 +17,35 @@ pub enum PodmanError {
 	StreamEndedEarly,
 	/// Podman API returned an error response (4xx/5xx).
 	Api { status: u16, message: String },
+	/// A libpod field-level rejection that podup identified and attributed to a
+	/// specific field of the request it sent.
+	///
+	/// libpod validates a handful of fields at the `SpecGenerator` (container
+	/// create) and build-query layer — namespaces via `ParseNamespace`,
+	/// `device_cgroup_rule` access strings via `parseLinuxResourcesDeviceAccess`,
+	/// build-arg/label keys, and a few others. When podup pre-validates these,
+	/// or when it identifies the offending field by inspecting the request it
+	/// just sent, it surfaces the rejection as a `Field` so the user sees the
+	/// compose-side key plus the offending value, not the raw libpod message.
+	/// `service` is the compose service name for `SpecGenerator` requests and
+	/// the empty string for build-query requests (which have no service
+	/// context); `field` is the compose-side field name (e.g. `"pid"`,
+	/// `"build.args"`); `value` is the offending value as it was sent;
+	/// `message` is the ready-to-print explanation and includes the libpod
+	/// detail so the cause is not lost (#1357).
+	Field {
+		/// Compose service name, or `""` when the request had no service
+		/// context (build queries, ping).
+		service: String,
+		/// Compose-side field name (e.g. `"pid"`, `"runtime"`, `"build.args"`).
+		field: String,
+		/// The offending value, truncated if necessary so a huge or binary
+		/// value does not flood the error.
+		value: String,
+		/// Ready-to-print explanation; carries the libpod detail so the cause
+		/// is preserved.
+		message: String,
+	},
 	/// The reachable Podman server speaks a libpod API version below the minimum
 	/// podup supports. Carries the version string the server reported (empty when
 	/// the server sent no `Libpod-API-Version` header).
@@ -35,6 +64,18 @@ impl fmt::Display for PodmanError {
 				Some(hint) => write!(f, "{hint} (podman: {message})"),
 				None => write!(f, "podman API error (HTTP {status}): {message}"),
 			},
+			Self::Field {
+				service,
+				field,
+				value,
+				message,
+			} => {
+				if service.is_empty() {
+					write!(f, "{field}: {message} (value: {value})")
+				} else {
+					write!(f, "service.{service}: {field}: {message} (value: {value})")
+				}
+			}
 			Self::IncompatibleApiVersion { reported } => {
 				let reported = if reported.is_empty() {
 					"an unknown version"
@@ -100,6 +141,7 @@ impl std::error::Error for PodmanError {
 			Self::StreamTooLarge
 			| Self::StreamEndedEarly
 			| Self::Api { .. }
+			| Self::Field { .. }
 			| Self::IncompatibleApiVersion { .. } => None,
 		}
 	}
@@ -187,6 +229,7 @@ impl PodmanError {
 			Self::Json(_) => "malformed-frame",
 			Self::StreamTooLarge => "stream-too-large",
 			Self::StreamEndedEarly => "stream-ended-early",
+			Self::Field { .. } => "field-rejected",
 			_ => "other",
 		}
 	}
@@ -617,5 +660,71 @@ mod tests {
 		let e: PodmanError = json_err.into();
 		assert!(matches!(e, PodmanError::Json(_)));
 		assert!(e.to_string().contains("json error"));
+	}
+
+	#[test]
+	fn field_error_names_service_and_field() {
+		// A `Field` rendered for a container-create failure leads with the
+		// service and field, then the value, so the operator sees the
+		// offending entry without parsing the libpod body (#1357).
+		let e = PodmanError::Field {
+			service: "web".into(),
+			field: "pid".into(),
+			value: "evil".into(),
+			message: "namespace not recognised".into(),
+		};
+		let msg = e.to_string();
+		assert!(
+			msg.starts_with("service.web: pid: namespace not recognised"),
+			"got {msg:?}"
+		);
+		assert!(msg.contains("evil"));
+	}
+
+	#[test]
+	fn field_error_for_build_query_skips_service_prefix() {
+		// Build queries have no service context, so the `service.X:` prefix
+		// is omitted and the field name leads directly.
+		let e = PodmanError::Field {
+			service: String::new(),
+			field: "build.args".into(),
+			value: "MALFORMED\\nKEY".into(),
+			message: "key is not a valid identifier".into(),
+		};
+		let msg = e.to_string();
+		assert!(
+			msg.starts_with("build.args: key is not a valid identifier"),
+			"got {msg:?}"
+		);
+		assert!(!msg.contains("service."));
+		assert!(msg.contains("MALFORMED\\nKEY"));
+	}
+
+	#[test]
+	fn field_error_has_no_source() {
+		// Like the other owned variants, `Field` has no underlying error to
+		// chain — the explanation is in the variant's own fields.
+		use std::error::Error;
+		let e = PodmanError::Field {
+			service: "web".into(),
+			field: "pid".into(),
+			value: "evil".into(),
+			message: "namespace not recognised".into(),
+		};
+		assert!(e.source().is_none());
+	}
+
+	#[test]
+	fn is_status_does_not_match_field() {
+		// The `is_status` predicate keys on the `Api` variant, so a `Field`
+		// rejection is never mistaken for a generic API error.
+		let e = PodmanError::Field {
+			service: "web".into(),
+			field: "pid".into(),
+			value: "evil".into(),
+			message: "x".into(),
+		};
+		assert!(!e.is_status(400));
+		assert!(!e.is_status(500));
 	}
 }
