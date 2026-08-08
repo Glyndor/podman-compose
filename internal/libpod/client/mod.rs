@@ -1,25 +1,30 @@
 //! HTTP client for the Podman libpod REST API.
 //!
-//! Opens a new connection per request over the Podman Unix socket (or named
-//! pipe on Windows). Connection-per-request is correct for a CLI tool where
-//! API calls are sequential and infrequent.
+//! Reuses HTTP/1.1 connections to the Podman Unix socket (or named pipe on
+//! Windows) across requests through the per-socket pool in
+//! [`client::pool`](self). Buffered calls acquire a connection, issue one
+//! request, and release it on completion; streaming calls take a dedicated
+//! connection for the lifetime of the stream and release it when the body
+//! drops. See [`Client`] for the full contract.
+
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use futures_util::Stream;
 use http_body_util::{BodyExt, Full, Limited, StreamBody};
 use hyper::body::{Frame, Incoming};
-use hyper::client::conn::http1;
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::error::PodmanError;
 
 mod encode;
 mod hijack;
+mod pool;
 mod stream;
 pub(crate) use encode::{is_valid_object_name, urlencoded};
 pub(crate) use hijack::Hijacked;
+use pool::ConnPool;
 use stream::SocketStream;
 
 /// The request body every call shares. A boxed body so a fully-buffered
@@ -52,12 +57,37 @@ const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 /// bounded by this — they are long-lived by design.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
+/// Whether a response carried `Connection: close`. When set, the socket is
+/// unusable for any further request and the pool must discard it instead of
+/// handing it back to the next acquirer. HTTP/1.1 keep-alive is the default
+/// in podup's real wire path; a `close` value is the server telling us this
+/// socket is single-use.
+fn has_connection_close(resp: &Response<Incoming>) -> bool {
+	resp.headers()
+		.get(hyper::header::CONNECTION)
+		.and_then(|v| v.to_str().ok())
+		.map(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case("close")))
+		.unwrap_or(false)
+}
+
 /// Result alias for libpod client calls, fixing the error to [`PodmanError`].
 pub type Result<T> = std::result::Result<T, PodmanError>;
 
 /// Podman libpod REST API client.
+///
+/// Holds an HTTP/1.1 connection pool keyed by socket path. Buffered calls
+/// acquire a connection, issue one request, and release the connection on
+/// completion; connections that observed an error are dropped instead of
+/// returned to the pool. Streaming calls (`get_stream`, `post_json_stream`,
+/// `post_empty_stream`, `post_bytes_stream`, `post_stream_body`,
+/// `post_json_stream_within`) take a dedicated connection for the lifetime of
+/// the stream's response body. Streaming connections do not share with the
+/// buffered pool — they are released when the [`Client`] is dropped, which in
+/// the CLI is the end of the command.
 pub struct Client {
 	socket_path: String,
+	pool: Arc<ConnPool>,
+	streaming: Mutex<Vec<pool::StreamingConn>>,
 }
 
 /// The decoded `X-Docker-Container-Path-Stat` header — a container path's name,
@@ -112,25 +142,21 @@ pub(crate) fn socket_error(path: &str, e: std::io::Error) -> super::PodmanError 
 	super::PodmanError::Connect(std::io::Error::new(e.kind(), format!("{path}: {e}{hint}")))
 }
 
+impl Drop for Client {
+	/// Close every held connection. Idle pooled connections are dropped via
+	/// the pool's `close`, which wakes any blocked acquirers with a closed
+	/// error; streaming connections are dropped directly, aborting their
+	/// driver tasks and tearing down their sockets.
+	fn drop(&mut self) {
+		// Clear the streaming connections first so the drop of each
+		// `StreamingConn` runs while the pool is still around. The pool's
+		// `close` then drains the idle queue.
+		self.streaming.lock().unwrap().clear();
+		self.pool.close();
+	}
+}
+
 impl Client {
-	/// Create a client bound to the given Podman socket path (or named pipe).
-	pub fn new(socket_path: impl Into<String>) -> Self {
-		Self {
-			socket_path: socket_path.into(),
-		}
-	}
-
-	/// Open a new HTTP/1.1 sender over the platform socket.
-	async fn connect(&self) -> Result<http1::SendRequest<BoxBody>> {
-		let stream = SocketStream::connect(&self.socket_path).await?;
-		let io = TokioIo::new(stream);
-		let (sender, conn) = http1::handshake(io).await?;
-		tokio::spawn(async move {
-			let _ = conn.await;
-		});
-		Ok(sender)
-	}
-
 	/// Build a request with an optional JSON body.
 	fn build_request(
 		method: Method,
@@ -175,7 +201,9 @@ impl Client {
 		response_timeout: Option<std::time::Duration>,
 	) -> Result<Response<Incoming>> {
 		tracing::debug!("libpod {} {}", req.method(), req.uri().path());
-		let mut sender = tokio::time::timeout(CONNECT_TIMEOUT, self.connect())
+		// Acquire a pooled connection, bounded by the connect-timeout so a
+		// stuck or absent socket cannot park the call indefinitely.
+		let mut guard = tokio::time::timeout(CONNECT_TIMEOUT, self.pool.acquire())
 			.await
 			.map_err(|_| PodmanError::Api {
 				status: 0,
@@ -184,14 +212,91 @@ impl Client {
 					CONNECT_TIMEOUT.as_secs()
 				),
 			})??;
-		let request = sender.send_request(req);
-		Self::apply_timeout(
+		let request = guard.sender_mut().send_request(req);
+		let send_result = Self::apply_timeout(
 			response_timeout,
 			"waiting for the Podman socket to respond",
 			request,
 		)
-		.await?
-		.map_err(PodmanError::Hyper)
+		.await;
+		match send_result {
+			Ok(Ok(resp)) => {
+				// The peer signalled it is closing the socket — drop the
+				// connection proactively instead of letting the next
+				// acquire discover it half-closed and pay the wait.
+				if has_connection_close(&resp) {
+					guard.poison();
+				}
+				Ok(resp)
+			}
+			Ok(Err(e)) => {
+				// The head never came back. The connection is no longer
+				// usable; poison so the next release drops it instead of
+				// handing a dead socket to the next acquirer.
+				guard.poison();
+				Err(PodmanError::Hyper(e))
+			}
+			Err(e) => {
+				// The timeout fired before the head arrived. Same outcome:
+				// the connection cannot be safely reused, drop it.
+				guard.poison();
+				Err(e)
+			}
+		}
+	}
+
+	/// Send a request whose response body is a long-lived stream and return
+	/// the raw response. The connection is opened outside the buffered pool
+	/// and held by the [`Client`] until the [`Client`] drops — the streaming
+	/// body returned to the caller reads from this held connection, and
+	/// surrendering it to a buffered caller mid-stream would corrupt the
+	/// wire. Closing the [`Client`] (e.g. at the end of a CLI command) tears
+	/// the connection down.
+	async fn send_streaming(
+		&self,
+		req: Request<BoxBody>,
+		response_timeout: Option<std::time::Duration>,
+	) -> Result<Response<Incoming>> {
+		tracing::debug!("libpod {} {}", req.method(), req.uri().path());
+		let mut conn = tokio::time::timeout(CONNECT_TIMEOUT, self.pool.open_streaming())
+			.await
+			.map_err(|_| PodmanError::Api {
+				status: 0,
+				message: format!(
+					"timed out after {}s connecting to the Podman socket",
+					CONNECT_TIMEOUT.as_secs()
+				),
+			})??;
+		let request = conn.sender_mut().send_request(req);
+		let send_result = Self::apply_timeout(
+			response_timeout,
+			"waiting for the Podman socket to respond",
+			request,
+		)
+		.await;
+		match send_result {
+			Ok(Ok(resp)) => {
+				// Hand the connection to the [`Client`] for the lifetime of
+				// the response body; the body's [`Incoming`] reads from this
+				// socket. Dropping the body itself does not close the
+				// connection — only the [`Client`] Drop does — because the
+				// streaming helpers' return type is fixed at `Response<Incoming>`
+				// and we cannot attach a hook to the body drop without
+				// changing the public surface.
+				self.streaming.lock().unwrap().push(conn);
+				Ok(resp)
+			}
+			Ok(Err(e)) => {
+				// Head never came; the [`StreamingConn`] drop will close the
+				// socket. No further tracking needed.
+				drop(conn);
+				Err(PodmanError::Hyper(e))
+			}
+			Err(e) => {
+				drop(conn);
+				Err(e)
+			}
+		}
 	}
 
 	/// Read the full response body into a `Vec<u8>`, capped at
@@ -330,7 +435,7 @@ impl Client {
 	/// `GET` → return raw `Response<Incoming>` for streaming.
 	pub async fn get_stream(&self, path: &str) -> Result<Response<Incoming>> {
 		let req = Self::build_request(Method::GET, path, full(Bytes::new()), None)?;
-		Self::stream_or_err(self.send(req, Some(READ_TIMEOUT)).await?).await
+		Self::stream_or_err(self.send_streaming(req, Some(READ_TIMEOUT)).await?).await
 	}
 
 	/// `POST` with JSON body → deserialize JSON response.
@@ -379,7 +484,7 @@ impl Client {
 			full(Bytes::from(json)),
 			Some("application/json"),
 		)?;
-		Self::stream_or_err(self.send(req, Some(READ_TIMEOUT)).await?).await
+		Self::stream_or_err(self.send_streaming(req, Some(READ_TIMEOUT)).await?).await
 	}
 
 	/// `POST` with empty body → ignore response body (expect 2xx or 304).
@@ -443,13 +548,13 @@ impl Client {
 			full(Bytes::from(json)),
 			Some("application/json"),
 		)?;
-		Self::stream_or_err(self.send(req, head_timeout).await?).await
+		Self::stream_or_err(self.send_streaming(req, head_timeout).await?).await
 	}
 
 	/// `POST` with empty body → return raw `Response<Incoming>` for streaming.
 	pub async fn post_empty_stream(&self, path: &str) -> Result<Response<Incoming>> {
 		let req = Self::build_request(Method::POST, path, full(Bytes::new()), None)?;
-		Self::stream_or_err(self.send(req, Some(READ_TIMEOUT)).await?).await
+		Self::stream_or_err(self.send_streaming(req, Some(READ_TIMEOUT)).await?).await
 	}
 
 	/// `POST` with empty body → deserialize JSON response.
@@ -487,7 +592,7 @@ impl Client {
 		content_type: &str,
 	) -> Result<Response<Incoming>> {
 		let req = Self::build_request(Method::POST, path, full(bytes), Some(content_type))?;
-		Self::stream_or_err(self.send(req, Some(READ_TIMEOUT)).await?).await
+		Self::stream_or_err(self.send_streaming(req, Some(READ_TIMEOUT)).await?).await
 	}
 
 	/// `POST` with a **streamed** body → return raw `Response<Incoming>` for
@@ -508,7 +613,7 @@ impl Client {
 	{
 		let body = StreamBody::new(chunks).boxed_unsync();
 		let req = Self::build_request(Method::POST, path, body, Some(content_type))?;
-		Self::stream_or_err(self.send(req, Some(READ_TIMEOUT)).await?).await
+		Self::stream_or_err(self.send_streaming(req, Some(READ_TIMEOUT)).await?).await
 	}
 
 	/// `POST` with a raw-bytes body → deserialize JSON response.

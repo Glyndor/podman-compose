@@ -135,6 +135,13 @@ pub(crate) struct Cli {
 	#[arg(long, env = "PODMAN_SOCKET", global = true)]
 	pub(crate) socket: Option<String>,
 
+	/// Maximum number of HTTP/1.1 connections the libpod client keeps open
+	/// to the Podman socket for reuse (or `PODUP_LIBCOD_POOL`). Buffered calls
+	/// share the pool; streaming calls each take a dedicated connection
+	/// outside this cap. Default: 8.
+	#[arg(long, env = "PODUP_LIBCOD_POOL", global = true, value_name = "N")]
+	pub(crate) connection_pool_size: Option<usize>,
+
 	/// Active profiles (comma-separated).  May also be set via `COMPOSE_PROFILES`.
 	#[arg(long, value_delimiter = ',', env = "COMPOSE_PROFILES", global = true)]
 	pub(crate) profile: Vec<String>,
