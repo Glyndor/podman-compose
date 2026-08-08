@@ -129,6 +129,27 @@ impl Engine {
 		Ok(())
 	}
 
+	/// Push a host file or directory into a service container.
+	///
+	/// # Concurrency contract — read before touching the two HEAD + PUT sequence
+	///
+	/// `cp_to_container` issues two `HEAD /archive` requests with the PUT
+	/// between them, so a concurrent mutation in the window could land a
+	/// successful-but-wrong-state PUT. The two callers in the codebase are
+	/// the CLI `cp` subcommand and the `watch` sync path, both of which are
+	/// called only while the per-project lock ([`crate::engine::lock`]) is
+	/// held by the mutating stage — `lock_project` serialises a single
+	/// `podup` process against any other `podup` process working on the same
+	/// project, closing the **cross-invocation** case.
+	///
+	/// The **within-invocation** case — a foreign actor (a manual
+	/// `podman exec`, another compose stack on the same machine, the user
+	/// running `podman cp` in another shell) mutating the destination
+	/// between the two HEADs — is closed by libpod itself: the archive PUT
+	/// extracts into a directory that we have just confirmed exists and is
+	/// a directory, so a foreign `rm -rf` racing in is rejected by the
+	/// second PUT, not silently succeeded. The `extract_stat_path` HEAD
+	/// below is what makes that property hold; do not skip it.
 	async fn cp_to_container(
 		&self,
 		file: &ComposeFile,

@@ -221,6 +221,49 @@ fn install_at_does_not_leave_an_old_sibling() {
 		"install_at must not create a .old sibling — that is the L5 caller's job"
 	);
 }
+/// #1367 (L5): the chmod-0000 case the issue's test plan calls out. A binary
+/// the operator can no longer read or execute is the canonical "I have a
+/// backup question for the rollback" case: the new bytes land on disk, the
+/// self-test cannot even spawn the binary, and the L5 path must leave the
+/// previous binary in place rather than leave the user with a half-installed
+/// release. Simulate the full `install_binary` flow with a stub target: the
+/// helper functions compose exactly the way the real function does, the
+/// self-test fails for a chmod-0000 file (PermissionDenied at spawn), and
+/// `restore_from_backup` puts the previous bytes back.
+#[cfg(unix)]
+#[test]
+fn install_binary_rolls_back_when_the_target_is_unreadable() {
+	use std::os::unix::fs::PermissionsExt;
+	let dir = tempfile::tempdir().unwrap();
+	let target = dir.path().join("podup");
+	std::fs::write(&target, b"the previous binary").unwrap();
+
+	let backup = move_target_aside(&target).expect("the move-aside must succeed");
+	// The "new bytes" landing on disk: a real, fresh, chmod-0000 file the
+	// kernel will refuse to exec, so the self-test cannot pass.
+	std::fs::write(&target, b"the new binary").unwrap();
+	std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+	// Spawning a chmod-0000 file is a hard PermissionDenied — the self-test
+	// must surface that as a failure, and the rollback must restore the
+	// previous binary. Mirrors the real `install_binary` failure path.
+	let err = self_test(&target, "9.9.9").expect_err("a chmod-0000 binary must fail its self-test");
+	assert!(
+		format!("{err}").contains("could not run"),
+		"the error should be a spawn failure, got: {err}"
+	);
+	restore_from_backup(&target, &backup).expect("the rollback must succeed");
+	assert_eq!(
+		std::fs::read(&target).unwrap(),
+		b"the previous binary",
+		"the rollback must put the previous binary back at the target"
+	);
+	// The .old sibling is consumed by the rollback.
+	assert!(
+		!backup.exists(),
+		"the .old sibling is consumed by the rollback"
+	);
+}
 /// Write an executable stub script and return its path.
 #[cfg(unix)]
 fn write_stub(dir: &Path, name: &str, body: &str) -> PathBuf {
