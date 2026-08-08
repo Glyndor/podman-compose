@@ -89,6 +89,80 @@ try {
 		return $dest
 	}
 
+	# Resolve the actual release tag from the GitHub releases API when the
+	# caller leaves the version at its default ('latest'). The signature over
+	# SHA256SUMS binds the asset bytes but not the release tag, so a CDN or
+	# transparent-proxy replay can serve an older, *legitimately* signed
+	# binary and matching manifest - both still verify cryptographically. We
+	# pin the staged binary's reported --version to this resolved tag in
+	# the self-test (Test-StagedVersion) to close that window. Without this
+	# resolution we cannot self-test against the literal string 'latest',
+	# and using the binary's own --version as the truth would be circular
+	# (that is exactly the attack).
+	function Resolve-ReleaseTag {
+		$apiUrl = "https://api.github.com/repos/$Repo/releases/latest"
+		try {
+			$resp = Invoke-WebRequest -Uri $apiUrl -Headers @{ 'Accept' = 'application/vnd.github+json' } -UseBasicParsing -TimeoutSec 60
+		} catch {
+			Fail "Cannot resolve latest release tag from $apiUrl"
+		}
+		# Use ErrorAction to surface a bad response as a fatal condition rather
+		# than silently emitting $null and moving on.
+		try {
+			$json = $resp.Content | ConvertFrom-Json -ErrorAction Stop
+		} catch {
+			Fail "Malformed GitHub releases JSON from /releases/latest"
+		}
+		if (-not $json.tag_name) {
+			Fail "GitHub releases response missing tag_name"
+		}
+		return [string]$json.tag_name
+	}
+
+	# Confirm the staged binary's --version reports the resolved release
+	# tag. This closes the signed-release rollback window: a replayed older
+	# binary passes the Ed25519 signature, the SHA-256 digest, and the build
+	# provenance (the manifest and the asset are both legitimately signed),
+	# but its --version still reports the old release. The self-test refuses
+	# such an install the same way the Rust `podup update` does
+	# (internal/update/install.rs:152-205).
+	#
+	# Strict equality, with one optional leading 'v'. Each whitespace-
+	# delimited token in the staged binary's --version output is compared
+	# in full; a starts_with / substring match would let `3.7.0-dev` slip
+	# past the `3.7.0` check, which is the rollback case this gate exists
+	# to reject. Matches the Rust behaviour token-for-token.
+	function Test-StagedVersion {
+		param(
+			[string]$StagedPath,
+			[string]$ResolvedTag
+		)
+		$expected = if ($ResolvedTag.StartsWith('v')) { $ResolvedTag.Substring(1) } else { $ResolvedTag }
+		# Run the staged binary's --version. A non-zero exit (or a missing
+		# file) fails closed.
+		try {
+			$reported = & $StagedPath --version 2>&1
+		} catch {
+			Remove-Item -Path $StagedPath -Force -ErrorAction SilentlyContinue
+			Fail "Could not run $StagedPath --version to self-test the staged binary"
+		}
+		if ($LASTEXITCODE -ne 0) {
+			Remove-Item -Path $StagedPath -Force -ErrorAction SilentlyContinue
+			Fail "Could not run $StagedPath --version to self-test the staged binary"
+		}
+		$reportedStr = ($reported | Out-String).TrimEnd()
+		$tokens = $reportedStr -split '\s+'
+		foreach ($token in $tokens) {
+			if (($token -eq $expected) -or ($token -eq "v$expected")) {
+				Write-LogOk "Reported --version matches $ResolvedTag"
+				return
+			}
+		}
+		Remove-Item -Path $StagedPath -Force -ErrorAction SilentlyContinue
+		Write-LogError "Staged binary reports `"$reportedStr`", expected $ResolvedTag"
+		Fail "Refusing to install: staged binary's --version does not match the resolved release tag (possible rollback) - the staged file has been removed"
+	}
+
 	Write-LogInfo "Downloading $Artifact ($Version) ..."
 	$artifactPath = Get-ReleaseFile $Artifact
 	$sumsPath = Get-ReleaseFile 'SHA256SUMS'
@@ -220,6 +294,19 @@ sys.exit(1)
 	if ($expected -ne $actual) { Fail "Checksum verification failed for $Artifact" }
 	Write-LogOk 'Checksum verified'
 
+	# Resolve the actual release tag for the self-test. With an explicit
+	# PODUP_VERSION=vX.Y.Z this is just that tag; with the default 'latest'
+	# we hit the GitHub releases API to discover it. The signed manifest
+	# binds asset bytes but not the release tag, so we cannot use the
+	# staged binary's --version as the source of truth - that would be
+	# the attack vector.
+	$ResolvedTag = if ($Version -eq 'latest') {
+		Write-LogInfo 'Resolving latest release tag ...'
+		Resolve-ReleaseTag
+	} else {
+		$Version
+	}
+
 	# --- Install -------------------------------------------------------------
 
 	if (-not (Test-Path $InstallDir)) {
@@ -230,6 +317,16 @@ sys.exit(1)
 	# can never leave a partial yet executable binary on PATH.
 	$staged = Join-Path $InstallDir ".podup.install-$PID.exe"
 	Copy-Item -Path $artifactPath -Destination $staged -Force
+
+	# Self-test against the staged binary BEFORE the move into place. The
+	# signed manifest binds the asset bytes but not the release tag, so a
+	# CDN or transparent-proxy replay can serve an older, *legitimately*
+	# signed binary and matching SHA256SUMS - both still verify. The
+	# staged binary's --version still reports the old release, and we
+	# refuse. Mirrors the Rust self_test at
+	# internal/update/install.rs:152-205.
+	Test-StagedVersion -StagedPath $staged -ResolvedTag $ResolvedTag
+
 	Move-Item -Path $staged -Destination $target -Force
 
 	# Add the install dir to the user PATH if it is not already there.

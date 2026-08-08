@@ -634,7 +634,13 @@ Replace the running binary with the latest signed release.
 | `--force` | Reinstall even if the latest release is not newer. | off |
 
 Verification fails closed: a missing key, bad Ed25519 signature, or SHA-256
-mismatch aborts before the installed binary is touched. See
+mismatch aborts before the installed binary is touched. After the binary is
+written, a self-test runs `<binary> --version` and refuses the install if the
+reported version does not match the resolved release tag (strict equality,
+optional single `v` prefix) — a CDN or proxy that replays an older,
+*legitimately* signed release passes the signature and digest checks but fails
+this one, and the previous binary is restored. The shell installers
+(`install.sh`, `install.ps1`) run the same gate. See
 [self-update.md](self-update.md) for the trust model.
 
 ### `autostart` (alias `boot`)

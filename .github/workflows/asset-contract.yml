@@ -10,6 +10,7 @@ on:
       - ".github/workflows/release.yml"
       - ".github/workflows/asset-contract.yml"
       - ".github/scripts/verify-signing-key.py"
+      - "internal/update/install.rs"
       - "tests/fixtures/releases/**"
   pull_request:
     branches:
@@ -21,6 +22,7 @@ on:
       - ".github/workflows/release.yml"
       - ".github/workflows/asset-contract.yml"
       - ".github/scripts/verify-signing-key.py"
+      - "internal/update/install.rs"
       - "tests/fixtures/releases/**"
 
 permissions:
@@ -85,3 +87,46 @@ jobs:
         run: |
           $env:PATH = "$env:RUNNER_TEMP\fixturevenv\Scripts;$env:PATH"
           pwsh -NoProfile -File tests/fixtures/releases/test.ps1
+  # Version self-test in the shell installer (issue #1356). The Rust
+  # `podup update` already pins the staged binary's --version to the
+  # resolved tag (internal/update/install.rs:152-205) and refuses a
+  # rollback. The shell installer path was missing the equivalent gate
+  # - a CDN or transparent proxy could replay an older, *legitimately*
+  # signed binary and matching SHA256SUMS and the install would accept
+  # it. The fixture exercises verify_version_self_test in install.sh
+  # directly with stub binaries (matching version, older version, -dev
+  # suffix, garbage, non-zero exit, missing file) so a regression in
+  # the strict-equality-with-optional-v comparison fails here.
+  shell-version-self-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run the version-self-test shell fixture
+        run: bash tests/fixtures/releases/version-self-test.sh
+  # Same fixture on Windows so install.ps1's Test-StagedVersion is
+  # covered. The PowerShell script extracts the function via AST and
+  # runs it against .cmd stubs, so a regression in the strict-equality
+  # comparison or in the staged-file-removal on failure fails here.
+  powershell-version-self-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run the version-self-test PowerShell fixture
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/fixtures/releases/version-self-test.ps1
+  # Rust reference test for the self_test in internal/update/install.rs.
+  # Gates against the shell-side regression by pinning the canonical
+  # behaviour: the shell installer mirrors this test token-for-token.
+  # Installs rustup directly (dtolnay/rust-toolchain is not on the
+  # org's allowed-actions list) at the project's MSRV, the same way
+  # release.yml sets up the release build.
+  rust-self-test-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        env:
+          RUST_TOOLCHAIN: "1.85"
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+      - name: Run the install self-test
+        run: cargo test --locked -p podup install::tests::self_test
