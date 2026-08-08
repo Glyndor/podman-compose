@@ -178,6 +178,8 @@ mod exec_flags;
 mod health_targeting;
 #[path = "engine_integration/include_extends.rs"]
 mod include_extends;
+#[path = "engine_integration/label_file_safety.rs"]
+mod label_file_safety;
 #[path = "engine_integration/lifecycle.rs"]
 mod lifecycle;
 #[path = "engine_integration/lifecycle_query.rs"]

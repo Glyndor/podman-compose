@@ -11,6 +11,7 @@ use std::path::Path;
 use tracing::warn;
 
 use crate::compose::types::{BlkioConfig, Service};
+use crate::error::ComposeError;
 use crate::libpod::types::container::{
 	LinuxBlockIO, LinuxDevice, LinuxDeviceCgroup, LinuxThrottleDevice, LinuxWeightDevice,
 };
@@ -160,10 +161,98 @@ pub(super) fn build_blkio_config(service: &Service) -> Option<LinuxBlockIO> {
 // Label helpers
 // ---------------------------------------------------------------------------
 
+/// Maximum byte length of a label key, matching podman's per-label cap. A label
+/// file with an oversize key would either be truncated by libpod or rejected at
+/// the libpod layer with an opaque 400; rejecting up front gives a clearer
+/// message and closes the silent-truncation path.
+pub(super) const MAX_LABEL_KEY_LEN: usize = 253;
+/// Maximum byte length of a label value (4 KiB). Podman's own cap is higher,
+/// but a hostile `label_file:` value would otherwise be JSON-accepted by
+/// libpod and then handed to downstream consumers that re-parse the value,
+/// where a multi-megabyte string is at best useless and at worst a DoS vector.
+/// 4 KiB is generous for any real label and bounds the worst case.
+pub(super) const MAX_LABEL_VALUE_LEN: usize = 4 * 1024;
+/// Maximum number of distinct label entries podup will accept from a single
+/// `label_file:` pass. The 16 MiB read cap on the file does not constrain the
+/// resulting HashMap size, so a 16 MiB file of single-character keys could
+/// otherwise produce a 16M-entry map. 64 is well past any real label set and
+/// bounds the worst case.
+pub(super) const MAX_LABEL_FILE_ENTRIES: usize = 64;
+
+/// Why [`sanitize_kv_pair`] rejected a `label_file:` entry. Returned rather
+/// than a `bool` so the caller can produce a specific error message that names
+/// the offending axis (key vs value vs cap) without re-checking the rules.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum SanitizeError {
+	/// The key is empty, contains an ASCII control character, or exceeds
+	/// [`MAX_LABEL_KEY_LEN`] bytes.
+	InvalidKey,
+	/// The value contains an ASCII control character or exceeds
+	/// [`MAX_LABEL_VALUE_LEN`] bytes.
+	InvalidValue,
+	/// The map is already at [`MAX_LABEL_FILE_ENTRIES`] distinct keys and this
+	/// entry would add a new one (an overwrite of an existing key is allowed).
+	TooManyEntries,
+}
+
+/// Sanitize a single key/value pair parsed from a `label_file:` line and insert
+/// it into `labels`, enforcing:
+///
+/// * per-pair constraints on the key — non-empty, no ASCII control characters,
+///   length ≤ [`MAX_LABEL_KEY_LEN`];
+/// * per-pair constraints on the value — no ASCII control characters, length ≤
+///   [`MAX_LABEL_VALUE_LEN`];
+/// * the per-file entry cap [`MAX_LABEL_FILE_ENTRIES`] on distinct keys.
+///
+/// Podman JSON-encodes the value on the wire, so wire injection is not the
+/// concern; the rejection is for **downstream consumers that re-parse the label
+/// value** (logs, `ls`/`inspect` UIs, label-based filters), where a control
+/// character in either side lets a single entry break out of its context.
+///
+/// Returns the inserted `(key, value)` on success, or the specific
+/// [`SanitizeError`] variant on rejection. On rejection `labels` is left
+/// unchanged so the caller can decide what to surface.
+pub(super) fn sanitize_kv_pair(
+	labels: &mut HashMap<String, String>,
+	key: &str,
+	value: &str,
+) -> Result<(String, String), SanitizeError> {
+	if key.is_empty() || key.len() > MAX_LABEL_KEY_LEN || key.chars().any(|c| c.is_control()) {
+		return Err(SanitizeError::InvalidKey);
+	}
+	if value.len() > MAX_LABEL_VALUE_LEN || value.chars().any(|c| c.is_control()) {
+		return Err(SanitizeError::InvalidValue);
+	}
+	// Overwrite of an existing key is allowed even at the cap — the cap bounds
+	// the number of distinct keys, not total insertions.
+	if !labels.contains_key(key) && labels.len() >= MAX_LABEL_FILE_ENTRIES {
+		return Err(SanitizeError::TooManyEntries);
+	}
+	let k = key.to_string();
+	let v = value.to_string();
+	labels.insert(k.clone(), v.clone());
+	Ok((k, v))
+}
+
+/// Encode a compose-file path string for inclusion in the comma-joined
+/// `podup.config-files` label. A `,` in a path would visually merge with the
+/// next entry when the label is split back on `,`; `%2C` round-trips through
+/// that split unambiguously. Newlines are not produced by `Path::display` on
+/// any supported platform and are left as-is — the libpod JSON encoding would
+/// re-escape them anyway. The underlying `PathBuf` is unaffected: this is a
+/// render-side concern only.
+pub(super) fn encode_path_for_label(path_str: &str) -> String {
+	if path_str.contains(',') {
+		path_str.replace(',', "%2C")
+	} else {
+		path_str.to_string()
+	}
+}
+
 pub(super) fn build_label_file_labels(
 	service: &Service,
 	base_dir: &Path,
-) -> HashMap<String, String> {
+) -> Result<HashMap<String, String>, ComposeError> {
 	let mut labels = HashMap::new();
 	for path in service.label_file.to_list() {
 		let full = if std::path::Path::new(&path).is_absolute() {
@@ -178,20 +267,27 @@ pub(super) fn build_label_file_labels(
 				continue;
 			}
 		};
-		for line in content.lines() {
+		for (line_idx, line) in content.lines().enumerate() {
 			let trimmed = line.trim();
 			if trimmed.is_empty() || trimmed.starts_with('#') {
 				continue;
 			}
 			let mut parts = trimmed.splitn(2, '=');
-			let key = parts.next().unwrap_or("").trim().to_string();
-			let val = parts.next().unwrap_or("").to_string();
-			if !key.is_empty() {
-				labels.insert(key, val);
+			let key = parts.next().unwrap_or("").trim();
+			let val = parts.next().unwrap_or("");
+			if key.is_empty() {
+				continue;
+			}
+			if let Err(why) = sanitize_kv_pair(&mut labels, key, val) {
+				return Err(ComposeError::Unsupported(format!(
+					"label_file {} line {}: rejected ({why:?})",
+					full.display(),
+					line_idx + 1,
+				)));
 			}
 		}
 	}
-	labels
+	Ok(labels)
 }
 
 /// Resolve the user-facing labels for a container.
@@ -257,278 +353,4 @@ pub(super) fn warn_swarm_only_deploy(service_name: &str, service: &Service) {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::compose::types::Service;
-
-	fn default_service() -> Service {
-		Service::default()
-	}
-
-	// --- device parsing ---
-
-	#[test]
-	fn parse_device_host_container_perm() {
-		let parsed = parse_device("/dev/null:/dev/zero:rwm");
-		assert_eq!(parsed.device.path, "/dev/zero");
-		// The trailing permission segment becomes a cgroup access rule.
-		let rule = parsed.cgroup_rule.expect("perm should yield a cgroup rule");
-		assert!(rule.allow);
-		assert_eq!(rule.access.as_deref(), Some("rwm"));
-	}
-
-	#[test]
-	fn parse_device_same_path_both_sides() {
-		let parsed = parse_device("/dev/null");
-		assert_eq!(parsed.device.path, "/dev/null");
-		// No permission segment → no cgroup rule (Podman defaults to rwm).
-		assert!(parsed.cgroup_rule.is_none());
-	}
-
-	#[test]
-	fn parse_device_two_part() {
-		let parsed = parse_device("/dev/null:/dev/xvda");
-		assert_eq!(parsed.device.path, "/dev/xvda");
-		assert!(parsed.cgroup_rule.is_none());
-	}
-
-	#[test]
-	fn parse_device_restricted_perm_is_preserved() {
-		// `devices: ["/dev/sda:/dev/sda:r"]` must keep the read-only restriction
-		// rather than silently becoming rwm on the live up path.
-		let parsed = parse_device("/dev/sda:/dev/sda:r");
-		assert_eq!(parsed.device.path, "/dev/sda");
-		let rule = parsed.cgroup_rule.expect("perm should yield a cgroup rule");
-		assert!(rule.allow);
-		assert_eq!(rule.access.as_deref(), Some("r"));
-		// The rule targets the same node as the device it restricts.
-		assert_eq!(rule.device_type, Some(parsed.device.device_type));
-		assert_eq!(rule.major, Some(parsed.device.major));
-		assert_eq!(rule.minor, Some(parsed.device.minor));
-	}
-
-	// --- blkio ---
-
-	#[test]
-	fn build_blkio_config_empty_no_blkio() {
-		assert!(build_blkio_config(&default_service()).is_none());
-	}
-
-	#[test]
-	fn build_blkio_config_weight_only() {
-		use crate::compose::types::BlkioConfig;
-		let mut svc = default_service();
-		svc.blkio_config = Some(BlkioConfig {
-			weight: Some(500),
-			..Default::default()
-		});
-		let blkio = build_blkio_config(&svc).unwrap();
-		assert_eq!(blkio.weight, Some(500));
-		assert!(blkio.weight_device.is_empty());
-	}
-
-	#[test]
-	fn build_blkio_config_with_rate_device() {
-		use crate::compose::types::{BlkioConfig, BlkioRateDevice};
-		let mut svc = default_service();
-		svc.blkio_config = Some(BlkioConfig {
-			device_read_bps: vec![BlkioRateDevice {
-				path: "/dev/sda".into(),
-				rate: serde_yaml::Value::Number(serde_yaml::Number::from(1048576u64)),
-			}],
-			..Default::default()
-		});
-		let blkio = build_blkio_config(&svc).unwrap();
-		assert_eq!(blkio.throttle_read_bps_device.len(), 1);
-		assert_eq!(blkio.throttle_read_bps_device[0].rate, 1048576);
-		assert!(blkio.throttle_write_bps_device.is_empty());
-	}
-
-	#[test]
-	fn build_blkio_config_maps_weight_device() {
-		use crate::compose::types::{BlkioConfig, BlkioWeightDevice};
-		let mut svc = default_service();
-		svc.blkio_config = Some(BlkioConfig {
-			weight: Some(300),
-			weight_device: vec![BlkioWeightDevice {
-				// A non-existent path stats to (0, 0); the weight still propagates.
-				path: "/dev/does-not-exist".into(),
-				weight: 800,
-			}],
-			..Default::default()
-		});
-		let blkio = build_blkio_config(&svc).unwrap();
-		assert_eq!(blkio.weight, Some(300));
-		assert_eq!(blkio.weight_device.len(), 1);
-		assert_eq!(blkio.weight_device[0].weight, Some(800));
-	}
-
-	#[test]
-	fn build_blkio_config_maps_all_four_throttle_kinds() {
-		use crate::compose::types::{BlkioConfig, BlkioRateDevice};
-		let dev = |rate: u64| BlkioRateDevice {
-			path: "/dev/sda".into(),
-			rate: serde_yaml::Value::Number(serde_yaml::Number::from(rate)),
-		};
-		let mut svc = default_service();
-		svc.blkio_config = Some(BlkioConfig {
-			device_read_bps: vec![dev(1)],
-			device_write_bps: vec![dev(2)],
-			device_read_iops: vec![dev(3)],
-			device_write_iops: vec![dev(4)],
-			..Default::default()
-		});
-		let blkio = build_blkio_config(&svc).unwrap();
-		assert_eq!(blkio.throttle_read_bps_device[0].rate, 1);
-		assert_eq!(blkio.throttle_write_bps_device[0].rate, 2);
-		assert_eq!(blkio.throttle_read_iops_device[0].rate, 3);
-		assert_eq!(blkio.throttle_write_iops_device[0].rate, 4);
-	}
-
-	// --- build_label_file_labels ---
-
-	#[test]
-	fn label_file_parses_keys_skips_comments_and_blanks() {
-		use crate::compose::types::primitives::StringOrList;
-		let dir = tempfile::tempdir().unwrap();
-		let path = dir.path().join("labels.env");
-		std::fs::write(
-			&path,
-			"# a comment\n\ncom.example.team=blue\nbare-key\n  com.example.tier = gold \n",
-		)
-		.unwrap();
-
-		let mut svc = default_service();
-		svc.label_file = StringOrList::Single("labels.env".to_string());
-		let labels = build_label_file_labels(&svc, dir.path());
-
-		assert_eq!(
-			labels.get("com.example.team").map(String::as_str),
-			Some("blue")
-		);
-		// A bare key with no `=` keeps an empty value.
-		assert_eq!(labels.get("bare-key").map(String::as_str), Some(""));
-		// The whole line is trimmed first, then the key side is trimmed again; the
-		// value keeps its leading space after `=` but loses the line's trailing space.
-		assert_eq!(
-			labels.get("com.example.tier").map(String::as_str),
-			Some(" gold")
-		);
-		// Comment and blank lines contribute nothing.
-		assert_eq!(labels.len(), 3);
-	}
-
-	#[test]
-	fn label_file_missing_file_is_skipped() {
-		use crate::compose::types::primitives::StringOrList;
-		let dir = tempfile::tempdir().unwrap();
-		let mut svc = default_service();
-		svc.label_file = StringOrList::Single("absent.env".to_string());
-		// A missing label file warns and yields no labels rather than erroring.
-		assert!(build_label_file_labels(&svc, dir.path()).is_empty());
-	}
-
-	// --- warn_swarm_only_deploy ---
-
-	#[test]
-	fn warn_swarm_only_deploy_no_deploy_is_noop() {
-		let svc = default_service();
-		warn_swarm_only_deploy("web", &svc);
-	}
-
-	#[test]
-	fn warn_swarm_only_deploy_no_swarm_fields_is_noop() {
-		use crate::compose::types::DeployConfig;
-		let mut svc = default_service();
-		svc.deploy = Some(DeployConfig {
-			replicas: Some(2),
-			..Default::default()
-		});
-		warn_swarm_only_deploy("web", &svc);
-	}
-
-	#[test]
-	fn warn_swarm_only_deploy_all_swarm_fields_no_panic() {
-		use crate::compose::types::{DeployConfig, DeployPlacement, DeployUpdateConfig};
-		let mut svc = default_service();
-		svc.deploy = Some(DeployConfig {
-			mode: Some("global".to_string()),
-			placement: Some(DeployPlacement {
-				constraints: vec!["node.role == manager".to_string()],
-				..Default::default()
-			}),
-			update_config: Some(DeployUpdateConfig {
-				parallelism: Some(1),
-				..Default::default()
-			}),
-			rollback_config: Some(DeployUpdateConfig::default()),
-			endpoint_mode: Some("dnsrr".to_string()),
-			..Default::default()
-		});
-		warn_swarm_only_deploy("web", &svc);
-	}
-
-	// --- container label resolution ---
-
-	#[test]
-	fn resolve_container_labels_keeps_service_labels() {
-		use crate::compose::types::primitives::Labels;
-		use indexmap::IndexMap;
-		let mut svc = default_service();
-		let mut map = IndexMap::new();
-		map.insert("com.example.team".to_string(), "blue".to_string());
-		svc.labels = Labels::Map(map);
-
-		let labels = resolve_container_labels(&svc, HashMap::new());
-		assert_eq!(
-			labels.get("com.example.team").map(String::as_str),
-			Some("blue")
-		);
-	}
-
-	#[test]
-	fn resolve_container_labels_does_not_apply_deploy_labels() {
-		use crate::compose::types::primitives::Labels;
-		use crate::compose::types::DeployConfig;
-		use indexmap::IndexMap;
-		let mut svc = default_service();
-		let mut svc_map = IndexMap::new();
-		svc_map.insert("com.example.service".to_string(), "on".to_string());
-		svc.labels = Labels::Map(svc_map);
-		let mut deploy_map = IndexMap::new();
-		deploy_map.insert("com.example.deploy".to_string(), "swarm".to_string());
-		svc.deploy = Some(DeployConfig {
-			labels: Labels::Map(deploy_map),
-			..Default::default()
-		});
-
-		let labels = resolve_container_labels(&svc, HashMap::new());
-		// Per the Compose Specification, deploy.labels are NOT applied to the container.
-		assert!(!labels.contains_key("com.example.deploy"));
-		// Service labels still apply.
-		assert_eq!(
-			labels.get("com.example.service").map(String::as_str),
-			Some("on")
-		);
-	}
-
-	#[test]
-	fn resolve_container_labels_service_overrides_label_file() {
-		use crate::compose::types::primitives::Labels;
-		use indexmap::IndexMap;
-		let mut svc = default_service();
-		let mut map = IndexMap::new();
-		map.insert("shared".to_string(), "from-service".to_string());
-		svc.labels = Labels::Map(map);
-		let mut file_labels = HashMap::new();
-		file_labels.insert("shared".to_string(), "from-file".to_string());
-		file_labels.insert("only-file".to_string(), "yes".to_string());
-
-		let labels = resolve_container_labels(&svc, file_labels);
-		assert_eq!(
-			labels.get("shared").map(String::as_str),
-			Some("from-service")
-		);
-		assert_eq!(labels.get("only-file").map(String::as_str), Some("yes"));
-	}
-}
+mod tests;

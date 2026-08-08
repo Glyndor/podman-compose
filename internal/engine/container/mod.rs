@@ -26,8 +26,8 @@ use super::network::resolve_network_mode;
 use super::volume_mounts::build_mounts_all;
 use super::Engine;
 use fields::{
-	build_blkio_config, build_label_file_labels, parse_device, resolve_container_labels,
-	warn_swarm_only_deploy,
+	build_blkio_config, build_label_file_labels, encode_path_for_label, parse_device,
+	resolve_container_labels, warn_swarm_only_deploy,
 };
 use security::{cdi_device, parse_device_cgroup_rule, parse_security_opts};
 
@@ -127,7 +127,7 @@ impl Engine {
 		let (netns, networks) = resolve_network_mode(service_name, service, file, &self.project);
 
 		// --- Labels ---
-		let label_file_labels = build_label_file_labels(service, &self.base_dir);
+		let label_file_labels = build_label_file_labels(service, &self.base_dir)?;
 		// Per the Compose Specification, deploy.labels are set on the service
 		// only and must NOT be applied to containers, so they are not merged here.
 		let mut labels = resolve_container_labels(service, label_file_labels);
@@ -143,7 +143,9 @@ impl Engine {
 			let joined = self
 				.compose_files
 				.iter()
-				.map(|p| p.display().to_string())
+				// URL-encode any `,` so a path containing one cannot visually merge
+				// with the next entry when the joined label is split back on `,`.
+				.map(|p| encode_path_for_label(&p.display().to_string()))
 				.collect::<Vec<_>>()
 				.join(",");
 			labels.insert("podup.config-files".to_string(), joined);
