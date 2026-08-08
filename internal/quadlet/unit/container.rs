@@ -14,6 +14,7 @@ use super::{
 	render_restart, render_tmpfs_mount, render_volume, sorted_label_pairs, sorted_pairs, unit_stem,
 	QuadletUnit, Section,
 };
+use crate::quadlet::is_no_warn_set;
 
 /// Project-wide inputs every generated unit needs, as opposed to the per-service
 /// ones (`name`, `service`). Grouped rather than passed loose because the set
@@ -112,6 +113,20 @@ pub(crate) fn container_unit(
 		// No dedicated [Container] key exists for privileged mode; pass it through
 		// as a raw podman flag, like the other escape-hatch fields.
 		container.add("PodmanArgs", "--privileged".to_string());
+		// The live `up` engine emits a per-call warning for every active
+		// host-binding mode. Quadlet cannot call the engine (it has no Podman
+		// client), so it surfaces the same warning here, at generate time, so
+		// the operator sees the warning whichever path they use. The mode is
+		// still emitted below; the warning is the point. `--no-warn` opts
+		// the operator out of this one too (set via the `NoWarnGuard` the CLI
+		// driver wraps around `write_quadlet`).
+		if !is_no_warn_set() {
+			tracing::warn!(
+				"service \"{name}\": privileged: true grants every Linux capability and exposes \
+				 every host device; under rootless Podman the effect is reduced but the container \
+				 still bypasses the default capability set"
+			);
+		}
 	}
 	if service.init == Some(true) {
 		container.add("RunInit", "true".to_string());
@@ -282,7 +297,20 @@ pub(crate) fn container_unit(
 	// a non-existent dependency and fail to start. Other modes (bridge:, custom,
 	// …) have no key and are reported by collect_warnings.
 	match service.network_mode.as_deref() {
-		Some("host") => container.add("Network", "host".to_string()),
+		Some("host") => {
+			container.add("Network", "host".to_string());
+			// Quadlet emits the unit file with `Network=host` and walks away;
+			// there is no engine call to warn on it. The warning is the same
+			// one the live `up` path emits, so the operator sees an identical
+			// message whichever path they use. `--no-warn` opts the operator
+			// out of this one too.
+			if !is_no_warn_set() {
+				tracing::warn!(
+					"service \"{name}\": network_mode: host shares the host's network namespace; \
+					 the container sees host network interfaces and any port it binds is a host port"
+				);
+			}
+		}
 		Some("none") => container.add("Network", "none".to_string()),
 		Some(m) => {
 			if let Some(target) = m.strip_prefix("service:") {
@@ -292,6 +320,17 @@ pub(crate) fn container_unit(
 				);
 			} else if let Some(target) = m.strip_prefix("container:") {
 				container.add("Network", format!("container:{target}"));
+				// Sharing another container's netns collides with the same
+				// isolation argument as `host`. Podman does not warn on it at
+				// generate time, so the surface lives here. `--no-warn` opts
+				// the operator out of this one too.
+				if !is_no_warn_set() {
+					tracing::warn!(
+						"service \"{name}\": network_mode: container:{target} shares another \
+						 container's network namespace; both containers see the same network \
+						 interfaces and ports"
+					);
+				}
 			}
 		}
 		None => {}

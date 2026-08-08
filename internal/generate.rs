@@ -76,9 +76,22 @@ pub(crate) fn write_quadlet(
 	project: &str,
 	base_dir: &Path,
 	output: Option<&Path>,
+	no_warn: bool,
 ) -> podup::Result<()> {
 	// Reject configs the running commands would reject, before emitting anything.
 	validate_for_quadlet(file)?;
+
+	// The Quadlet path's host-binding / privilege-escalation warnings are
+	// gated on `--no-warn` (issue #1358). The flag lives on a thread-local
+	// because `generate_at` is a public free function and adding a parameter
+	// would be a breaking change for downstream callers (helmly-agent is one).
+	// The Quadlet command runs synchronously on the CLI thread, so a
+	// thread-local has the same observable behaviour as a parameter would.
+	let _guard = if no_warn {
+		Some(podup::quadlet::NoWarnGuard::new())
+	} else {
+		None
+	};
 
 	let result = podup::quadlet::generate_at(file, project, base_dir);
 	if let Some(dup) = result.duplicate_filename() {
@@ -141,7 +154,8 @@ mod tests {
 			"services:\n  a:\n    image: x\n    depends_on: [b]\n  b:\n    image: y\n    depends_on: [a]\n",
 		)
 		.unwrap();
-		let err = write_quadlet(&file, "proj", std::path::Path::new("/srv/app"), None).unwrap_err();
+		let err = write_quadlet(&file, "proj", std::path::Path::new("/srv/app"), None, false)
+			.unwrap_err();
 		assert!(matches!(err, podup::ComposeError::CircularDependency(_)));
 	}
 
