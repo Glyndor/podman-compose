@@ -184,6 +184,82 @@ run_root() {
 	fi
 }
 
+# Resolve the actual release tag from the GitHub releases API when the
+# caller leaves the version at its default ("latest"). The signature over
+# SHA256SUMS binds the asset bytes but not the release tag, so a CDN or
+# transparent-proxy replay can serve an older, *legitimately* signed
+# binary and matching manifest - both still verify cryptographically.
+# We pin the staged binary's reported --version to this resolved tag in
+# the self-test (verify_version_self_test) to close that window. Without
+# this resolution we cannot self-test against the literal string
+# "latest", and using the binary's own --version as the truth would be
+# circular (that is exactly the attack).
+#
+# Echoes the tag with the `v` prefix (the convention every published
+# release follows). python3 is already required for the Ed25519
+# signature check, so leaning on it for JSON parsing here does not add
+# a new dependency.
+resolve_release_tag() {
+	local api_url="https://api.github.com/repos/${REPO}/releases/latest"
+	local body
+	body="$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+		--max-time 60 -fsSL \
+		-H 'Accept: application/vnd.github+json' \
+		"$api_url")" || fail "Cannot resolve latest release tag from ${api_url}"
+	python3 - "$body" <<'PYEOF' || fail "Malformed GitHub releases JSON from /releases/latest"
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+except (json.JSONDecodeError, ValueError) as exc:
+    sys.exit(f"malformed GitHub releases JSON: {exc}")
+tag = data.get("tag_name", "")
+if not isinstance(tag, str) or not tag:
+    sys.exit(f"GitHub releases response missing tag_name: {tag!r}")
+print(tag)
+PYEOF
+}
+
+# Confirm the staged binary's --version reports the resolved release
+# tag. This closes the signed-release rollback window: a replayed older
+# binary passes the Ed25519 signature, the SHA-256 digest, and the build
+# provenance (the manifest and the asset are both legitimately signed),
+# but its --version still reports the old release. The self-test refuses
+# such an install the same way the Rust `podup update` does
+# (internal/update/install.rs:152-205).
+#
+# Strict equality, with one optional leading `v`. Each whitespace-
+# delimited token in the staged binary's --version output is compared
+# in full; a starts_with / substring match would let `3.7.0-dev` slip
+# past the `3.7.0` check, which is the rollback case this gate exists
+# to reject. Matches the Rust behaviour token-for-token.
+#
+#   verify_version_self_test <staged-path> <resolved-tag>
+verify_version_self_test() {
+	local staged="$1" expected_tag="$2"
+	local expected="${expected_tag#v}"
+
+	local reported
+	# The staged file lives in INSTALL_DIR (possibly sudo-owned) with a
+	# hidden name; reading --version requires execute permission but no
+	# read/ownership on the parent.
+	if ! reported="$("$staged" --version 2>/dev/null)"; then
+		rm -f "$staged" 2>/dev/null || true
+		fail "Could not run ${staged} --version to self-test the staged binary"
+	fi
+
+	local token
+	# shellcheck disable=SC2086  # word-splitting is intentional: $reported is the raw --version line.
+	for token in $reported; do
+		if [[ "$token" == "$expected" || "$token" == "v$expected" ]]; then
+			log_ok "Reported --version matches ${expected_tag}"
+			return 0
+		fi
+	done
+	rm -f "$staged" 2>/dev/null || true
+	log_error "Staged binary reports '${reported}', expected ${expected_tag}"
+	fail "Refusing to install: staged binary's --version does not match the resolved release tag (possible rollback) - the staged file has been removed"
+}
+
 # --- apt mode ----------------------------------------------------------------
 
 install_apt() {
@@ -283,18 +359,43 @@ or python3 with the 'cryptography' package, or set PODUP_RELEASE_PUBKEY_B64, the
 
 	verify_checksum "$ARTIFACT"
 
+	# Resolve the actual release tag for the self-test. With an explicit
+	# PODUP_VERSION=vX.Y.Z this is just that tag; with the default
+	# "latest" we hit the GitHub releases API to discover it. The signed
+	# manifest binds asset bytes but not the release tag, so we cannot
+	# use the staged binary's --version as the source of truth - that
+	# would be the attack vector.
+	local resolved_tag
+	if [[ "$VERSION" == "latest" ]]; then
+		log_info "Resolving latest release tag ..."
+		resolved_tag="$(resolve_release_tag)"
+	else
+		resolved_tag="$VERSION"
+	fi
+
 	# Stage next to the target and rename into place, so a kill mid-install can
-	# never leave a partial yet executable binary on PATH.
+	# never leave a partial yet executable binary on PATH. The version
+	# self-test runs against the staged binary before the move: a failed
+	# self-test removes the staged file and aborts the install the same
+	# way the Rust self_test does.
 	local staged="${INSTALL_DIR}/.podup.install-$$"
 	local install_cmd=(install -m 0755 "${TMP_DIR}/${ARTIFACT}" "$staged")
 	local move_cmd=(mv -f "$staged" "${INSTALL_DIR}/podup")
 	if [[ -w "$INSTALL_DIR" ]]; then
-		"${install_cmd[@]}" && "${move_cmd[@]}"
+		"${install_cmd[@]}"
 	elif command -v sudo >/dev/null 2>&1; then
 		log_info "Installing to ${INSTALL_DIR} (requires sudo) ..."
-		sudo "${install_cmd[@]}" && sudo "${move_cmd[@]}"
+		sudo "${install_cmd[@]}"
 	else
 		fail "Cannot write to ${INSTALL_DIR} and sudo is not available. Set PODUP_INSTALL_DIR to a writable directory."
+	fi
+
+	verify_version_self_test "$staged" "$resolved_tag"
+
+	if [[ -w "$INSTALL_DIR" ]]; then
+		"${move_cmd[@]}"
+	elif command -v sudo >/dev/null 2>&1; then
+		sudo "${move_cmd[@]}"
 	fi
 
 	log_ok "podup installed: $("${INSTALL_DIR}/podup" --version)"

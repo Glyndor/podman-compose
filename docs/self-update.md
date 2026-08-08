@@ -65,6 +65,28 @@ release public key is configured. There is **no opt-out**: a checksum alone is
 not a trust anchor. The `--apt` path likewise verifies the keyring package's
 Ed25519 signature before installing it as root.
 
+### Version self-test (rollback gate)
+
+The signed manifest binds the asset bytes but **not** the release tag — a CDN
+or transparent proxy able to spoof release metadata could replay an older,
+*legitimately* signed binary and matching `SHA256SUMS`, and both would still
+verify. Both `install.sh` and `install.ps1` therefore run the staged binary's
+`--version` and pin it to the resolved tag (resolved via the GitHub releases
+API when `PODUP_VERSION=latest`, or used as-is when an explicit `vX.Y.Z` is
+given). The comparison is **strict equality with one optional `v` prefix**, so
+a `3.7.0-dev` report does not slip past a `3.7.0` check — that is the rollback
+case this gate exists to reject. A mismatch removes the staged file and aborts
+the install with exit code `1`; the operator sees:
+
+```
+[fail] Staged binary reports 'podup version v3.6.0', expected v3.7.0
+Refusing to install: staged binary's --version does not match the resolved
+release tag (possible rollback) - the staged file has been removed
+```
+
+The same gate runs inside `podup update` (`internal/update/install.rs:152-205`)
+and a failed self-test there rolls back to the previous binary.
+
 `install.sh` and `install.ps1` are themselves listed in the signed `SHA256SUMS`
 manifest and carry their own `install.sh.sig` / `install.ps1.sig`, so a user
 pinning a version can verify the script before piping it to a shell — the script
