@@ -378,14 +378,54 @@ or python3 with the 'cryptography' package, or set PODUP_RELEASE_PUBKEY_B64, the
 	# self-test runs against the staged binary before the move: a failed
 	# self-test removes the staged file and aborts the install the same
 	# way the Rust self_test does.
+	#
+	# The staged binary is created private (0600) under a 077 umask so the
+	# verified bytes are never world-readable in a shared directory like
+	# /usr/local/bin during the window before the rename. The target's mode
+	# is then applied explicitly, masked with ~0o777 so a setuid/setgid/
+	# sticky bit on the target (planted or inherited) cannot ride onto the
+	# freshly installed binary — the same discipline the Rust updater
+	# follows at internal/update/install.rs:237-298. Mirrors what the
+	# Rust `install_at` does, with `install` swapped for the equivalent
+	# `cp + chmod` because `-m` only sets the mode of the *new* file and
+	# cannot start private then widen.
 	local staged="${INSTALL_DIR}/.podup.install-$$"
-	local install_cmd=(install -m 0755 "${TMP_DIR}/${ARTIFACT}" "$staged")
-	local move_cmd=(mv -f "$staged" "${INSTALL_DIR}/podup")
+	local target="${INSTALL_DIR}/podup"
+	# Read the target's mode if it exists, so the new binary takes over
+	# whatever mode the operator chose. A default install lands at 0755.
+	# stat -c %a prints the mode as an octal string ("755", "4755"…); strip
+	# the special bits explicitly rather than relying on arithmetic, so
+	# the value fed to chmod is always a plain permission string.
+	local target_mode
+	if [[ -e "$target" ]]; then
+		target_mode="$(stat -c '%a' "$target")"
+		# 4 digits → setuid/setgid/sticky + perm; 3 digits → perm only.
+		# Strip the leading digit and any special bits from the value the
+		# operator set, so a tampered planted setuid bit never propagates.
+		local perm="${target_mode: -3}"
+		# final sanity: only octal digits 0-7 survive.
+		if [[ "$perm" =~ ^[0-7]{3}$ ]]; then
+			target_mode="$perm"
+		else
+			target_mode="755"
+		fi
+	else
+		target_mode="755"
+	fi
+	# Stage next to the target: copy under a 077 umask so the verified bytes
+	# are never world-readable in a shared directory (e.g. /usr/local/bin)
+	# during the window before the chmod applies the target's mode. The
+	# chmod then widens the file to the target's ordinary permission bits,
+	# with the special bits stripped — same discipline the Rust updater
+	# follows at internal/update/install.rs:237-298.
+	local copy_cmd=(install -m 0600 "${TMP_DIR}/${ARTIFACT}" "$staged")
+	local perms_cmd=(chmod "$target_mode" "$staged")
+	local move_cmd=(mv -f "$staged" "$target")
 	if [[ -w "$INSTALL_DIR" ]]; then
-		"${install_cmd[@]}"
+		(umask 077 && "${copy_cmd[@]}" && "${perms_cmd[@]}")
 	elif command -v sudo >/dev/null 2>&1; then
 		log_info "Installing to ${INSTALL_DIR} (requires sudo) ..."
-		sudo "${install_cmd[@]}"
+		sudo sh -c "umask 077 && $(printf '%q ' "${copy_cmd[@]}") && $(printf '%q ' "${perms_cmd[@]}")"
 	else
 		fail "Cannot write to ${INSTALL_DIR} and sudo is not available. Set PODUP_INSTALL_DIR to a writable directory."
 	fi
@@ -398,7 +438,7 @@ or python3 with the 'cryptography' package, or set PODUP_RELEASE_PUBKEY_B64, the
 		sudo "${move_cmd[@]}"
 	fi
 
-	log_ok "podup installed: $("${INSTALL_DIR}/podup" --version)"
+	log_ok "podup installed: $("${target}" --version)"
 }
 
 # --- Dispatch ----------------------------------------------------------------
