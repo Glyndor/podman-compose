@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 #
 # podup installer for Windows - downloads a release binary, verifies it and
 # installs it.
@@ -313,9 +313,20 @@ sys.exit(1)
 		New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 	}
 	$target = Join-Path $InstallDir 'podup.exe'
-	# Stage next to the target and rename into place, so an interrupted install
-	# can never leave a partial yet executable binary on PATH.
-	$staged = Join-Path $InstallDir ".podup.install-$PID.exe"
+	# A running .exe cannot be overwritten, but it can be renamed. Unify
+	# with the Rust updater (internal/update/install.rs:307-325): rename
+	# the in-use target aside to *.old, move the staged binary in, then
+	# best-effort remove the leftover. If the staged → target rename
+	# fails, the old binary is restored from *.old so the user is never
+	# left without a working podup. The *.old path follows the target's
+	# basename rather than a PID-suffix, so a kill between the two
+	# renames leaves a single recoverable sibling rather than a
+	# stale partial.
+	$backup = [System.IO.Path]::ChangeExtension($target, '.old')
+	$staged = Join-Path $InstallDir '.podup.install.exe'
+	if (Test-Path -LiteralPath $staged) {
+		Remove-Item -LiteralPath $staged -Force
+	}
 	Copy-Item -Path $artifactPath -Destination $staged -Force
 
 	# Self-test against the staged binary BEFORE the move into place. The
@@ -327,7 +338,34 @@ sys.exit(1)
 	# internal/update/install.rs:152-205.
 	Test-StagedVersion -StagedPath $staged -ResolvedTag $ResolvedTag
 
-	Move-Item -Path $staged -Destination $target -Force
+	# Move the in-use target aside. Drop any stale leftover from a prior
+	# interrupted install (a best-effort removal we still clean up at the
+	# start of the next run, but the install path itself should not blow
+	# up on it).
+	if (Test-Path -LiteralPath $backup) {
+		Remove-Item -LiteralPath $backup -Force
+	}
+	if (Test-Path -LiteralPath $target) {
+		Move-Item -LiteralPath $target -Destination $backup -Force
+	}
+	# Move the verified staged binary into place. If this fails (target
+	# directory read-only, AV scanner has the file open, …) restore the
+	# old binary so podup is not uninstalled by a failed upgrade.
+	try {
+		Move-Item -LiteralPath $staged -Destination $target -Force
+	} catch {
+		if (Test-Path -LiteralPath $backup) {
+			try {
+				Move-Item -LiteralPath $backup -Destination $target -Force
+			} catch {
+				Fail "Failed to install the new binary AND to restore the previous one from $backup - re-run the installer: $($_.Exception.Message)"
+			}
+		}
+		Fail "Failed to install the new binary, restored the previous one from $backup: $($_.Exception.Message)"
+	}
+	# Best-effort remove the *.old: it may still be locked by the running
+	# process, in which case the next updater run reaps it on entry.
+	Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
 
 	# Add the install dir to the user PATH if it is not already there.
 	$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
