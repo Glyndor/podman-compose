@@ -11,12 +11,15 @@ use crate::libpod::API_PREFIX;
 use crate::{ports, size};
 
 mod fields;
+mod host_mode;
 mod resolve;
 mod security;
 use resolve::{
 	build_env, resolve_links, resolve_stop_signal, resolve_volume_name, resolve_volumes_from,
 };
 pub(crate) use resolve::{config_hash, resolve_bind_source};
+
+pub(crate) use host_mode::check_host_mode;
 
 use super::container_config::{
 	build_healthcheck, build_log_config, build_resource_limits, build_restart_policy,
@@ -235,6 +238,18 @@ impl Engine {
 
 		for warning in rootless_caveat_warnings(service_name, service) {
 			tracing::warn!("{warning}");
+		}
+
+		// Surface every active host-binding / privilege-escalation mode the
+		// compose file declared. The warning is emitted *before* the spec is
+		// POSTed so a host-mode the operator did not intend never reaches the
+		// daemon — the log line is the only signal they get, and it has to
+		// arrive before the API call succeeds. `--no-warn` is the escape
+		// hatch for operators who wrote the compose file deliberately.
+		if !self.no_warn {
+			for w in check_host_mode(service_name, service) {
+				tracing::warn!("{}", w.message);
+			}
 		}
 
 		let stop_signal = service

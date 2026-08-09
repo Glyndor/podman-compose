@@ -532,7 +532,13 @@ async fn run() -> podup::Result<()> {
 		// Absolute base dir so a `.build` unit's context resolves under the compose
 		// file, not the unit directory the systemd generator would otherwise use.
 		let base_dir = std::fs::canonicalize(&base_dir).unwrap_or(base_dir);
-		return write_quadlet(&filtered, &project, &base_dir, output.as_deref());
+		return write_quadlet(
+			&filtered,
+			&project,
+			&base_dir,
+			output.as_deref(),
+			cli.no_warn,
+		);
 	}
 
 	// `autostart` manages a rootless `systemctl --user` unit that brings the stack
@@ -603,7 +609,8 @@ async fn run() -> podup::Result<()> {
 		.with_run_env_files(cli.env_file.clone())
 		.with_run_labels(startup::run_labels_for(&cli.command))
 		.with_run_no_tty(startup::run_no_tty_for(&cli.command))
-		.with_renew_anon_volumes(renew_anon_volumes);
+		.with_renew_anon_volumes(renew_anon_volumes)
+		.with_no_warn(cli.no_warn);
 
 	// Serialize mutating lifecycle commands against concurrent `podup` runs on
 	// the same project. Read-only / follow commands (ps, logs, top, port,

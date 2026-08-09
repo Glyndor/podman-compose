@@ -23,6 +23,7 @@ These appear before the subcommand and may also come from the environment.
 | `--project-directory <PATH>` | | Base directory for relative paths (env_file, build context, bind mounts, config/secret sources). Defaults to the compose file's directory. |
 | `--ansi <WHEN>` | | Colour output: `auto`, `always` or `never`. `always` forces colour even into a pipe or file. | 
 | `--env-file <PATH>` | | Env file(s) for interpolation. Repeatable; later files win. **Replaces** a project `.env` rather than adding to it — when this is given, `.env` is not read. The process environment still takes precedence over both. |
+| `--no-warn` | | Suppress the host-binding / privilege-escalation warnings the engine emits during `up`/`create`/`run`/`exec` (e.g. `network_mode: host`, `privileged: true`, `pid: host`, `container:<id>` namespace sharing). Operators who wrote the compose file deliberately use this to silence the per-run warning. `podup config` still surfaces the active modes at default log level — that command is the "show me what will happen" path, where the warning is the whole point. | off |
 
 **Profiles activate their dependencies.** A service left out by profile
 filtering is still started when a service that *is* running declares

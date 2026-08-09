@@ -227,6 +227,18 @@ impl Engine {
 			.services
 			.get(service_name)
 			.ok_or_else(|| ComposeError::ServiceNotFound(service_name.into()))?;
+		// Surface the same host-binding / privilege-escalation warnings the
+		// `up` path would have emitted, so `exec` against a privileged or
+		// host-networked container does not appear safer than the same
+		// container's `up`. The container itself was created with these modes,
+		// but `exec` is the operator's chance to notice them — and the command
+		// they are about to run executes inside that container. `--no-warn`
+		// still opts out.
+		if !self.no_warn {
+			for w in crate::engine::container::check_host_mode(service_name, service) {
+				tracing::warn!("{}", w.message);
+			}
+		}
 		// Resolve the target replica against the *running* containers (matching
 		// `cp`), so `--index N` and a bare `exec` reach a live replica of a service
 		// scaled by an earlier `up --scale`/`scale` — not just the compose static

@@ -140,6 +140,13 @@ pub struct Engine {
 	/// matters because podup is consumed as a library and a caller may hold more
 	/// than one engine.
 	pub(super) images_seen_present: std::sync::Mutex<std::collections::HashSet<String>>,
+	/// CLI `--no-warn`: suppress the host-binding / privilege-escalation
+	/// warnings the engine emits during `up`/`create`/`run`/`exec`. The
+	/// operator wrote the compose file deliberately, so the default-warning
+	/// behaviour is opt-out per run rather than per command. `config`'s
+	/// surface-mode listing is unaffected — `config` is the "show me what
+	/// will happen" command, so the warnings stay visible there.
+	pub(super) no_warn: bool,
 }
 
 impl Engine {
@@ -182,6 +189,7 @@ impl Engine {
 			run_no_tty: false,
 			renew_anon_volumes: false,
 			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
+			no_warn: false,
 		}
 	}
 
@@ -203,6 +211,7 @@ impl Engine {
 			run_no_tty: false,
 			renew_anon_volumes: false,
 			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
+			no_warn: false,
 		}
 	}
 
@@ -283,6 +292,18 @@ impl Engine {
 	/// recreating a container also removes its old anonymous volumes.
 	pub fn with_renew_anon_volumes(mut self, renew: bool) -> Self {
 		self.renew_anon_volumes = renew;
+		self
+	}
+
+	/// Set the CLI `--no-warn` flag. Builder-style; when set, the engine
+	/// suppresses the host-binding / privilege-escalation warnings it emits
+	/// during `up`/`create`/`run`/`exec`. Operators who deliberately wrote
+	/// `privileged: true` (or any other host-binding mode) into the compose
+	/// file use this to silence the per-run warning; `config`'s surface-mode
+	/// listing is unaffected (`config` is the "show me what will happen"
+	/// command, where the warning is the whole point).
+	pub fn with_no_warn(mut self, no_warn: bool) -> Self {
+		self.no_warn = no_warn;
 		self
 	}
 
@@ -513,6 +534,23 @@ impl Engine {
 /// value was rejected.
 pub(super) fn to_query_json<T: serde::Serialize>(what: &str, v: &T) -> Result<String> {
 	serde_json::to_string(v).map_err(|e| ComposeError::Build(format!("invalid {what}: {e}")))
+}
+
+/// Emit one `tracing::warn!` per active host-binding / privilege-escalation mode
+/// across every service in `file`.
+///
+/// The `config` command uses this to surface the active modes at the default
+/// log level (CI logs see them even when the operator never runs `up`). It is
+/// deliberately not gated on `--no-warn` — `config` is the "show me what will
+/// happen" command, where the warning is the whole point. The live
+/// `up`/`create`/`run`/`exec` paths emit the same warnings per-call but honour
+/// `--no-warn`.
+pub fn surface_host_modes(file: &crate::compose::types::ComposeFile) {
+	for (name, service) in &file.services {
+		for w in self::container::check_host_mode(name, service) {
+			tracing::warn!("{}", w.message);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
