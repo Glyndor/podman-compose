@@ -152,7 +152,7 @@ jobs:
                 # This used to say the drops were specific to the nested-virt
                 # (VM-in-runner) transport, and that a single-level VM "never
                 # drops a byte". **That is measured false** (2026-08-03, #1322):
-                # on a plain KVM guest with Podman 6.0.1, the same suite fails
+                # on a plain KVM guest with Podman 6.0.2, the same suite fails
                 # 17 of 27 at eight test threads and 3 at one — a clean
                 # dose-response curve in thread count, reproducible across
                 # repetitions. Nesting makes it worse; it does not cause it.
