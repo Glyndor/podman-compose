@@ -85,7 +85,14 @@ jobs:
                   echo "=== nested-virt transient on attempt $attempt; retrying ==="
                 done
                 tail -20 /tmp/cov.log
-                awk '$1=="TOTAL" { for (i=1;i<=NF;i++) if ($i ~ /%$/) { print $i; exit } }' /tmp/cov.log
+                # Emit exactly one `PODUP_COVERAGE=<pct>` line for the gate step
+                # to parse. The previous script printed the coverage only as part
+                # of the tail output, which the gate's `grep -oE 'PODUP_COVERAGE=…'`
+                # never matched — the gate treated the whole run as a missing
+                # number and exited 0 with a `::warning::`. Branch is fixed in
+                # one place so the gate (the contract the lane actually measures)
+                # sees a clean number.
+                awk '$1=="TOTAL" { for (i=1;i<=NF;i++) if ($i ~ /%$/) { print "PODUP_COVERAGE=" $i; exit } }' /tmp/cov.log
                 echo "PODUP_COVERAGE_BRANCH=develop"
           runcmd:
             - bash -c 'dnf install -y podman rust cargo gcc git llvm >/dev/console 2>&1'
@@ -118,7 +125,12 @@ jobs:
           # takes develop below 88% is the early warning this workflow
           # exists to surface — the same shape of break, in the half-life
           # before the next release PR.
-          COV_INT=$(printf '%.0f' "${COV%%%}")
+          # `cargo llvm-cov` emits a percent like `91.30%`. Strip the
+          # trailing `%` and the fractional part (`cut -d. -f1`) so
+          # `printf '%d'` gets an integer — `printf '%.0f' "91.30"` errors
+          # with `invalid number`, and the whole job fails closed exactly
+          # when a regression would otherwise have been missed.
+          COV_INT=$(printf '%d' "$(echo "$COV" | tr -dc '0-9.' | cut -d. -f1)")
           if [ "$COV_INT" -lt 88 ]; then
             echo "::error::develop coverage $COV is below the 88% nightly floor (#1380)."
             exit 1
