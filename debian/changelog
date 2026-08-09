@@ -1,3 +1,76 @@
+podup (3.7.0) unstable; urgency=medium
+
+  Added
+
+  * A nightly live-Podman coverage gate now runs on the `develop` branch
+    (`podman-lane-develop-nightly` workflow). The `main` nightly was the only
+    signal that a regression landing on `develop` had broken coverage in the
+    half-life before the next release PR; the develop nightly closes that gap
+    with the same 88% floor on the Podman 6 leg.
+  * Per-engine project-label cache. The URL-encoded
+    `{"label":["podup.project={name}"]}` JSON is built once when the engine is
+    constructed; the dynamic sites (those that add a second predicate like
+    `podup.service={svc}`) splice the raw label and re-encode only once. The
+    per-call `format!` + `serde_json::to_string` + `urlencoded` on every
+    container-list / network-list call is gone.
+  * `write_frame` shared helper in the engine: probes `std::str::from_utf8`
+    first and only falls through to `String::from_utf8_lossy` on the rare
+    invalid-byte case, dropping the per-frame `Cow` allocation on the happy
+    `run` path.
+
+  Fixed
+
+  * `interpolate_value` gates the parent mapping rebuild on
+    `mapping_needs_interp`, which only enters the rebuild when a descendant
+    string actually carries a `$`. The 10k key/value pairs on a 100-service
+    file no longer move for free.
+  * The progress ticker re-probed terminal capabilities and queried the
+    window size on every 100 ms tick; both are now cached at `begin()` and
+    re-read only when the size actually matters. `progress_line` also took
+    a global `Mutex` lock per emission, which was paid even when no board
+    was open; an `AtomicBool` short-circuits the hot path.
+  * `identity_style` allocated a `format!("{p}-")` per call; the prefix
+    is now cached in `PROJECT_PREFIX`, set in `set_project` and read by
+    `identity_slot`.
+  * `restart_service_set` returned `(all.clone(), all)` for the
+    empty-targets branch, paying two clones of a 100-service set; it now
+    returns `(Arc<HashSet<String>>, Arc<HashSet<String>>)` so the two halves
+    share one `Arc::clone` and the dependents-included branch is the only
+    place that still allocates.
+  * `is_exec_teardown_noise` matched any stderr line containing
+    `unixpacket` and `connection reset by peer`; a Go program logging
+    `dial unixpacket: connection reset by peer` had its line silently
+    dropped. The match now anchors on the `read unixpacket` system prefix
+    so a real program's log is preserved.
+  * `confirm_lost_response` compared `state == Some("running")` literally;
+    switched to `eq_ignore_ascii_case` so a future libpod returning
+    `Running` or `RUNNING` does not produce a false negative.
+  * `libpod_pull_policy` warned and silently fell back to `missing` for an
+    unknown value; a typo'd `pull_policy: alaways` previously turned into
+    the opposite of what the user wrote (a `never` typo pulled fresh images
+    on every `up`). An unknown value is now a hard error with the accepted
+    list in the message.
+  * `Engine::run_lifecycle_hook` held the stdout lock for the whole
+    stream, serialising the hook behind any other writer for its entire
+    lifetime. The lock is now per-frame, symmetric with stderr.
+  * `libpod/client/mod.rs` and `engine/mod.rs` exceeded the 500-line hard
+    cap that the org's `line-limit` reusable enforces. The libpod client
+    methods are now split into per-verb files (`get.rs`, `post.rs`,
+    `put.rs`, `delete.rs`, `misc.rs`); the engine helpers
+    (`walk_dir`/`walk_collect`, the interactive-detection, the replica
+    name resolution, the project-label filter cache) each moved to
+    their own module. Both files are now under 500 code lines, so the
+    per-PR lane is no longer red on the `line-limit` check.
+
+  Changed
+
+  * The Podman baseline moved to **6.0.2** (was 6.0.1). Re-validated via
+    the live-Podman lane on a fresh Fedora rawhide cloud image;
+    `PODUP_SUMMARY pass=179 fail=0 flaky=0` on the Podman 6 leg, no new
+    identities on the per-major known-failures list.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sun, 09 Aug 2026 12:55:00 -0500
+
 podup (3.6.1) unstable; urgency=medium
 
   Fixed
