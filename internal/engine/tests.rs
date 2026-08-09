@@ -197,3 +197,46 @@ fn order_replicas_sorts_by_replica_number() {
 		names(&["proj-web-1", "proj-web-2", "proj-web-10"])
 	);
 }
+
+// `project_label_filter_*` (#1364)
+
+/// The cached `{"label":["podup.project=<name>"]}` JSON for container
+/// listings is built once per `Engine` and reused across every
+/// container-list call site. The two halves of the cache agree on the
+/// project name and on the URL-encoded JSON shape.
+#[test]
+fn project_label_cache_matches_handbuilt_filter() {
+	let e = engine("demo");
+	let expected = crate::libpod::urlencoded(
+		&serde_json::json!({ "label": ["podup.project=demo"] }).to_string(),
+	);
+	assert_eq!(e.project_label_filter_encoded(), expected);
+	// The raw label is the splice point for the dynamic sites.
+	assert_eq!(e.project_label_raw(), "podup.project=demo");
+}
+
+/// The container and network cache halves are the same JSON, so the
+/// network-side call site can reuse the same encoding (#1364).
+#[test]
+fn project_label_cache_container_and_network_match() {
+	let e = engine("demo");
+	assert_eq!(
+		e.project_label_filter_encoded(),
+		e.project_network_filter_encoded(),
+	);
+}
+
+/// The dynamic filter (one extra label) splices the project label once and
+/// re-encodes only once, matching the hand-built filter for the same labels.
+#[test]
+fn project_label_filter_with_splices_project_once() {
+	let e = engine("demo");
+	let with = e.project_label_filter_with(["podup.service=web".to_string()]);
+	let expected = crate::libpod::urlencoded(
+		&serde_json::json!({
+			"label": ["podup.project=demo", "podup.service=web"],
+		})
+		.to_string(),
+	);
+	assert_eq!(with, expected);
+}
