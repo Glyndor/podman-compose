@@ -144,9 +144,15 @@ pub struct Engine {
 	/// warnings the engine emits during `up`/`create`/`run`/`exec`. The
 	/// operator wrote the compose file deliberately, so the default-warning
 	/// behaviour is opt-out per run rather than per command. `config`'s
-	/// surface-mode listing is unaffected — `config` is the "show me what
-	/// will happen" command, so the warnings stay visible there.
+	/// surface-mode listing is unaffected — `config` is the "show me what will
+	/// happen" command, where the warnings stay visible there.
 	pub(super) no_warn: bool,
+	/// The pre-URL-encoded libpod `filters` JSON object that scopes a
+	/// container-list call to this project's `podup.project={name}` label,
+	/// plus the raw `podup.project={name}` label string. Built once per
+	/// [`Engine`] so call sites do not pay `format!` + `serde_json::to_string`
+	/// + `urlencoded` on every invocation (#1364).
+	project_label: ProjectLabelParts,
 }
 
 impl Engine {
@@ -175,7 +181,7 @@ impl Engine {
 		};
 		Self {
 			client,
-			project,
+			project: project.clone(),
 			base_dir,
 			compose_files: Vec::new(),
 			stop_timeout: None,
@@ -190,6 +196,7 @@ impl Engine {
 			renew_anon_volumes: false,
 			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
 			no_warn: false,
+			project_label: build_project_label_parts(&project),
 		}
 	}
 
@@ -197,7 +204,7 @@ impl Engine {
 	pub fn with_base_dir(client: Client, project: String, base_dir: PathBuf) -> Self {
 		Self {
 			client,
-			project,
+			project: project.clone(),
 			base_dir,
 			compose_files: Vec::new(),
 			stop_timeout: None,
@@ -212,6 +219,7 @@ impl Engine {
 			renew_anon_volumes: false,
 			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
 			no_warn: false,
+			project_label: build_project_label_parts(&project),
 		}
 	}
 
@@ -318,6 +326,46 @@ impl Engine {
 			.scale
 			.or(service.deploy.as_ref().and_then(|d| d.replicas))
 			.unwrap_or(1) as usize
+	}
+
+	/// The cached URL-encoded `{"label":["podup.project=…"]}` JSON for the
+	/// container-list call sites that scope by the project label only
+	/// (#1364).
+	pub(super) fn project_label_filter_encoded(&self) -> &str {
+		&self.project_label.encoded
+	}
+
+	/// The cached URL-encoded `{"label":["podup.project=…"]}` JSON for
+	/// network-list call sites. Identical to the container version because
+	/// libpod's network and container label filters take the same shape
+	/// (#1364).
+	pub(super) fn project_network_filter_encoded(&self) -> &str {
+		&self.project_label.network_encoded
+	}
+
+	/// The cached raw `podup.project={name}` label string, exposed for the
+	/// dynamic sites (those that combine the project label with a second
+	/// predicate like `podup.service={svc}`) so they can splice the project
+	/// half into their own JSON without reformatting it on every call
+	/// (#1364).
+	pub(super) fn project_label_raw(&self) -> &str {
+		&self.project_label.raw
+	}
+
+	/// Build the URL-encoded `{"label":[…]}` filter for a project container
+	/// call that needs one extra label predicate (typically `podup.service=`).
+	/// `extras` carries the additional labels verbatim; the project label is
+	/// spliced in once per call so the only `format!` is on the caller's
+	/// extras (#1364).
+	pub(super) fn project_label_filter_with(
+		&self,
+		extras: impl IntoIterator<Item = String>,
+	) -> String {
+		let mut labels: Vec<String> = Vec::new();
+		labels.push(self.project_label.raw.clone());
+		labels.extend(extras);
+		let filter = serde_json::json!({ "label": labels });
+		crate::libpod::urlencoded(&filter.to_string())
 	}
 
 	pub(super) async fn run_lifecycle_hook(
@@ -596,6 +644,41 @@ fn resolve_replica_name(
 			.into_iter()
 			.next()
 			.ok_or_else(|| ComposeError::ServiceNotFound(service_name.into())),
+	}
+}
+
+/// The pre-URL-encoded libpod `filters` JSON object that scopes a
+/// container-list call to this project's `podup.project={name}` label, plus
+/// the raw `podup.project={name}` label string. Built once per [`Engine`] so
+/// call sites do not pay `format!` + `serde_json::to_string` + `urlencoded`
+/// on every invocation (#1364).
+///
+/// Both halves are returned together because they always come from the same
+/// `project` string; the dynamic sites (those that add a second predicate
+/// like `podup.service={svc}`) need the unencoded label to splice into their
+/// own JSON.
+struct ProjectLabelParts {
+	/// The URL-encoded `{"label":["podup.project={name}"]}` filter for
+	/// container-list calls.
+	encoded: String,
+	/// The URL-encoded `{"label":["podup.project={name}"]}` filter for
+	/// network-list calls. libpod's network and container label filters take
+	/// the same shape, so the JSON is the same and only the URL is needed
+	/// once (#1364).
+	network_encoded: String,
+	/// The raw `podup.project={name}` label, for splicing into larger filter
+	/// objects.
+	raw: String,
+}
+
+fn build_project_label_parts(project: &str) -> ProjectLabelParts {
+	let raw = format!("podup.project={project}");
+	let filter = serde_json::json!({ "label": [raw.clone()] });
+	let serialized = filter.to_string();
+	ProjectLabelParts {
+		encoded: crate::libpod::urlencoded(&serialized),
+		network_encoded: crate::libpod::urlencoded(&serialized),
+		raw,
 	}
 }
 

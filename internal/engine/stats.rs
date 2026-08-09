@@ -479,10 +479,9 @@ impl Engine {
 		file: &ComposeFile,
 		target_services: &[String],
 	) -> Result<Vec<TargetContainer>> {
-		let filters = serde_json::json!({ "label": [format!("podup.project={}", self.project)] });
 		let path = format!(
 			"{API_PREFIX}/containers/json?all=true&filters={}",
-			urlencoded(&filters.to_string()),
+			self.project_label_filter_encoded(),
 		);
 		let entries = self
 			.client

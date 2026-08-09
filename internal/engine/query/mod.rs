@@ -552,10 +552,9 @@ impl Engine {
 	/// the end was expected, so the caller keeps the original error rather than
 	/// masking a possible failure. Mirrors the fail-closed rule `stats` uses.
 	pub(super) async fn container_still_running(&self, container_name: &str) -> Option<bool> {
-		let filters = serde_json::json!({ "label": [format!("podup.project={}", self.project)] });
 		let path = format!(
 			"{API_PREFIX}/containers/json?all=true&filters={}",
-			urlencoded(&filters.to_string()),
+			self.project_label_filter_encoded(),
 		);
 		let entries = self
 			.client
@@ -578,11 +577,9 @@ impl Engine {
 	/// Names of this project's containers (by label) that the current compose file
 	/// no longer defines — the orphans, shared by removal and the warning.
 	async fn orphan_container_names(&self, file: &ComposeFile) -> Result<Vec<String>> {
-		let label = format!("podup.project={}", self.project);
-		let filters = serde_json::json!({ "label": [label] });
 		let path = format!(
 			"{API_PREFIX}/containers/json?all=true&filters={}",
-			urlencoded(&filters.to_string()),
+			self.project_label_filter_encoded(),
 		);
 
 		let running = self
