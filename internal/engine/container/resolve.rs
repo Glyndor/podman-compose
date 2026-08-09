@@ -178,10 +178,17 @@ pub(super) fn resolve_volumes_from(
 pub(crate) fn config_hash(service: &Service, file: &ComposeFile) -> Result<String> {
 	use sha2::{Digest, Sha256};
 	let mut hasher = Sha256::new();
-	// Canonicalise through `serde_json::Value` first: object keys are emitted in
-	// sorted order, so map-typed fields (e.g. `storage_opt`) cannot reorder
-	// between runs and flap the hash into a spurious recreate. Fail closed if
-	// serialization fails (e.g. a non-scalar mapping key in an `x-` extension):
+	// Canonicalise through `serde_json::Value` first: `Value::Object` is
+	// backed by a `BTreeMap` (see `serde_json::Map`), so a `to_value` then
+	// `to_vec` round-trip emits map keys in lexicographic order regardless of
+	// how the service's `HashMap`-typed fields happen to iterate. A direct
+	// `to_vec(&service)` walks the field's `HashMap` directly and produces
+	// different bytes for different iteration orders, which would flap the
+	// hash on every parse and trigger spurious recreates. The double
+	// serialisation is therefore load-bearing for the stable-hash invariant
+	// (#1364 deferred the proposed optimisation — see
+	// `config_hash_stable_despite_map_field_order`). Fail closed if either
+	// step fails (e.g. a non-scalar mapping key in an `x-` extension):
 	// returning an empty/default hash would make distinct services hash
 	// identically and silently suppress recreation and inline-secret rotation.
 	let serialized = serde_json::to_value(service)
@@ -229,9 +236,16 @@ fn hash_inline_payload(
 	environment: Option<&str>,
 ) {
 	use sha2::Digest;
-	let payload = match (content, environment) {
-		(Some(c), _) => Some(c.as_bytes().to_vec()),
-		(None, Some(var)) => Some(std::env::var(var).unwrap_or_default().into_bytes()),
+	// The environment-sourced branch holds the resolved `String` in a local so
+	// the `&[u8]` view stays alive across `update()` (#1364 — also E0716
+	// otherwise: a temporary `as_bytes()` is freed at end of statement).
+	let env_value;
+	let payload: Option<&[u8]> = match (content, environment) {
+		(Some(c), _) => Some(c.as_bytes()),
+		(None, Some(var)) => {
+			env_value = std::env::var(var).unwrap_or_default();
+			Some(env_value.as_bytes())
+		}
 		(None, None) => None,
 	};
 	if let Some(payload) = payload {
@@ -239,7 +253,9 @@ fn hash_inline_payload(
 		hasher.update(name.as_bytes());
 		// Length-prefix so (name, payload) pairs cannot be confused across refs.
 		hasher.update((payload.len() as u64).to_le_bytes());
-		hasher.update(&payload);
+		// `update` takes `impl AsRef<[u8]>`; `&[u8]` skips the `.to_vec()`
+		// round-trip the previous code paid (#1364).
+		hasher.update(payload);
 	}
 }
 
