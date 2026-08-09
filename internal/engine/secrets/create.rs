@@ -100,6 +100,33 @@ impl Engine {
 	/// 5.x builds reject when the secret does not yet exist — the internal delete
 	/// fails with "no secret data with ID"), the existing secret of this name is
 	/// removed first (a 404 is fine) and then created fresh.
+	///
+	/// # Concurrency contract — read before touching the inspect → delete → create sequence
+	///
+	/// The inspect-then-delete-then-create is **not** atomic at the libpod wire
+	/// level, so a race in the window could delete something the caller does
+	/// not own or land a state inconsistent with what the inspect claimed. Two
+	/// guards close the cases that matter in practice:
+	///
+	/// 1. The **cross-invocation** case is closed by the per-project lock
+	///    ([`crate::engine::lock`]) held for the duration of `up`. Two
+	///    `podup` processes touching the same project serialise through it,
+	///    so the inspect is never stale across processes.
+	/// 2. The **within-invocation** case is closed by the project-scoped
+	///    naming. Every secret created here has a name of the form
+	///    `<project>_...`, which is unique to this `Engine` instance, and the
+	///    inspect rejects any name that does not carry `podup.project=<proj>`
+	///    — so a foreign secret of the same literal name is refused rather
+	///    than clobbered. A race with the same project therefore cannot
+	///    happen in the same process.
+	///
+	/// What these two guards do **not** cover: an external actor (a manual
+	/// `podman secret create`, a separate compose stack, a test harness) that
+	/// claims a project-scoped name in the window between inspect and create.
+	/// That falls through to a `500 from libpod`, which this function
+	/// recognises and rewraps into a legible "something else created a secret
+	/// of that name in between" message — the operator can act on it without
+	/// having to read the libpod error verbatim.
 	async fn create_secret(&self, name: &str, payload: &[u8]) -> Result<()> {
 		check_secret_size(name, payload.len())?;
 		// Guard the delete-then-create: if a secret of this name already exists and

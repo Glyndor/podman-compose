@@ -143,12 +143,33 @@ pub struct Engine {
 }
 
 impl Engine {
-	/// Create an engine for `project_name` using the working directory as the base path for relative volume mounts.
+	/// Create an engine for `project_name` using the working directory as the
+	/// base path for relative volume mounts.
+	///
+	/// If the working directory cannot be resolved (the process's CWD was
+	/// deleted or is unreadable at construction time), the engine falls back
+	/// to an empty `base_dir` and a warning is logged. Callers that need a
+	/// definite base directory — the CLI does — should use
+	/// [`Engine::with_base_dir`] instead, which surfaces a missing or
+	/// unreadable directory as a hard error rather than a silent empty
+	/// path that later surfaces as a confusing "compose file not found".
 	pub fn new(client: Client, project: String) -> Self {
+		let base_dir = match std::env::current_dir() {
+			Ok(dir) => dir,
+			Err(e) => {
+				tracing::warn!(
+					"cannot resolve the current working directory ({e}); base_dir is empty \
+					 and relative paths (compose files, volume mounts, env_file sources) \
+					 will not resolve. Use Engine::with_base_dir to set an explicit base \
+					 directory."
+				);
+				PathBuf::new()
+			}
+		};
 		Self {
 			client,
 			project,
-			base_dir: std::env::current_dir().unwrap_or_default(),
+			base_dir,
 			compose_files: Vec::new(),
 			stop_timeout: None,
 			scale_overrides: std::collections::HashMap::new(),
