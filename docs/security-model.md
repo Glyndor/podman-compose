@@ -154,6 +154,110 @@ substitution is the failure mode `SHA256SUMS` cannot catch: the manifest can be
 re-signed to match the swapped binary, so trusting `SHA256SUMS.sig` alone
 leaves a hole. The per-asset loop closes it.
 
+## What podup trusts libpod to defend
+
+Every cross-layer transition from the compose file into the libpod API is
+filtered by an in-crate validator before the call is made, on the principle
+that a hostile or buggy libpod must not be enough on its own to push bad
+data into a process or onto disk:
+
+- **Container, project, volume, secret, network, and config names** are
+  matched against the podman object-name pattern (`[a-zA-Z0-9][a-zA-Z0-9_.-]*`)
+  in `is_valid_object_name`; an invalid name is rejected client-side with a
+  clear error instead of an opaque libpod HTTP 500.
+- **Project names** are filtered through `is_safe_project_name` (lowercase ASCII
+  letter/digit followed by lowercase letters/digits/`-`/`_`, ≤ 128 chars) at
+  the dispatch boundary, so the value never reaches a code path that builds
+  a filesystem path from it.
+- **URL paths** go through `urlencoded` so container names, project names,
+  and tags with arbitrary bytes reach libpod as a single encoded segment.
+- **Quadlet values** are filtered through `escape_unit_value` /
+  `safe_unit_stem`; the unit filename is checked again by `write_units` so
+  a poisoned value cannot break out of the output directory.
+- **Signal names** are resolved to numbers through `resolve_stop_signal` —
+  the libpod endpoint is a number, a string returns HTTP 500.
+- **Pull policies** are normalised through `libpod_pull_policy`; an
+  unrecognised value is a hard error rather than a silent default, so a
+  typo'd `pull_policy: alaways` does not flip the policy the user intended.
+- **Timeouts** are parsed by `parse_timeout` and clamped; an out-of-range
+  value is rejected, not silently zeroed.
+- **Self-update bytes** are verified against an Ed25519 signature
+  (`RELEASE_PUBKEYS`) plus a SHA-256 manifest match, then installed through
+  an `O_NOFOLLOW` rename with the running binary's mode preserved. The
+  staged binary's `--version` is checked against the resolved release tag
+  before the in-place swap.
+
+## What podup does not defend
+
+podup is not a sandbox. The points below are **documented gaps** an operator
+or auditor must know about, and they are not changed by tightening the
+filters above. They are not flaws; they are the conscious boundary.
+
+- **A compose file that asks for a privilege podup has no policy on.** A
+  `cap_add: [SYS_ADMIN]`, `pid: host`, `network_mode: host`, or
+  `runtime: /path/to/binary` is forwarded to libpod as-is. podup emits a
+  `tracing::warn!` per active host-binding / privilege-escalation mode
+  (`network_mode: host`, `privileged: true`, `pid`/`ipc`/`uts`/`cgroup`/`userns_mode: host`,
+  and the `container:<id>` namespace-sharing form) and the `config`
+  command surfaces the same modes at default log level. The actual gate
+  is libpod's own validator; podup does not second-guess it.
+- **Compose-sourced paths are unconfined by design.** `label_file`,
+  `env_file`, `extends.file`, `include`, `secrets.file`, `build.context`,
+  and the bind sources in `volumes:` accept `../` and absolute paths; the
+  spec treats them as trusted operator input. The operator who runs
+  `podup` on a compose file is the one choosing to honour those paths —
+  the same posture a `Makefile` has.
+- **Inline-secret `file:` sources have a point-in-time lifetime.** The
+  bytes are read at `up`, copied into a Podman-native secret, and persist
+  until the next `up` overwrites. Editing the file on disk after `up`
+  does not propagate; recreate the container to pick up the new value.
+- **The static-review sweep surfaced real limits that podup cannot fully
+  close by itself.** Whether libpod's per-field validators actually reject
+  every value podup forwards is verifiable only by running against a real
+  Podman; whether the live streaming endpoints are reachable in production
+  is verifiable only by fuzzing and by the live integration lane (see
+  below). podup keeps both as required checks; it does not claim the
+  check is exhaustive.
+
+## What the live integration lane validates
+
+The `podman-lane` workflow boots Fedora qemu VMs in the runner (nested-virt —
+`ubuntu-24.04` exposes `/dev/kvm`) with full systemd, once per supported
+Podman major (Fedora 44 for Podman 5, rawhide for Podman 6). Each VM runs
+the integration suite as a rootless user. The lane is a **required status
+check** on every pull request; the nightly schedule and the lane-internal
+`PODUP_REQUIRE_PODMAN=1` together close the "no engine, all tests skip"
+green path the unit suite can otherwise open. The per-major
+`.github/podman-known-failures-<major>` files are a **classification** of
+the failures the lane still sees, not a count; any test that fails without
+appearing on its major's list is reported as an unexpected regression.
+
+The lane's `--test-threads` cap is set to the largest value that keeps the
+connection-drop noise the nested-virt transport adds under control; bumping
+it costs roughly twenty minutes per leg per run. The suite's per-test
+identity (not just the pass count) is what tells a regression from a
+flaky drop, and the lane's retry loop covers exactly the drop signatures
+the transport produces.
+
+## What static review cannot tell us
+
+A static reviewer reads source. Several questions raised by the 2026
+audit of podup are not decidable from source alone:
+
+- Whether libpod's per-field validators actually reject everything podup
+  forwards. The integration lane (above) is the answer, and it is run
+  against every supported Podman major on every engine change.
+- Whether the rollback attack via CDN re-sign of an older release would
+  be accepted by a field binary. The PoC for that is in
+  `install.sh:verify_version_self_test` and `install.ps1:Test-StagedVersion`
+  — the staged binary's `--version` is checked against the resolved
+  release tag before the in-place swap, so a CDN that hands back a
+  legitimately-signed older release is rejected.
+- Whether the race conditions in `cp_to_container`, `run_attached`, and
+  the streaming endpoints are reachable in production. Fuzz targets
+  (`fuzz/fuzz_targets/`) and the live-Podman lane are the only ways to
+  confirm.
+
 ## Reporting
 
 Report vulnerabilities privately via the repository's **Security tab → Report a
