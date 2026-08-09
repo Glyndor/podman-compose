@@ -290,8 +290,8 @@ impl Engine {
 		// replica beyond the first (falls back to the static names when none are
 		// running yet).
 		// One `live_replica_names` round-trip per selected service (a future
-		// optimization: batch this through scale.rs's
-		// `list_project_containers_by_service` instead). A resolution failure for
+		// optimization: batch this through scale.rs's `live_project_replicas`
+		// instead). A resolution failure for
 		// one service must not blank the whole command the way an `.await?` would:
 		// warn and skip that service so the rest still stream, matching the
 		// per-container tolerance below.

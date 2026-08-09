@@ -13,7 +13,7 @@
 
 use std::collections::HashSet;
 
-use crate::compose::types::{ComposeFile, LifecycleHook, Service};
+use crate::compose::types::{ComposeFile, LifecycleHook};
 use crate::engine::Engine;
 use crate::error::{ComposeError, Result};
 use crate::libpod::{urlencoded, API_PREFIX};
@@ -138,45 +138,45 @@ pub(super) fn restart_service_set(
 }
 
 impl Engine {
-	/// Stop a single service's live containers (only those actually running), as
-	/// one unit of work in a concurrent level. See [`Engine::stop`].
+	/// Stop a single service's live containers, as one unit of work in a
+	/// concurrent level. See [`Engine::stop`]. Takes its container names from
+	/// the bulk project listing (`live_project_replicas`); the per-container
+	/// `acted` flag still has to come from [`Self::stop_container`] itself
+	/// because the bulk helper returns names without states (#1363).
 	pub(super) async fn stop_one_service(
 		&self,
-		service_name: &str,
+		container_names: Vec<String>,
 		grace: i32,
 		acted: &std::sync::atomic::AtomicBool,
 	) -> Result<()> {
-		for container in self.live_service_containers(service_name).await? {
-			if super::scale::state_is_active(&container.state) {
-				acted.store(true, std::sync::atomic::Ordering::Relaxed);
-				self.stop_container(&container.name, grace).await?;
-			} else {
-				tracing::debug!(
-					"{}: not running ({}) — stop is a no-op",
-					container.name,
-					container.state
-				);
+		let mut first_err: Option<ComposeError> = None;
+		for container_name in container_names {
+			match self.stop_container(&container_name, grace).await {
+				Ok(true) => acted.store(true, std::sync::atomic::Ordering::Relaxed),
+				Ok(false) => {
+					tracing::debug!("{container_name}: not running — stop is a no-op");
+				}
+				Err(e) => {
+					first_err.get_or_insert(e);
+				}
 			}
 		}
-		Ok(())
+		first_err.map_or(Ok(()), Err)
 	}
 
 	/// Start a single service's live containers, recording in `any_live` whether
 	/// the service had any container to act on. See [`Engine::start`].
 	pub(super) async fn start_one_service(
 		&self,
-		service_name: &str,
+		container_names: Vec<String>,
 		any_live: &std::sync::atomic::AtomicBool,
 	) -> Result<()> {
-		let live = self
-			.list_project_container_names(Some(service_name))
-			.await?;
-		if live.is_empty() {
+		if container_names.is_empty() {
 			return Ok(());
 		}
 		any_live.store(true, std::sync::atomic::Ordering::Relaxed);
 		let mut first_err: Option<ComposeError> = None;
-		for container_name in live {
+		for container_name in container_names {
 			let path = format!(
 				"{API_PREFIX}/containers/{}/start",
 				urlencoded(&container_name),
@@ -195,14 +195,13 @@ impl Engine {
 	/// (`restarted` for a direct target, `cascade-restarted` for a dependent).
 	pub(super) async fn restart_one_service(
 		&self,
-		service_name: &str,
-		service: &Service,
+		container_names: Vec<String>,
+		grace: i32,
 		done: &str,
 		acted: &std::sync::atomic::AtomicBool,
 	) -> Result<()> {
-		let grace = self.grace_period_secs(service);
 		let mut first_err: Option<ComposeError> = None;
-		for container_name in self.live_replica_names(service_name, service).await? {
+		for container_name in container_names {
 			// Single atomic restart (no visible stopped window) instead of a
 			// stop+start round-trip.
 			let restart_path = format!(
@@ -227,13 +226,12 @@ impl Engine {
 	/// Send `signal` to a single service's live containers. See [`Engine::kill`].
 	pub(super) async fn kill_one_service(
 		&self,
-		service_name: &str,
-		service: &Service,
+		container_names: Vec<String>,
 		signal: &str,
 		acted: &std::sync::atomic::AtomicBool,
 	) -> Result<()> {
 		let mut first_err: Option<ComposeError> = None;
-		for container_name in self.live_replica_names(service_name, service).await? {
+		for container_name in container_names {
 			let path = format!(
 				"{API_PREFIX}/containers/{}/kill?signal={}",
 				urlencoded(&container_name),
@@ -256,14 +254,13 @@ impl Engine {
 	/// Remove a single service's containers. See [`Engine::rm_with_options`].
 	pub(super) async fn rm_one_service(
 		&self,
-		service_name: &str,
-		service: &Service,
+		container_names: Vec<String>,
 		force: bool,
 		remove_volumes: bool,
 		acted: &std::sync::atomic::AtomicBool,
 	) -> Result<()> {
 		let mut first_err: Option<ComposeError> = None;
-		for container_name in self.live_replica_names(service_name, service).await? {
+		for container_name in container_names {
 			let force_str = if force { "true" } else { "false" };
 			let path = format!(
 				"{API_PREFIX}/containers/{}?force={force_str}&v={remove_volumes}",
@@ -298,14 +295,13 @@ impl Engine {
 	/// mismatch as an idempotent no-op. `endpoint` is `pause`/`unpause`.
 	pub(super) async fn idempotent_state_service(
 		&self,
-		service_name: &str,
-		service: &Service,
+		container_names: Vec<String>,
 		endpoint: &str,
 		done: &str,
 		acted: &std::sync::atomic::AtomicBool,
 	) -> Result<()> {
 		let mut first_err: Option<ComposeError> = None;
-		for container_name in self.live_replica_names(service_name, service).await? {
+		for container_name in container_names {
 			let path = format!(
 				"{API_PREFIX}/containers/{}/{endpoint}",
 				urlencoded(&container_name),
@@ -410,6 +406,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::compose::types::Service;
 	use crate::error::ComposeError;
 
 	fn levels(input: &[&[&str]]) -> Vec<Vec<String>> {
