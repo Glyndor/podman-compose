@@ -14,37 +14,13 @@ pub use copy::CpOptions;
 pub use image::{resolve_image_digests, CommitOptions};
 pub use lifecycle::{validate_stop_timeout, RunOptions, RunOverrides};
 pub use lock::ProjectLock;
-/// Whether `run` should allocate a pseudo-TTY and attach stdin.
-///
-/// A TTY on both ends by default, `-T` to opt out, `-d` excluded because there
-/// is nobody to be interactive with — and **both** stdin and stdout must be
-/// terminals.
-///
-/// Requiring stdout too is not symmetry for its own sake. A pty merges stdout
-/// and stderr and emits CRLF, so `podup run app cmd > out.txt` typed at a shell
-/// — stdin still a terminal, stdout a file — would have written pty bytes with
-/// stderr folded in, where it used to write clean demultiplexed output. That is
-/// the most common redirect there is, and `docker compose` keeps it clean
-/// (measured). Checking stdin alone silently changed the format of a file.
-pub(crate) fn wants_interactive_run(no_tty: bool, detach: bool) -> bool {
-	wants_interactive_with(
-		no_tty,
-		detach,
-		query::stdin_is_terminal(),
-		query::stdout_is_terminal(),
-	)
-}
+mod interactive;
+pub(crate) use interactive::wants_interactive_run;
+mod project_label;
+use project_label::{build_project_label_parts, ProjectLabelParts};
+mod replicas;
+use replicas::resolve_replica_name;
 
-/// The decision with the environment passed in, so both terminal cases are
-/// testable rather than depending on how the suite happened to be invoked.
-fn wants_interactive_with(no_tty: bool, detach: bool, stdin_tty: bool, stdout_tty: bool) -> bool {
-	!no_tty && !detach && stdin_tty && stdout_tty
-}
-
-pub use query::{
-	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsDisplayOptions,
-	PsFilterOptions, PsOptions, DEFAULT_LOG_TAIL,
-};
 mod container_config;
 pub(crate) use container_config::build_log_config;
 #[cfg(test)]
@@ -59,6 +35,10 @@ pub use profiles::{retain_active_profiles, retain_active_profiles_with_targets};
 mod projects;
 pub use projects::{list_projects, list_projects_filtered, LsOptions};
 pub(crate) mod query;
+pub use query::{
+	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsDisplayOptions,
+	PsFilterOptions, PsOptions, DEFAULT_LOG_TAIL,
+};
 mod secrets;
 mod staging;
 mod stats;
@@ -145,9 +125,15 @@ pub struct Engine {
 	/// warnings the engine emits during `up`/`create`/`run`/`exec`. The
 	/// operator wrote the compose file deliberately, so the default-warning
 	/// behaviour is opt-out per run rather than per command. `config`'s
-	/// surface-mode listing is unaffected — `config` is the "show me what
-	/// will happen" command, so the warnings stay visible there.
+	/// surface-mode listing is unaffected — `config` is the "show me what will
+	/// happen" command, where the warnings stay visible there.
 	pub(super) no_warn: bool,
+	/// The pre-URL-encoded libpod `filters` JSON object that scopes a
+	/// container-list call to this project's `podup.project={name}` label,
+	/// plus the raw `podup.project={name}` label string. Built once per
+	/// [`Engine`] so call sites do not pay `format!` + `serde_json::to_string`
+	/// + `urlencoded` on every invocation (#1364).
+	project_label: ProjectLabelParts,
 }
 
 impl Engine {
@@ -176,7 +162,7 @@ impl Engine {
 		};
 		Self {
 			client,
-			project,
+			project: project.clone(),
 			base_dir,
 			compose_files: Vec::new(),
 			stop_timeout: None,
@@ -191,6 +177,7 @@ impl Engine {
 			renew_anon_volumes: false,
 			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
 			no_warn: false,
+			project_label: build_project_label_parts(&project),
 		}
 	}
 
@@ -198,7 +185,7 @@ impl Engine {
 	pub fn with_base_dir(client: Client, project: String, base_dir: PathBuf) -> Self {
 		Self {
 			client,
-			project,
+			project: project.clone(),
 			base_dir,
 			compose_files: Vec::new(),
 			stop_timeout: None,
@@ -213,6 +200,7 @@ impl Engine {
 			renew_anon_volumes: false,
 			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
 			no_warn: false,
+			project_label: build_project_label_parts(&project),
 		}
 	}
 
@@ -319,6 +307,46 @@ impl Engine {
 			.scale
 			.or(service.deploy.as_ref().and_then(|d| d.replicas))
 			.unwrap_or(1) as usize
+	}
+
+	/// The cached URL-encoded `{"label":["podup.project=…"]}` JSON for the
+	/// container-list call sites that scope by the project label only
+	/// (#1364).
+	pub(super) fn project_label_filter_encoded(&self) -> &str {
+		&self.project_label.encoded
+	}
+
+	/// The cached URL-encoded `{"label":["podup.project=…"]}` JSON for
+	/// network-list call sites. Identical to the container version because
+	/// libpod's network and container label filters take the same shape
+	/// (#1364).
+	pub(super) fn project_network_filter_encoded(&self) -> &str {
+		&self.project_label.network_encoded
+	}
+
+	/// The cached raw `podup.project={name}` label string, exposed for the
+	/// dynamic sites (those that combine the project label with a second
+	/// predicate like `podup.service={svc}`) so they can splice the project
+	/// half into their own JSON without reformatting it on every call
+	/// (#1364).
+	pub(super) fn project_label_raw(&self) -> &str {
+		&self.project_label.raw
+	}
+
+	/// Build the URL-encoded `{"label":[…]}` filter for a project container
+	/// call that needs one extra label predicate (typically `podup.service=`).
+	/// `extras` carries the additional labels verbatim; the project label is
+	/// spliced in once per call so the only `format!` is on the caller's
+	/// extras (#1364).
+	pub(super) fn project_label_filter_with(
+		&self,
+		extras: impl IntoIterator<Item = String>,
+	) -> String {
+		let mut labels: Vec<String> = Vec::new();
+		labels.push(self.project_label.raw.clone());
+		labels.extend(extras);
+		let filter = serde_json::json!({ "label": labels });
+		crate::libpod::urlencoded(&filter.to_string())
 	}
 
 	pub(super) async fn run_lifecycle_hook(
@@ -572,72 +600,8 @@ pub fn surface_host_modes(file: &crate::compose::types::ComposeFile) {
 }
 
 // ---------------------------------------------------------------------------
-// Replica resolution helpers
+// Replica resolution helpers (see `replicas.rs`)
 // ---------------------------------------------------------------------------
-
-/// Resolve a replica container name from the set of names that exist for a
-/// service (the running replicas, or the statically derived names before
-/// anything is created) and a 1-based `--index`. Each name is either the
-/// unsuffixed base (the sole replica) or `{base}-{n}`.
-///
-/// `--index n` targets the replica numbered `n` — by name, not by position —
-/// so it stays correct after a runtime `scale`/`up --scale` and regardless of
-/// the order Podman lists containers; `0` is rejected (indexes are 1-based);
-/// `None` picks the lowest-numbered replica. Pure so it is unit-testable
-/// without a Podman socket.
-fn resolve_replica_name(
-	service_name: &str,
-	base: &str,
-	names: &[String],
-	index: Option<u32>,
-) -> Result<String> {
-	match index {
-		Some(0) => Err(ComposeError::ReplicaIndex {
-			service: service_name.to_string(),
-			index: 0,
-		}),
-		Some(i) => {
-			let suffixed = format!("{base}-{i}");
-			if names.iter().any(|n| n == &suffixed) {
-				return Ok(suffixed);
-			}
-			// A single, unsuffixed replica answers to index 1 only.
-			if i == 1 && names.iter().any(|n| n == base) {
-				return Ok(base.to_string());
-			}
-			Err(ComposeError::ReplicaIndex {
-				service: service_name.to_string(),
-				index: i,
-			})
-		}
-		None => order_replicas(base, names)
-			.into_iter()
-			.next()
-			.ok_or_else(|| ComposeError::ServiceNotFound(service_name.into())),
-	}
-}
-
-/// Order replica container names by their 1-based replica number so callers can
-/// pick the lowest-numbered one independently of Podman's listing order. A name
-/// is the unsuffixed base (the sole replica → number 1) or `{base}-{n}`; names
-/// matching neither are dropped.
-fn order_replicas(base: &str, names: &[String]) -> Vec<String> {
-	let prefix = format!("{base}-");
-	let mut numbered: Vec<(usize, String)> = names
-		.iter()
-		.filter_map(|name| {
-			if name == base {
-				Some((1, name.clone()))
-			} else {
-				name.strip_prefix(&prefix)
-					.and_then(|s| s.parse::<usize>().ok())
-					.map(|n| (n, name.clone()))
-			}
-		})
-		.collect();
-	numbered.sort_by_key(|(n, _)| *n);
-	numbered.into_iter().map(|(_, name)| name).collect()
-}
 
 // ---------------------------------------------------------------------------
 // Filesystem helpers (see `walk.rs`)
@@ -751,42 +715,3 @@ mod tests;
 
 #[cfg(test)]
 mod stream_end_tests;
-
-#[cfg(test)]
-mod interactive_run_tests {
-	use super::wants_interactive_run;
-
-	/// `-T` opts out, matching `docker compose run` — which has no `-i` because
-	/// a TTY on both ends is the default.
-	#[test]
-	fn no_tty_disables_the_pty() {
-		assert!(!wants_interactive_run(true, false));
-	}
-
-	/// `-d` detaches, so there is nobody to be interactive with.
-	#[test]
-	fn detach_disables_the_pty() {
-		assert!(!wants_interactive_run(false, true));
-	}
-
-	/// The decisive one for existing users: in a test harness — as in any script
-	/// or pipeline — stdin is not a terminal, so `run` stays on the unchanged
-	/// streaming path. Allocating a pty there would change output framing for
-	/// every script that already calls `podup run`.
-	#[test]
-	fn a_non_terminal_stdin_stays_on_the_streaming_path() {
-		assert!(!wants_interactive_run(false, false));
-	}
-
-	/// Both ends are required, and this is the case that made it necessary:
-	/// `podup run app cmd > out.txt` typed at a shell leaves stdin a terminal
-	/// while stdout is a file. Checking stdin alone allocated a pty, and a pty
-	/// merges stdout with stderr and writes CRLF — so the redirect silently
-	/// changed the bytes the file received. Verified against `docker compose`,
-	/// which keeps it clean.
-	#[test]
-	fn a_redirected_stdout_stays_on_the_streaming_path() {
-		assert!(!super::wants_interactive_with(false, false, true, false));
-		assert!(super::wants_interactive_with(false, false, true, true));
-	}
-}

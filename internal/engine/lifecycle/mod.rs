@@ -200,12 +200,9 @@ impl Engine {
 			let mut present: HashSet<String> = HashSet::new();
 			let mut existing_hash: HashMap<String, String> = HashMap::new();
 			if !force_recreate {
-				let filters = serde_json::json!({
-					"label": [format!("podup.project={}", self.project)],
-				});
 				let path = format!(
 					"{API_PREFIX}/containers/json?all=true&filters={}",
-					crate::libpod::urlencoded(&filters.to_string()),
+					self.project_label_filter_encoded(),
 				);
 				let entries = self
 					.client

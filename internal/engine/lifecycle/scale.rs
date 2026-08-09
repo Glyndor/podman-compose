@@ -252,14 +252,15 @@ impl Engine {
 		&self,
 		service: Option<&str>,
 	) -> Result<Vec<String>> {
-		let mut labels = vec![format!("podup.project={}", self.project)];
+		// The project label half comes from the cached `project_label_raw`;
+		// the optional service label is appended fresh (#1364).
+		let mut labels = vec![self.project_label_raw().to_string()];
 		if let Some(svc) = service {
 			labels.push(format!("podup.service={svc}"));
 		}
-		let filters = serde_json::json!({ "label": labels });
 		let path = format!(
 			"{API_PREFIX}/containers/json?all=true&filters={}",
-			urlencoded(&filters.to_string()),
+			self.project_label_filter_with(labels.iter().cloned()),
 		);
 		let entries = self
 			.client
@@ -289,10 +290,11 @@ impl Engine {
 	pub(crate) async fn live_project_replicas(
 		&self,
 	) -> Result<std::collections::HashMap<String, Vec<String>>> {
-		let filters = serde_json::json!({ "label": [format!("podup.project={}", self.project)] });
+		// Reuse the per-engine URL-encoded filter (#1364); see
+		// [`Engine::project_label_filter_encoded`].
 		let path = format!(
 			"{API_PREFIX}/containers/json?all=true&filters={}",
-			urlencoded(&filters.to_string()),
+			self.project_label_filter_encoded(),
 		);
 		let entries = self
 			.client
@@ -329,7 +331,7 @@ impl Engine {
 	) -> Result<Vec<LiveContainer>> {
 		let filters = serde_json::json!({
 			"label": [
-				format!("podup.project={}", self.project),
+				self.project_label_raw(),
 				format!("podup.service={service_name}"),
 			],
 		});

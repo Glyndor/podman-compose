@@ -104,11 +104,9 @@ impl Engine {
 	pub(super) async fn remove_project_networks_by_label(
 		&self,
 	) -> Option<crate::error::ComposeError> {
-		let net_filters =
-			serde_json::json!({ "label": [format!("podup.project={}", self.project)] });
 		let list_path = format!(
 			"{API_PREFIX}/networks/json?filters={}",
-			urlencoded(&net_filters.to_string()),
+			self.project_network_filter_encoded(),
 		);
 		let Ok(nets) = self
 			.client

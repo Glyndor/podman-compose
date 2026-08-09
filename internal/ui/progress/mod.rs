@@ -35,6 +35,14 @@ const TICK: std::time::Duration = std::time::Duration::from_millis(100);
 /// progress on.
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 
+/// Whether a board is currently open, independent of [`SESSION`]. Set by
+/// [`begin`] and cleared by [`end`]; consulted by [`finish`] (which
+/// `progress_line` routes through) so the common "no board" path short-circuits
+/// the `Mutex::lock` without taking it. Uncontended `Mutex::lock` is ~20 ns but
+/// `progress_line` fires once per resource per command, so over a 100-service
+/// `up` the lock+unlock pairs add up to ~2 µs of pure syscall work (#1364).
+static SESSION_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// The repaint ticker, kept so it can be stopped when the board ends.
 static TICKER: Mutex<Option<tokio::task::JoinHandle<()>>> = Mutex::new(None);
 
@@ -49,18 +57,26 @@ struct Session {
 	name_width: usize,
 }
 
-/// Whether a live region is allowed right now.
+/// The two halves of the "is a live region allowed" decision, split out so the
+/// terminal+colour half can be cached at [`begin`] while the resize-dependent
+/// width stays per-repaint (#1364). Previously `live_allowed` re-ran both
+/// halves ten times a second for the lifetime of the board, paying for
+/// `is_terminal()` + `TIOCGWINSZ` on every repaint.
 ///
-/// Three conditions, all required. stderr must be a terminal — `--ansi always |
-/// tee` is a log, not a terminal, and repainting into it writes cursor moves
-/// into a file. The colour choice must not be `Never`, because someone who asked
-/// for no escapes means it. And the width must be readable, since every line is
-/// truncated to it and the repaint arithmetic depends on that truncation.
-fn live_allowed() -> Option<usize> {
+/// stderr must be a terminal — `--ansi always | tee` is a log, not a terminal,
+/// and repainting into it writes cursor moves into a file. The colour choice
+/// must not be `Never`, because someone who asked for no escapes means it. The
+/// width must be readable, since every line is truncated to it and the repaint
+/// arithmetic depends on that truncation.
+fn live_terminal_colored() -> bool {
 	use std::io::IsTerminal;
-	if !std::io::stderr().is_terminal() || !super::stderr_colored() {
-		return None;
-	}
+	std::io::stderr().is_terminal() && super::stderr_colored()
+}
+
+/// The current terminal width from a `window_size()` answer, or `None` when
+/// the runtime cannot tell. Per-repaint so a resize mid-command is reflected
+/// on the next frame (#1364).
+fn live_width() -> Option<usize> {
 	width_from(crate::engine::query::terminal::window_size())
 }
 
@@ -91,8 +107,12 @@ pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
 		.max()
 		.unwrap_or(0)
 		.clamp(12, 40);
-	let region = live_allowed().map(|_| live::Region::new(live::Target::Stderr));
-	let live = region.is_some();
+	// Cache the terminal+colour decision here (it cannot change mid-command)
+	// and only re-read the width per repaint, so a resize mid-command is
+	// still honoured. `live_allowed` previously re-ran both halves ten times a
+	// second for the lifetime of the board (#1364).
+	let live = live_terminal_colored();
+	let region = live.then(|| live::Region::new(live::Target::Stderr));
 	if let Ok(mut slot) = SESSION.lock() {
 		*slot = Some(Session {
 			board,
@@ -101,6 +121,12 @@ pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
 			name_width,
 		});
 	}
+	// The flag goes up *after* the session is installed: a `finish` racing the
+	// install sees either no session (`SESSION_OPEN` false → no lock taken) or
+	// a fully-built session. The reverse order would let `finish` take the
+	// lock only to find an empty session and return false — same result, more
+	// work.
+	SESSION_OPEN.store(true, std::sync::atomic::Ordering::Release);
 	if live {
 		spawn_ticker();
 	}
@@ -173,6 +199,14 @@ pub(super) fn finish(kind: &str, name: &str, verb: &str) -> bool {
 	let Some(kind) = Kind::from_noun(kind) else {
 		return false;
 	};
+	// Short-circuit the common "no board open" path before taking the lock
+	// (#1364). `progress_line` is the hottest UI site: a 100-service `up`
+	// fires it 100 times, and every call would otherwise acquire and release
+	// the global `SESSION` mutex just to discover there is no session. With
+	// the flag, the lock is only taken when `begin` was actually called.
+	if !SESSION_OPEN.load(std::sync::atomic::Ordering::Acquire) {
+		return false;
+	}
 	let sink = {
 		let Ok(mut slot) = SESSION.lock() else {
 			return false;
@@ -203,6 +237,12 @@ pub(super) fn finish(kind: &str, name: &str, verb: &str) -> bool {
 ///
 /// Idempotent, because the commands that open a board have several exits.
 pub fn end() {
+	if !SESSION_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel) {
+		// No board was ever opened — the flag is the single source of truth
+		// for that. Drop it first so a racing `finish` doesn't take the lock
+		// just to find an empty session (#1364).
+		return;
+	}
 	if let Ok(mut slot) = TICKER.lock() {
 		if let Some(handle) = slot.take() {
 			handle.abort();
@@ -213,9 +253,11 @@ pub fn end() {
 	};
 	if let Some(mut session) = slot.take() {
 		// One last paint with the region emptied, so the last thing on screen is
-		// the permanent record rather than a half-drawn board.
+		// the permanent record rather than a half-drawn board. Width stays
+		// per-repaint for the resize handling — only the terminal+colour
+		// decision was cached at `begin` (#1364).
 		if session.region.is_some() {
-			let width = live_allowed().unwrap_or(0);
+			let width = live_width().unwrap_or(0);
 			let now = Instant::now();
 			let scrollback: Vec<String> = session
 				.board
@@ -253,7 +295,9 @@ fn repaint() {
 	};
 	// Re-read the width every repaint, so a resize mid-command does not leave
 	// every later line wrapping — and wrapping is what breaks the arithmetic.
-	let width = live_allowed().unwrap_or(0);
+	// Only the width is re-read; the terminal+colour decision is cached at
+	// `begin` (#1364).
+	let width = live_width().unwrap_or(0);
 	let now = Instant::now();
 	let scrollback: Vec<String> = board
 		.take_completed_prefix()
