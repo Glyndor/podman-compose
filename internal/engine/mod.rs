@@ -67,6 +67,7 @@ pub use stats::StatsOptions;
 mod volume;
 pub use volume::{VolumesDisplayOptions, VolumesOptions};
 mod volume_mounts;
+mod walk;
 #[cfg(feature = "watch")]
 mod watch;
 
@@ -639,29 +640,8 @@ fn order_replicas(base: &str, names: &[String]) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Filesystem helpers
+// Filesystem helpers (see `walk.rs`)
 // ---------------------------------------------------------------------------
-
-fn walk_dir(root: &std::path::Path) -> std::io::Result<Vec<PathBuf>> {
-	let mut out = Vec::new();
-	walk_collect(root, &mut out)?;
-	Ok(out)
-}
-
-fn walk_collect(dir: &std::path::Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
-	let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
-	entries.sort_by_key(|e| e.file_name());
-	for entry in entries {
-		let path = entry.path();
-		let file_type = entry.file_type()?;
-		out.push(path.clone());
-		if file_type.is_dir() {
-			walk_collect(&path, out)?;
-		}
-	}
-	Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------

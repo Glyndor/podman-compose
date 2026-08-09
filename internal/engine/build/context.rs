@@ -12,6 +12,7 @@ use std::path::Path;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
+use crate::engine::walk;
 use crate::error::{ComposeError, Result};
 
 /// Append the build context to `tar`, honoring `.dockerignore`.
@@ -30,7 +31,7 @@ fn append_context<W: std::io::Write>(
 	// an SSH key — into the image. Store the link itself instead, matching the
 	// watch-sync and cp paths.
 	tar.follow_symlinks(false);
-	for abs in super::super::walk_dir(context).map_err(ComposeError::Io)? {
+	for abs in walk::walk_dir(context).map_err(ComposeError::Io)? {
 		let rel = abs
 			.strip_prefix(context)
 			.map_err(|_| ComposeError::Build("path strip error".into()))?;
