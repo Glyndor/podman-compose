@@ -83,10 +83,26 @@ static PROGRESS_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// palette. Stripping the project first makes one container one colour.
 static PROJECT: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
 
+/// The pre-formatted `"{project}-"` prefix, cached so [`identity_slot`] does
+/// not reallocate it on every call. Set in tandem with [`PROJECT`] by
+/// [`set_project`]; read by [`identity_slot`] on every progress event, table
+/// row, and log-prefix row (~300 of those per 100-service `up`, #1364).
+static PROJECT_PREFIX: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+
 /// Record the project name for identity colouring. Set once per invocation.
 pub fn set_project(name: &str) {
 	if let Ok(mut slot) = PROJECT.write() {
 		name.clone_into(&mut slot);
+	}
+	if let Ok(mut prefix_slot) = PROJECT_PREFIX.write() {
+		if name.is_empty() {
+			prefix_slot.clear();
+		} else {
+			let mut prefixed = String::with_capacity(name.len() + 1);
+			prefixed.push_str(name);
+			prefixed.push('-');
+			*prefix_slot = prefixed;
+		}
 	}
 }
 
@@ -120,12 +136,16 @@ pub fn identity_style(label: &str) -> Style {
 /// The palette slot backing [`identity_style`]. See [`service_slot`] for why
 /// this exists as its own, unrendered step.
 pub(crate) fn identity_slot(label: &str) -> usize {
-	let key = PROJECT
+	// Use the cached `"{project}-"` prefix instead of formatting one per call.
+	// `progress_line` and the table renderers fire this on every container
+	// name in every command, so the per-call `format!` was ~300 wasted
+	// allocations per 100-service `up` (#1364).
+	let key = PROJECT_PREFIX
 		.read()
 		.ok()
 		.and_then(|p| {
 			(!p.is_empty())
-				.then(|| label.strip_prefix(&format!("{p}-")).map(str::to_string))
+				.then(|| label.strip_prefix(p.as_str()).map(str::to_string))
 				.flatten()
 		})
 		.unwrap_or_else(|| label.to_string());
