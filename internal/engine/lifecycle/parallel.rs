@@ -12,6 +12,7 @@
 //! This mirrors what the `up`/`create` path already does.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::compose::types::{ComposeFile, LifecycleHook};
 use crate::engine::Engine;
@@ -117,24 +118,30 @@ pub(super) fn restart_service_set(
 	file: &ComposeFile,
 	target_services: &[String],
 	no_deps: bool,
-) -> (HashSet<String>, HashSet<String>) {
+) -> (Arc<HashSet<String>>, Arc<HashSet<String>>) {
 	if target_services.is_empty() {
-		let all: HashSet<String> = file.services.keys().cloned().collect();
-		return (all.clone(), all);
-	}
-	let targets: HashSet<String> = target_services.iter().cloned().collect();
-	let mut full = targets.clone();
-	if !no_deps {
-		for (dep_name, dep_service) in &file.services {
-			if targets
-				.iter()
-				.any(|t| dep_service.depends_on.restart_for(t))
-			{
-				full.insert(dep_name.clone());
+		// No targets means "every service is both a target and a member of
+		// the full restart set". The two `Arc`s share the same `HashSet` so
+		// only one `HashSet` is built and only one `Arc::clone` is paid;
+		// callers read both as immutable (`contains()`), so the aliasing is
+		// safe. The previous code wrote `(all.clone(), all)` inline (#1364).
+		let all: Arc<HashSet<String>> = Arc::new(file.services.keys().cloned().collect());
+		(all.clone(), all)
+	} else {
+		let targets: Arc<HashSet<String>> = Arc::new(target_services.iter().cloned().collect());
+		let mut full: HashSet<String> = targets.as_ref().clone();
+		if !no_deps {
+			for (dep_name, dep_service) in &file.services {
+				if targets
+					.iter()
+					.any(|t| dep_service.depends_on.restart_for(t))
+				{
+					full.insert(dep_name.clone());
+				}
 			}
 		}
+		(Arc::new(full), targets)
 	}
-	(full, targets)
 }
 
 impl Engine {
