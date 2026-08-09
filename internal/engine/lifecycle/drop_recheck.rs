@@ -36,10 +36,17 @@ impl LifecycleGoal {
 	/// Whether libpod's `State` satisfies this goal. `None` means the container
 	/// no longer exists — which reaches `NotRunning` and `Gone`, and fails
 	/// `Running`.
+	///
+	/// The state field is currently always lowercase (validated against
+	/// `libpod/define/containerstate.go::ContainerStatus.String()` — returns
+	/// `"unknown"|"created"|...|"stopping"`) but the test is case-insensitive so
+	/// a future libpod returning `Running` or `RUNNING` does not produce a
+	/// false negative (#1369).
 	pub(super) fn reached(self, state: Option<&str>) -> bool {
+		let running = state.is_some_and(|s| s.eq_ignore_ascii_case("running"));
 		match self {
-			Self::Running => state == Some("running"),
-			Self::NotRunning => state != Some("running"),
+			Self::Running => running,
+			Self::NotRunning => !running,
 			Self::Gone => state.is_none(),
 		}
 	}

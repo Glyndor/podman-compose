@@ -138,9 +138,17 @@ fn expand_exec_env(env: &[String]) -> Vec<String> {
 /// stderr channel when an exec launch fails (e.g. a bad `--workdir`/`--user`):
 /// a secondary `read unixpacket ... connection reset by peer` frame that adds
 /// nothing to the real diagnostic. Matching is deliberately narrow so ordinary
-/// program output is never suppressed.
+/// program output is never suppressed: a bare `contains` on the two substrings
+/// would also suppress a Go program that logs `dial unixpacket: connection reset
+/// by peer` (#1369). The match anchors on the system-noise prefix the standard
+/// library prints for that error, which a real program's log does not carry.
 fn is_exec_teardown_noise(line: &str) -> bool {
-	line.contains("unixpacket") && line.contains("connection reset by peer")
+	// The two shapes Rust/glibc and Go print, kept as a small set so a real
+	// program's log never collides. The system prefix (`os error 104` on
+	// Linux, `Connection reset by peer` from a lower-level `cargo`/`conmon`
+	// log) is what narrows the match: a real Go `dial unixpacket: ...` line
+	// does not start with `read unixpacket`.
+	line.contains("read unixpacket") && line.contains("connection reset by peer")
 }
 
 /// Map a libpod error from an `exec` target into a friendly

@@ -371,21 +371,23 @@ impl Engine {
 			.map_err(ComposeError::Podman)?;
 
 		let mut stream = crate::libpod::parse_multiplexed(resp.into_body());
-		// Lock stdout once for the whole stream instead of re-acquiring the lock
-		// (and issuing a syscall) per frame; stdout is ours exclusively on this
-		// path. stderr is locked per frame because the tracing subscriber also
-		// writes there: holding its lock across the await loop would starve
-		// concurrent log emissions. Flush after each frame so output stays prompt.
-		let mut out = std::io::stdout().lock();
+		// Lock both stdout and stderr per frame, symmetric with the rest of
+		// the engine: holding either lock across the await loop would stall any
+		// concurrent log emission, including the tracing subscriber that
+		// writes to stderr. The previous code held stdout's lock for the
+		// whole stream, which serialised the hook behind any other writer for
+		// its entire lifetime (#1369). Flush after each frame so output
+		// stays prompt.
 		while let Some(msg) = stream.next().await {
 			match msg.map_err(ComposeError::Podman)? {
 				LogOutput::StdOut { message } => {
-					let _ = out.write_all(String::from_utf8_lossy(&message).as_bytes());
+					let mut out = std::io::stdout().lock();
+					let _ = write_frame(&mut out, &message);
 					let _ = out.flush();
 				}
 				LogOutput::StdErr { message } => {
 					let mut err = std::io::stderr().lock();
-					let _ = err.write_all(String::from_utf8_lossy(&message).as_bytes());
+					let _ = write_frame(&mut err, &message);
 					let _ = err.flush();
 				}
 			}
@@ -535,6 +537,21 @@ impl Engine {
 /// value was rejected.
 pub(super) fn to_query_json<T: serde::Serialize>(what: &str, v: &T) -> Result<String> {
 	serde_json::to_string(v).map_err(|e| ComposeError::Build(format!("invalid {what}: {e}")))
+}
+
+/// Write one log frame without creating a lossy `Cow` for valid UTF-8.
+///
+/// `String::from_utf8_lossy` allocates a `Cow<String>` even on the happy path;
+/// `std::str::from_utf8` returns `&str` directly with no allocation. The
+/// lossy path is the rare one (an arbitrary byte stream from `run`/`exec`/
+/// hook output), so a single shared helper keeps the two call sites
+/// (`Engine::run` and `run_lifecycle_hook`) honest and matches the previous
+/// observable output (#1369).
+pub(crate) fn write_frame<W: std::io::Write>(out: &mut W, bytes: &[u8]) -> std::io::Result<()> {
+	match std::str::from_utf8(bytes) {
+		Ok(text) => out.write_all(text.as_bytes()),
+		Err(_) => out.write_all(String::from_utf8_lossy(bytes).as_bytes()),
+	}
 }
 
 /// Emit one `tracing::warn!` per active host-binding / privilege-escalation mode
