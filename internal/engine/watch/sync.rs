@@ -11,6 +11,7 @@ use std::path::Path;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
+use crate::engine::walk;
 use crate::error::{ComposeError, Result};
 
 /// Pack `src` into a gzipped tar, storing its top-level entry under
@@ -31,7 +32,7 @@ pub(super) fn build_sync_tar(src: &Path, entry_name: &Path) -> Result<Vec<u8>> {
 	tar.follow_symlinks(false);
 
 	if src.is_dir() {
-		for abs in super::super::walk_dir(src).map_err(ComposeError::Io)? {
+		for abs in walk::walk_dir(src).map_err(ComposeError::Io)? {
 			let rel = abs
 				.strip_prefix(src)
 				.map_err(|_| ComposeError::Build("path strip".into()))?;
