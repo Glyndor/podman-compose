@@ -1,0 +1,125 @@
+name: podman-lane (develop nightly)
+# Nightly live-Podman coverage on the `develop` branch — early-warning signal
+# for coverage drift that the `main` nightly (#1326) cannot see (#1380).
+#
+# The `main` nightly runs on the default branch only, so a regression landing on
+# `develop` is invisible to its 88% floor until the next release PR runs the
+# nightly. This workflow is a thin copy of `.github/workflows/podman-lane.yml`
+# with a different `ref` and a cron offset by 12h from the `main` one (the
+# `main` nightly fires at 09:00 UTC; this one fires at 21:00 UTC) so the two
+# never collide on runner capacity.
+#
+# Coverage is the only output consumed. The suite's pass/fail gate is unchanged
+# from the per-PR lane and still lives there; this job is an observation
+# (per #1326's own recommendation — a second instrumented build per PR is too
+# expensive to gate on).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 21 * * *"
+  pull_request:
+    branches: [develop]
+permissions:
+  contents: read
+jobs:
+  podman-vm:
+    runs-on: ubuntu-24.04
+    # Same wall-clock budget as the per-PR lane (#1338) — the coverage run
+    # serialises a second instrumented build inside the VM, and the Podman 6
+    # leg finished at 89% of this budget on the most recent measurement.
+    timeout-minutes: 95
+    strategy:
+      fail-fast: false
+      # Only the Podman 6 leg runs coverage. Podman 5 and 6 both measure the
+      # suite at ~91.5%, so gating the older major would be redundant. The
+      # per-PR lane is the full-support cross-check.
+      matrix:
+        podman: ["6"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install qemu + cloud tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-x86 qemu-utils cloud-image-utils
+      - name: Fetch Fedora rawhide cloud image (Podman 6)
+        run: |
+          base="https://dl.fedoraproject.org/pub/fedora/linux/development/rawhide/Cloud/x86_64/images/"
+          img=$(curl -fsSL "$base" | grep -oE 'Fedora-Cloud-Base-Generic-Rawhide-[0-9]+\.n\.[0-9]+\.x86_64\.qcow2' | sort -u | tail -1)
+          [ -n "$img" ] || { echo "::error::could not resolve a Fedora rawhide image at $base"; exit 1; }
+          echo "image: $img"
+          curl -fSL --retry 5 --retry-delay 5 --retry-all-errors -C - -o "$RUNNER_TEMP/vm.qcow2" "${base}${img}"
+          qemu-img resize "$RUNNER_TEMP/vm.qcow2" 40G
+      - name: Build cloud-init seed
+        run: |
+          cat > "$RUNNER_TEMP/user-data" <<'EOF'
+          #cloud-config
+          growpart: {mode: auto, devices: ['/']}
+          resize_rootfs: true
+          users:
+            - name: tester
+              sudo: 'ALL=(ALL) NOPASSWD:ALL'
+              shell: /bin/bash
+          write_files:
+            - path: /etc/containers/containers.conf
+              content: |
+                [containers]
+                log_driver = "k8s-file"
+            - path: /usr/local/bin/run-suite.sh
+              permissions: '0755'
+              content: |
+                #!/bin/bash
+                export XDG_RUNTIME_DIR=/run/user/$(id -u)
+                systemctl --user start podman.socket
+                export PODMAN_SOCKET=$XDG_RUNTIME_DIR/podman/podman.sock
+                export PODUP_REQUIRE_PODMAN=1
+                cd "$HOME/podup" || exit 90
+                COVERAGE=1
+                export LLVM_COV=/usr/bin/llvm-cov
+                export LLVM_PROFDATA=/usr/bin/llvm-profdata
+                DROPPED='IncompleteMessage|connection closed before message completed|channel closed|Connection reset|error reading a body from connection|unexpected EOF during chunk size line|IncompleteBody|body-unexpected-eof'
+                for attempt in 1 2; do
+                  RUST_LOG=podup=warn cargo install cargo-llvm-cov --locked >/tmp/covinstall.log 2>&1
+                  cargo llvm-cov --all-features --summary-only \
+                    -- --test-threads=1 >/tmp/cov.log 2>&1
+                  RC=$?
+                  [ "$RC" -eq 0 ] && break
+                  grep -qE "$DROPPED" /tmp/cov.log || break
+                  echo "=== nested-virt transient on attempt $attempt; retrying ==="
+                done
+                tail -20 /tmp/cov.log
+                awk '$1=="TOTAL" { for (i=1;i<=NF;i++) if ($i ~ /%$/) { print $i; exit } }' /tmp/cov.log
+                echo "PODUP_COVERAGE_BRANCH=develop"
+          runcmd:
+            - bash -c 'dnf install -y podman rust cargo gcc git llvm >/dev/console 2>&1'
+            - bash -c 'mkdir -p /mnt/repo && mount -t 9p -o trans=virtio,version=9p2000.L repo /mnt/repo && cp -a /mnt/repo /home/tester/podup && chown -R tester:tester /home/tester/podup'
+            - bash -c 'sudo -iu tester /usr/local/bin/run-suite.sh >/dev/console 2>&1'
+            - bash -c 'echo PROBE_DONE >/dev/console; sleep 2; poweroff'
+          EOF
+          cloud-localds "$RUNNER_TEMP/seed.iso" "$RUNNER_TEMP/user-data"
+      - name: Boot VM
+        run: |
+          sudo timeout 4200 qemu-system-x86_64 -enable-kvm -cpu host -m 6144 -smp 4 \
+            -drive file="$RUNNER_TEMP/vm.qcow2",if=virtio,format=qcow2 \
+            -drive file="$RUNNER_TEMP/seed.iso",if=virtio,format=raw \
+            -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+            -virtfs local,path=${{ github.workspace }},mount_tag=repo,security_model=none,id=repo \
+            -display none -serial stdio 2>&1 | tee "$RUNNER_TEMP/vm.log" || true
+      - name: Report develop coverage
+        run: |
+          L="$RUNNER_TEMP/vm.log"
+          COV=$(grep -oE 'PODUP_COVERAGE=[^ ]+' "$L" | tail -1 | cut -d= -f2)
+          if [ -z "$COV" ]; then
+            echo "::warning::no coverage number reported on develop — VM did not complete the run or the instrumented build failed"
+            tail -20 "$L"
+            exit 0
+          fi
+          echo "develop coverage: $COV"
+          echo "- **develop coverage:** $COV" >> "$GITHUB_STEP_SUMMARY"
+          # Nightly floor on develop: same 88% the `main` nightly applies
+          # (#1326), reported on the Podman 6 leg. A regression that
+          # takes develop below 88% is the early warning this workflow
+          # exists to surface — the same shape of break, in the half-life
+          # before the next release PR.
+          COV_INT=$(printf '%.0f' "${COV%%%}")
+          if [ "$COV_INT" -lt 88 ]; then
+            echo "::error::develop coverage $COV is below the 88% nightly floor (#1380)."
+            exit 1
+          fi
