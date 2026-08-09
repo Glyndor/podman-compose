@@ -125,75 +125,10 @@ fn names(list: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn resolve_replica_targets_running_scale_not_compose_default() {
-	// The regression: a later `cp`/`exec` has no `--scale` (empty overrides),
-	// so the static count is the compose default (1). But the service was
-	// scaled up earlier and three replicas are running — `--index 2` must
-	// address the running `proj-web-2`, not fall back to the base name.
-	let live = names(&["proj-web-1", "proj-web-2", "proj-web-3"]);
-	assert_eq!(
-		resolve_replica_name("web", "proj-web", &live, Some(2)).unwrap(),
-		"proj-web-2"
-	);
-	assert_eq!(
-		resolve_replica_name("web", "proj-web", &live, Some(3)).unwrap(),
-		"proj-web-3"
-	);
-}
-
-#[test]
-fn resolve_replica_is_order_independent() {
-	// Podman does not guarantee a listing order; `--index n` targets replica
-	// `n` by name, and `None` picks the lowest-numbered replica regardless.
-	let live = names(&["proj-web-3", "proj-web-1", "proj-web-2"]);
-	assert_eq!(
-		resolve_replica_name("web", "proj-web", &live, Some(1)).unwrap(),
-		"proj-web-1"
-	);
-	assert_eq!(
-		resolve_replica_name("web", "proj-web", &live, None).unwrap(),
-		"proj-web-1"
-	);
-}
-
-#[test]
-fn resolve_replica_out_of_range_against_running_scale() {
-	// Only two replicas running: index 3 is out of range, not a stale base.
-	let live = names(&["proj-web-1", "proj-web-2"]);
-	assert!(resolve_replica_name("web", "proj-web", &live, Some(3)).is_err());
-}
-
-#[test]
-fn resolve_replica_index_zero_is_rejected() {
-	let live = names(&["proj-web-1", "proj-web-2"]);
-	let err = resolve_replica_name("web", "proj-web", &live, Some(0))
-		.expect_err("index 0 must be rejected");
-	assert!(
-		matches!(err, ComposeError::ReplicaIndex { index: 0, ref service } if service == "web"),
-		"unexpected error: {err:?}"
-	);
-}
-
-#[test]
-fn resolve_replica_single_unsuffixed_base() {
-	// A single, unsuffixed replica answers to index 1 (and None), never index 2.
-	let live = names(&["proj-web"]);
-	assert_eq!(
-		resolve_replica_name("web", "proj-web", &live, None).unwrap(),
-		"proj-web"
-	);
-	assert_eq!(
-		resolve_replica_name("web", "proj-web", &live, Some(1)).unwrap(),
-		"proj-web"
-	);
-	assert!(resolve_replica_name("web", "proj-web", &live, Some(2)).is_err());
-}
-
-#[test]
 fn order_replicas_sorts_by_replica_number() {
 	let live = names(&["proj-web-10", "proj-web-2", "proj-web-1"]);
 	assert_eq!(
-		order_replicas("proj-web", &live),
+		super::replicas::order_replicas("proj-web", &live),
 		names(&["proj-web-1", "proj-web-2", "proj-web-10"])
 	);
 }
