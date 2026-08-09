@@ -262,12 +262,12 @@ impl Engine {
 				while let Some(msg) = log_stream.next().await {
 					match msg {
 						Ok(crate::libpod::LogOutput::StdOut { message }) => {
-							let _ = out.write_all(String::from_utf8_lossy(&message).as_bytes());
+							let _ = write_frame(&mut out, &message);
 							let _ = out.flush();
 						}
 						Ok(crate::libpod::LogOutput::StdErr { message }) => {
 							let mut err = std::io::stderr().lock();
-							let _ = err.write_all(String::from_utf8_lossy(&message).as_bytes());
+							let _ = write_frame(&mut err, &message);
 							let _ = err.flush();
 						}
 						// This arm used to abort the run. A lost chunked terminator
@@ -323,6 +323,14 @@ impl Engine {
 	}
 }
 
+/// Write one log frame without creating a lossy `Cow` for valid UTF-8.
+fn write_frame<W: std::io::Write>(out: &mut W, bytes: &[u8]) -> std::io::Result<()> {
+	match std::str::from_utf8(bytes) {
+		Ok(text) => out.write_all(text.as_bytes()),
+		Err(_) => out.write_all(String::from_utf8_lossy(bytes).as_bytes()),
+	}
+}
+
 /// Layer the three `run` environment sources into the final `KEY=VALUE` / `KEY`
 /// list by precedence (`--env-file` < service `environment:` < `-e`), matching
 /// `docker compose run --env-file`. `-e` overrides are appended last so a later
@@ -351,7 +359,7 @@ fn merge_run_environment(
 
 #[cfg(test)]
 mod tests {
-	use super::merge_run_environment;
+	use super::{merge_run_environment, write_frame};
 	use std::collections::HashMap;
 
 	fn lookup<'a>(list: &'a [String], key: &str) -> Option<&'a str> {
@@ -396,6 +404,22 @@ mod tests {
 		assert_eq!(lookup(&list, "A"), Some("a"));
 		assert_eq!(lookup(&list, "B"), Some("b"));
 		assert_eq!(lookup(&list, "C"), Some("c"));
+	}
+
+	// `write_frame` (#1364)
+
+	#[test]
+	fn write_frame_valid_utf8_writes_bytes_verbatim() {
+		let mut buf = Vec::new();
+		write_frame(&mut buf, b"hello\nworld\n").unwrap();
+		assert_eq!(buf, b"hello\nworld\n");
+	}
+
+	#[test]
+	fn write_frame_invalid_utf8_substitutes_replacement() {
+		let mut buf = Vec::new();
+		write_frame(&mut buf, b"ok\xFF!\n").unwrap();
+		assert_eq!(buf, "ok�!\n".as_bytes());
 	}
 }
 
