@@ -353,236 +353,47 @@ pub(crate) fn parse_cli() -> Cli {
 				eprint!("\n{}\n", render_help(&help, podup::ui::stderr_colored()));
 				process::exit(2);
 			}
-			_ => e.exit(),
+			// A real argument-parsing failure: unknown flag, missing required
+			// arg, bad value. Bypass `e.exit()` so the output carries the
+			// `podup:` prefix that `exit_status::print_error` and the
+			// `tracing` formatter both use. `e.exit()` would also write
+			// clap's own (unprefixed) version to stderr — printing the same
+			// complaint twice — so we render it once via
+			// `format_clap_error` and exit with the same code clap would have
+			// used.
+			_ => {
+				eprintln!("{}", format_clap_error(&e));
+				process::exit(e.exit_code());
+			}
 		},
 	}
 }
 
-#[cfg(test)]
-mod help_for_tests {
-	use super::help_for;
-	use crate::cli::Cli;
-	use clap::CommandFactory;
-
-	fn help(args: &[&str]) -> String {
-		help_for(Cli::command(), args.iter().map(|s| (*s).to_string())).to_string()
-	}
-
-	#[test]
-	fn no_subcommand_renders_the_root_help() {
-		assert!(help(&[]).contains("Usage: podup [OPTIONS] <COMMAND>"));
-	}
-
-	#[test]
-	fn a_subcommand_group_renders_its_own_help_not_the_root() {
-		let out = help(&["generate"]);
-		assert!(
-			out.contains("Usage: podup generate"),
-			"expected generate's own usage, got: {out}"
-		);
-		// The point of the fix: the root's usage must NOT be what a user asking
-		// about `generate` is shown.
-		assert!(
-			!out.contains("Usage: podup [OPTIONS] <COMMAND>"),
-			"the root help was rendered instead: {out}"
-		);
-		assert!(
-			out.contains("quadlet"),
-			"the group's subcommands are missing"
-		);
-	}
-
-	#[test]
-	fn an_alias_resolves_to_the_command_it_names() {
-		assert!(help(&["gen"]).contains("Usage: podup generate"));
-	}
-
-	#[test]
-	fn flags_before_the_subcommand_do_not_stop_the_walk() {
-		// `--ansi never generate` must still reach generate. A walk that treated
-		// the flag's value as a subcommand token would stop at `never`.
-		assert!(help(&["--ansi", "never", "autostart"]).contains("Usage: podup autostart"));
-	}
-
-	#[test]
-	fn a_flag_value_that_looks_like_a_subcommand_is_not_walked_into() {
-		// `-p` names a project. A project called "build" is ordinary, and reading
-		// it as the `build` command would render the wrong help for bare
-		// `podup -p build`.
-		let out = help(&["-p", "build"]);
-		assert!(
-			out.contains("Usage: podup [OPTIONS] <COMMAND>"),
-			"a flag's value was walked into as a subcommand: {out}"
-		);
-	}
-
-	#[test]
-	fn the_equals_form_carries_its_own_value() {
-		// `--project-name=build` consumes nothing after it, so `generate` is still
-		// the next token to consider.
-		assert!(help(&["--project-name=build", "generate"]).contains("Usage: podup generate"));
-	}
-
-	#[test]
-	fn an_unknown_token_stops_the_walk_at_the_last_real_command() {
-		assert!(help(&["generate", "nosuchthing"]).contains("Usage: podup generate"));
-	}
+/// Render a clap error with the binary's `podup: error:` prefix so an argument
+/// typo on the command line looks the same as every other failure path.
+/// clap's own formatter emits a bare `error:` line that doesn't match
+/// `exit_status::print_error` or the `tracing` formatter — a typo reached the
+/// user as a one-liner while every other error came out bold-red and prefixed.
+///
+/// The clap-rendered text (which includes the usage block for argument
+/// errors) is taken verbatim and re-emitted with our prefix on the leading
+/// line. Returning the string instead of writing it lets the caller decide
+/// on the sink: `parse_cli` writes it to stderr here, but a future test
+/// can render and assert on the same value without spinning a fake stderr.
+fn format_clap_error(err: &clap::error::Error) -> String {
+	let style = podup::ui::error_style();
+	let prefix = format!(
+		"podup: {render}error:{reset} ",
+		render = style.render(),
+		reset = style.render_reset()
+	);
+	// clap's own rendered text starts with the literal "error: " — strip it
+	// and re-emit with our prefix so the bold-red label matches the rest of
+	// the binary. The usage block below is left unchanged.
+	let body = err.to_string();
+	let body = body.strip_prefix("error: ").unwrap_or(&body);
+	format!("{prefix}{body}")
 }
 
 #[cfg(test)]
-mod render_help_tests {
-	use super::render_help;
-
-	fn styled() -> clap::builder::StyledStr {
-		let mut s = clap::builder::StyledStr::new();
-		s.push_str("Usage: podup [OPTIONS] <COMMAND>");
-		s
-	}
-
-	/// Piped output must be byte-clean: a script reading the usage screen gets
-	/// text, not terminal control codes.
-	#[test]
-	fn without_colour_the_text_carries_no_escapes() {
-		let out = render_help(&styled(), false);
-		assert!(!out.contains('\u{1b}'), "{out:?}");
-		assert!(out.contains("Usage: podup"), "{out:?}");
-	}
-
-	/// And the coloured arm actually differs, rather than being a no-op nobody
-	/// noticed — which is what a plain `assert!(out.contains("Usage"))` on both
-	/// arms would have failed to catch.
-	#[test]
-	fn with_colour_the_text_still_reads_the_same() {
-		let plain = render_help(&styled(), false);
-		let coloured = render_help(&styled(), true);
-		assert!(coloured.contains("Usage: podup"), "{coloured:?}");
-		assert_eq!(
-			coloured.replace('\u{1b}', ""),
-			plain.replace('\u{1b}', ""),
-			"colour must not change the words"
-		);
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn validate_project_name_message_matches_the_enforced_rule() {
-		// Pins the error text to what `is_safe_project_name` actually enforces
-		// (lowercase-only, no '.'), not the looser rule the message used to
-		// describe. `My.App` is exactly the kind of name the old wording
-		// ("ASCII letters, digits, '-', '_', '.'") implied was fine, yet
-		// `is_safe_project_name` has always rejected it (uppercase and '.'
-		// are both disallowed) - a user following the old message would still
-		// get bounced.
-		let err = validate_project_name("My.App").unwrap_err();
-		let msg = err.to_string();
-		assert!(
-			msg.contains("lowercase"),
-			"message must say the name must be lowercase: {msg:?}"
-		);
-		assert!(
-			!msg.contains("'.'"),
-			"message must not list '.' as an allowed character: {msg:?}"
-		);
-	}
-
-	#[test]
-	fn validate_project_name_accepts_a_safe_name() {
-		assert!(validate_project_name("my-app").is_ok());
-	}
-
-	#[test]
-	fn label_only_covers_ps_and_events() {
-		use crate::cli::{EventsFormat, OutputFormat};
-		// `ps` and `events` are scoped purely by the project label, so they are
-		// label-only and may run without a compose file.
-		assert!(is_label_only(&Commands::Ps {
-			all: false,
-			quiet: false,
-			services_only: false,
-			size: false,
-			filter: vec![],
-			status: vec![],
-			format: OutputFormat::Table,
-			services: vec![],
-		}));
-		assert!(is_label_only(&Commands::Events {
-			format: EventsFormat::Table,
-			since: None,
-			until: None,
-			filter: vec![],
-			json: false,
-		}));
-		// A command that reads service definitions is not label-only.
-		assert!(!is_label_only(&Commands::Top {
-			format: OutputFormat::Table,
-			services: vec![],
-		}));
-	}
-
-	#[test]
-	fn level_words_match_user_facing_terms() {
-		assert_eq!(level_word(tracing::Level::WARN), "warning");
-		assert_eq!(level_word(tracing::Level::ERROR), "error");
-		assert_eq!(level_word(tracing::Level::INFO), "info");
-		assert_eq!(level_word(tracing::Level::DEBUG), "debug");
-		assert_eq!(level_word(tracing::Level::TRACE), "trace");
-		// Each severity gets a distinct style; debug/trace share the dim style.
-		assert_ne!(
-			level_style(tracing::Level::ERROR),
-			level_style(tracing::Level::INFO)
-		);
-		assert_ne!(
-			level_style(tracing::Level::WARN),
-			level_style(tracing::Level::ERROR)
-		);
-		assert_eq!(
-			level_style(tracing::Level::DEBUG),
-			level_style(tracing::Level::TRACE)
-		);
-	}
-
-	#[test]
-	fn broken_pipe_panic_detected() {
-		assert!(is_broken_pipe_panic(
-			"failed printing to stdout: Broken pipe (os error 32)"
-		));
-		assert!(is_broken_pipe_panic(
-			"failed printing to stderr: Broken pipe (os error 32)"
-		));
-		assert!(!is_broken_pipe_panic("some other internal error"));
-	}
-
-	#[test]
-	fn an_unrelated_panic_mentioning_a_broken_pipe_is_not_swallowed() {
-		// These are real crashes. Matching them would exit 0 and print nothing,
-		// and `panic = "abort"` leaves this hook as the only gate before the exit
-		// status, so the process would report success on a genuine bug.
-		assert!(!is_broken_pipe_panic("Broken pipe"));
-		assert!(!is_broken_pipe_panic(
-			"called `Result::unwrap()` on an `Err` value: Os { code: 32, kind: BrokenPipe, message: \"Broken pipe\" }"
-		));
-		assert!(!is_broken_pipe_panic(
-			"podman refused the request: broken pipe reading from the container"
-		));
-		assert!(!is_broken_pipe_panic("assertion failed at os error 32"));
-	}
-
-	#[test]
-	fn internal_error_notice_reports_and_warns_on_secrets() {
-		let notice = internal_error_notice();
-		assert!(notice.contains(REPO_URL), "points at the issue tracker");
-		assert!(notice.contains("/issues"));
-		assert!(
-			notice.contains("redact"),
-			"reminds the user to scrub secrets"
-		);
-		assert!(
-			notice.contains("RUST_LOG=debug"),
-			"tells the user what to capture"
-		);
-	}
-}
+mod tests;

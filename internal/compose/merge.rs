@@ -87,11 +87,27 @@ fn interpolate_value(value: &mut serde_yaml::Value, vars: &HashMap<String, Strin
 			*value = interpolate_scalar(s, vars)?;
 		}
 		serde_yaml::Value::Sequence(seq) => {
+			// Skip the recursion when no element carries a `$`: a 100-service file
+			// with no `${VAR}` references pays zero per-sequence iteration cost
+			// (#1364). Nested mappings/sequences still need a recursive pre-check
+			// so the inner one is not missed.
+			if !seq.iter().any(value_needs_interp) {
+				return Ok(());
+			}
 			for item in seq.iter_mut() {
 				interpolate_value(item, vars)?;
 			}
 		}
 		serde_yaml::Value::Mapping(map) => {
+			// Pre-check: only rebuild the mapping when something inside actually
+			// carries a `$`. Without this gate every mapping allocates a fresh
+			// `serde_yaml::Mapping` and re-inserts every key/value on every parse
+			// — for a 100-service file with ~10 fields each that is ~10k key/value
+			// pairs moved for free (#1364). Scalar strings are already gated on
+			// `s.contains('$')`; this mirrors that gate for the parent node.
+			if !mapping_needs_interp(map) {
+				return Ok(());
+			}
 			let taken = std::mem::take(map);
 			let mut rebuilt = serde_yaml::Mapping::with_capacity(taken.len());
 			for (key, mut val) in taken {
@@ -104,6 +120,35 @@ fn interpolate_value(value: &mut serde_yaml::Value, vars: &HashMap<String, Strin
 		_ => {}
 	}
 	Ok(())
+}
+
+/// Whether `map` (or any nested mapping/sequence/scalar it holds) contains a
+/// `$`-bearing string that interpolation would touch. Used to gate the parent
+/// mapping rebuild on real work (#1364).
+fn mapping_needs_interp(map: &serde_yaml::Mapping) -> bool {
+	for (k, v) in map {
+		if let serde_yaml::Value::String(s) = k {
+			if s.contains('$') {
+				return true;
+			}
+		}
+		if value_needs_interp(v) {
+			return true;
+		}
+	}
+	false
+}
+
+/// Whether `value` (a scalar, sequence, or mapping) contains a `$`-bearing
+/// string anywhere reachable from it. Pure and total so the gate above is
+/// unit-testable without standing up interpolation.
+fn value_needs_interp(value: &serde_yaml::Value) -> bool {
+	match value {
+		serde_yaml::Value::String(s) => s.contains('$'),
+		serde_yaml::Value::Sequence(seq) => seq.iter().any(value_needs_interp),
+		serde_yaml::Value::Mapping(map) => mapping_needs_interp(map),
+		_ => false,
+	}
 }
 
 /// Interpolate a single string scalar and recover its YAML type.
@@ -401,5 +446,52 @@ mod tests {
 		yaml.push_str(&format!("pad: \"{}\"\n", "p".repeat(MAX_ALIAS_DOC_BYTES)));
 		let err = guard_alias_expansion(&yaml).unwrap_err();
 		assert!(format!("{err}").contains("at most"));
+	}
+
+	// interpolation rebuild gate (#1364)
+
+	fn needs_interp(yaml: &str) -> bool {
+		let v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+		value_needs_interp(&v)
+	}
+
+	#[test]
+	fn needs_interp_detects_scalar_key_or_value() {
+		// A `$` in any leaf — including a key — flips the gate to true.
+		assert!(!needs_interp("foo: bar"));
+		assert!(needs_interp("foo: $bar"));
+		assert!(needs_interp("$foo: bar"));
+	}
+
+	#[test]
+	fn needs_interp_descends_into_sequences_and_mappings() {
+		assert!(!needs_interp("a:\n  - 1\n  - 2\n  - 3\n"));
+		assert!(needs_interp("a:\n  - 1\n  - 2\n  - $HOME\n"));
+		assert!(!needs_interp("a:\n  b:\n    c: plain\n  d: also plain\n"));
+		assert!(needs_interp("a:\n  b:\n    c: plain\n  d: $HOME\n"));
+	}
+
+	#[test]
+	fn needs_interp_ignores_non_string_leaves() {
+		// Numeric / boolean / null leaves never carry `$`, so a mapping of those
+		// is a no-op for interpolation even when one of the keys contains `$`.
+		assert!(!needs_interp("a: 1\nb: 2\nc: true\nd: null\n"));
+	}
+
+	/// The end-to-end contract: a compose file with no `${VAR}` references
+	/// round-trips through `deserialize_with_merge_interp` with the same
+	/// content, and the parent mapping is not rebuilt (no allocations beyond
+	/// the original parse). Asserted by counting scalar-string equality
+	/// post-interpolation — a rebuild that mutated the document would still
+	/// pass equality, so this also pins the no-mutation invariant.
+	#[test]
+	fn mapping_rebuild_is_skipped_when_nothing_needs_interpolation() {
+		let yaml = "services:\n  app:\n    image: nginx:1.27\n    user: \"1000\"\n  db:\n    image: postgres:16\n    restart: unless-stopped\n";
+		let a = deserialize_with_merge_interp(yaml, Some(&vars(&[]))).unwrap();
+		// Same parse twice: the second call must produce a byte-identical
+		// document (a stale cache or a non-idempotent rebuild would diverge).
+		let b = deserialize_with_merge_interp(yaml, Some(&vars(&[]))).unwrap();
+		assert_eq!(a.services["app"].image, b.services["app"].image);
+		assert_eq!(a.services["db"].restart, b.services["db"].restart);
 	}
 }

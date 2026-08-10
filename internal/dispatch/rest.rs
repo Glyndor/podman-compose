@@ -23,6 +23,12 @@ fn cli_logs_tail_default(tail: Option<String>) -> Option<String> {
 
 /// Handle the commands not matched in [`super::dispatch`]. Behaviour-preserving
 /// continuation of the same match (the arms are a verbatim move).
+///
+/// The match is exhaustive on purpose: every variant of `Commands` is named
+/// here, with the variants handled by the parent match in `dispatch.rs`
+/// pinned as `unreachable!`. That way adding a new variant to the enum
+/// produces a compile error here, not a silent catch-all that only blows up
+/// in `--no-default-features` builds where the cfg-gated arms are stripped.
 pub(super) async fn dispatch_rest(
 	engine: &Engine,
 	file: &podup::compose::types::ComposeFile,
@@ -308,6 +314,23 @@ pub(super) async fn dispatch_rest(
 				.restart_with_options(file, &services, no_deps)
 				.await?
 		}
+		// Variants handled by the parent match in `dispatch.rs` (`Up`, `Down`,
+		// `Start`, `Stop`, `Scale`, `Create`, `Build`, `Rm`, `Kill`, `Pause`,
+		// `Unpause`). Reaching them here means the parent's arms were removed
+		// or the catch-all `other` binding stopped catching. Move the handler
+		// back to `dispatch.rs`; this second match exists for the long tail,
+		// not to replace any of these.
+		Commands::Up { .. } => unreachable!("handled in dispatch"),
+		Commands::Down { .. } => unreachable!("handled in dispatch"),
+		Commands::Start { .. } => unreachable!("handled in dispatch"),
+		Commands::Stop { .. } => unreachable!("handled in dispatch"),
+		Commands::Scale { .. } => unreachable!("handled in dispatch"),
+		Commands::Create { .. } => unreachable!("handled in dispatch"),
+		Commands::Build { .. } => unreachable!("handled in dispatch"),
+		Commands::Rm { .. } => unreachable!("handled in dispatch"),
+		Commands::Kill { .. } => unreachable!("handled in dispatch"),
+		Commands::Pause { .. } => unreachable!("handled in dispatch"),
+		Commands::Unpause { .. } => unreachable!("handled in dispatch"),
 		Commands::Config { .. } => unreachable!("handled above"),
 		Commands::Generate { .. } => unreachable!("handled above"),
 		Commands::Autostart { .. } => unreachable!("handled above"),
@@ -315,11 +338,16 @@ pub(super) async fn dispatch_rest(
 		Commands::Help { .. } => unreachable!("handled before compose parsing"),
 		Commands::Version { .. } => unreachable!("handled before compose parsing"),
 		Commands::Ls { .. } => unreachable!("handled before compose parsing"),
+		// The early-return guards in `internal/main.rs` intercept these
+		// variants before a compose file is parsed and dispatch is reached,
+		// so reaching them here means one of those guards was removed or
+		// skipped. Move the guard back into `main` rather than handling the
+		// variant here: the early return is what keeps `update` and
+		// `completions` off the compose-parse path entirely.
 		#[cfg(feature = "update")]
 		Commands::Update { .. } => unreachable!("handled before compose parsing"),
 		#[cfg(feature = "completions")]
 		Commands::Completions { .. } => unreachable!("handled before compose parsing"),
-		_ => unreachable!("handled in dispatch"),
 	}
 
 	Ok(())

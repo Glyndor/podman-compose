@@ -427,17 +427,27 @@ jobs:
           "$venv_py" .github/scripts/sign.py install.sh
           "$venv_py" .github/scripts/sign.py install.ps1
 
-      - name: Verify the signature against the keys consumers embed
+      - name: Verify every signature against the keys consumers embed
         run: |
           # sign.py only checks the seed is base64 of 32 bytes, so a wrong-but-
           # well-formed GLYNDOR_RELEASE_ED25519_KEY signs happily and publishes a
           # release nothing can verify. Releases are immutable, so that mistake
-          # burns the version. Do here, once, what every installer does on every
-          # machine: verify SHA256SUMS.sig against the keys install.sh ships. A
-          # mismatch fails the release instead of shipping it.
+          # burns the version. Verify, here and once, what every installer does
+          # on every machine - and what install.sh / install.ps1 do for
+          # SHA256SUMS is only half the story. Every per-asset .sig (per-binary,
+          # per-deb, per-SBOM, per-installer) carries the same trust: a per-
+          # binary substitution is the failure mode SHA256SUMS cannot catch
+          # (the manifest can be re-signed to match the swapped binary), so
+          # iterate every .sig in the workspace and verify it the same way.
+          # A mismatch on any one fails the release instead of shipping it.
           venv_py="$RUNNER_TEMP/signvenv/bin/python"
           [ -x "$venv_py" ] || venv_py="$RUNNER_TEMP/signvenv/Scripts/python.exe"
           "$venv_py" .github/scripts/verify-signing-key.py SHA256SUMS
+          shopt -s nullglob
+          for sig in *.sig; do
+            base="${sig%.sig}"
+            "$venv_py" .github/scripts/verify-signing-key.py "$base" "$sig"
+          done
 
       - name: Create GitHub Release
         env:

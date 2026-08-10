@@ -15,8 +15,61 @@ mod render;
 mod unit;
 mod warnings;
 
+use std::cell::Cell;
+
 use crate::compose::types::ComposeFile;
 use unit::{build_unit, container_unit, network_unit, volume_unit, UnitContext};
+
+thread_local! {
+	/// CLI `--no-warn` flag honoured by the Quadlet path's host-binding /
+	/// privilege-escalation warnings. Set by `write_quadlet` when the CLI
+	/// parsed `--no-warn` and consulted by `container_unit` before each
+	/// `tracing::warn!` so the operator can silence the per-generate noise
+	/// the same way they do on `up`/`create`/`run`/`exec`.
+	///
+	/// The live engine path carries the flag on `Engine::no_warn`; the Quadlet
+	/// path goes through a free function and has no such struct, so a
+	/// thread-local is the smallest non-breaking plumbing. The Quadlet command
+	/// runs synchronously on the CLI thread, so a thread-local has the same
+	/// observable behaviour as a parameter would.
+	static NO_WARN: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Set the Quadlet-path `--no-warn` flag for the current thread; restores the
+/// previous value on drop. The CLI driver wraps its call to `write_quadlet`
+/// in this scope so `container_unit` can read it via `is_no_warn_set`.
+pub struct NoWarnGuard {
+	prev: bool,
+}
+
+impl Default for NoWarnGuard {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+impl NoWarnGuard {
+	/// Activate `--no-warn` for the current thread until the guard is dropped.
+	/// Invoked by the CLI driver around `write_quadlet`; embedders that drive
+	/// the Quadlet path directly can use the same guard for the same effect.
+	pub fn new() -> Self {
+		let prev = NO_WARN.with(|c| c.get());
+		NO_WARN.with(|c| c.set(true));
+		Self { prev }
+	}
+}
+
+impl Drop for NoWarnGuard {
+	fn drop(&mut self) {
+		NO_WARN.with(|c| c.set(self.prev));
+	}
+}
+
+/// Whether `--no-warn` is active on the current thread. Read by
+/// `container_unit` before each host-binding `tracing::warn!`.
+pub(super) fn is_no_warn_set() -> bool {
+	NO_WARN.with(|c| c.get())
+}
 
 /// The `# podup-owner: <project>` marker a unit carries as its literal first
 /// line, if present.
@@ -230,6 +283,50 @@ pub fn generate_at(file: &ComposeFile, project: &str, base_dir: &std::path::Path
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod no_warn_tests {
+	//! The Quadlet-path host-binding / privilege-escalation warnings are
+	//! gated on a thread-local set by [`NoWarnGuard`]. The guard restores the
+	//! previous value on drop so nested scopes compose; a test that runs
+	//! inside another test's guard (or after one has leaked) would see a
+	//! different starting value, so the guard is documented as zero-overhead
+	//! for callers that do not wrap `write_quadlet`.
+	use super::{is_no_warn_set, NoWarnGuard};
+
+	#[test]
+	fn no_warn_is_off_by_default() {
+		assert!(!is_no_warn_set());
+	}
+
+	#[test]
+	fn guard_sets_and_restores() {
+		assert!(!is_no_warn_set());
+		{
+			let _g = NoWarnGuard::new();
+			assert!(is_no_warn_set());
+		}
+		assert!(
+			!is_no_warn_set(),
+			"dropping the guard must restore the previous value"
+		);
+	}
+
+	#[test]
+	fn nested_guards_restore_in_reverse_order() {
+		let _outer = NoWarnGuard::new();
+		assert!(is_no_warn_set());
+		{
+			// A nested guard inherits the inner value (true), so dropping it
+			// leaves the outer guard's setting intact.
+			let _inner = NoWarnGuard::new();
+		}
+		assert!(
+			is_no_warn_set(),
+			"a nested NoWarnGuard must not stomp the outer guard's value"
+		);
+	}
+}
 
 #[cfg(all(test, unix))]
 mod write_guard_tests {

@@ -274,7 +274,11 @@ async fn run() -> podup::Result<()> {
 				)));
 			}
 		}
-		let client = podup::podman::connect(resolve_socket(cli.socket.as_deref()).as_deref())?;
+		let client = podup::podman::connect_with_pool_size(
+			resolve_socket(cli.socket.as_deref()).as_deref(),
+			cli.connection_pool_size
+				.unwrap_or(podup::Client::DEFAULT_POOL_SIZE),
+		)?;
 		return podup::list_projects_filtered(
 			&client,
 			podup::LsOptions {
@@ -335,7 +339,11 @@ async fn run() -> podup::Result<()> {
 		// service names from up front; it registers them itself, from the live
 		// container listing it fetches immediately before tearing down.
 		podup::ui::set_services(&file.services.keys().cloned().collect::<Vec<_>>());
-		let client = podup::podman::connect(resolve_socket(cli.socket.as_deref()).as_deref())?;
+		let client = podup::podman::connect_with_pool_size(
+			resolve_socket(cli.socket.as_deref()).as_deref(),
+			cli.connection_pool_size
+				.unwrap_or(podup::Client::DEFAULT_POOL_SIZE),
+		)?;
 		let engine = podup::Engine::with_base_dir(client, project, base_dir);
 		return engine
 			.ps_filtered_with_display(
@@ -392,7 +400,11 @@ async fn run() -> podup::Result<()> {
 			}
 			let base_dir = resolve_base_dir(cli.project_directory.as_deref(), &compose_files[0]);
 			let stop_timeout = podup::validate_stop_timeout(*timeout)?;
-			let client = podup::podman::connect(resolve_socket(cli.socket.as_deref()).as_deref())?;
+			let client = podup::podman::connect_with_pool_size(
+				resolve_socket(cli.socket.as_deref()).as_deref(),
+				cli.connection_pool_size
+					.unwrap_or(podup::Client::DEFAULT_POOL_SIZE),
+			)?;
 			let engine = podup::Engine::with_base_dir(client, project, base_dir)
 				.with_stop_timeout(stop_timeout);
 			// `down` is mutating, so serialize it against concurrent runs as the
@@ -454,7 +466,11 @@ async fn run() -> podup::Result<()> {
 		// `--resolve-image-digests` pins each image to its registry digest, which
 		// needs a Podman connection to inspect images.
 		let mut resolved = if *resolve_image_digests {
-			let client = podup::podman::connect(resolve_socket(cli.socket.as_deref()).as_deref())?;
+			let client = podup::podman::connect_with_pool_size(
+				resolve_socket(cli.socket.as_deref()).as_deref(),
+				cli.connection_pool_size
+					.unwrap_or(podup::Client::DEFAULT_POOL_SIZE),
+			)?;
 			podup::resolve_image_digests(&client, &parsed).await?
 		} else {
 			parsed
@@ -516,7 +532,13 @@ async fn run() -> podup::Result<()> {
 		// Absolute base dir so a `.build` unit's context resolves under the compose
 		// file, not the unit directory the systemd generator would otherwise use.
 		let base_dir = std::fs::canonicalize(&base_dir).unwrap_or(base_dir);
-		return write_quadlet(&filtered, &project, &base_dir, output.as_deref());
+		return write_quadlet(
+			&filtered,
+			&project,
+			&base_dir,
+			output.as_deref(),
+			cli.no_warn,
+		);
 	}
 
 	// `autostart` manages a rootless `systemctl --user` unit that brings the stack
@@ -528,11 +550,16 @@ async fn run() -> podup::Result<()> {
 			profile: &cli.profile,
 			env_files: &cli.env_file,
 			socket: resolve_socket(cli.socket.as_deref()),
+			connection_pool_size: cli.connection_pool_size,
 		};
 		return autostart_cmd::dispatch(&env, &compose_files, project, base_dir, &file, kind).await;
 	}
 
-	let client = podup::podman::connect(resolve_socket(cli.socket.as_deref()).as_deref())?;
+	let client = podup::podman::connect_with_pool_size(
+		resolve_socket(cli.socket.as_deref()).as_deref(),
+		cli.connection_pool_size
+			.unwrap_or(podup::Client::DEFAULT_POOL_SIZE),
+	)?;
 	// The `-t/--timeout` shutdown-grace override applies to every command that
 	// stops containers (up recreate, down, stop, restart).
 	let stop_timeout = match &cli.command {
@@ -582,7 +609,8 @@ async fn run() -> podup::Result<()> {
 		.with_run_env_files(cli.env_file.clone())
 		.with_run_labels(startup::run_labels_for(&cli.command))
 		.with_run_no_tty(startup::run_no_tty_for(&cli.command))
-		.with_renew_anon_volumes(renew_anon_volumes);
+		.with_renew_anon_volumes(renew_anon_volumes)
+		.with_no_warn(cli.no_warn);
 
 	// Serialize mutating lifecycle commands against concurrent `podup` runs on
 	// the same project. Read-only / follow commands (ps, logs, top, port,

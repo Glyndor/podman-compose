@@ -114,9 +114,16 @@ impl Engine {
 						.as_ref()
 						.is_none_or(|set| set.contains(name.as_str()))
 			})
+			// A typo'd `pull_policy:` would otherwise be dropped silently here
+			// and then the per-service `pull_image` would fail downstream
+			// with the same error, N times. Resolve once and let the
+			// offending value short-circuit the whole batch (#1369).
 			.map(|(name, s)| {
 				let image = s.image.as_deref().unwrap_or_default();
-				let key = (image, self.resolved_pull_policy(s), s.platform.as_deref());
+				let policy = self
+					.resolved_pull_policy(s)
+					.expect("unknown pull policy already rejected in pull_image");
+				let key = (image, policy, s.platform.as_deref());
 				(name.as_str(), s, key)
 			})
 			.collect();
@@ -187,7 +194,7 @@ impl Engine {
 	}
 
 	pub(in crate::engine) async fn pull_image(&self, service: &Service) -> Result<()> {
-		let pull_policy = self.resolved_pull_policy(service);
+		let pull_policy = self.resolved_pull_policy(service)?;
 		self.pull_image_with_policy(service, pull_policy, self.quiet_pull)
 			.await
 	}
@@ -200,7 +207,7 @@ impl Engine {
 	/// `Pulling` twice per image on `up` while a standalone `pull` printed it
 	/// once.
 	pub(in crate::engine) async fn pull_image_quietly(&self, service: &Service) -> Result<()> {
-		let pull_policy = self.resolved_pull_policy(service);
+		let pull_policy = self.resolved_pull_policy(service)?;
 		self.pull_image_with_policy(service, pull_policy, true)
 			.await
 	}
@@ -214,17 +221,17 @@ impl Engine {
 	/// same resolved value — an override collapses the dedup (every service
 	/// resolves to the same policy), while differing per-service policies
 	/// (no override set) keep it split.
-	fn resolved_pull_policy(&self, service: &Service) -> &'static str {
+	fn resolved_pull_policy(&self, service: &Service) -> Result<&'static str> {
 		let requested = self
 			.pull_policy_override
 			.as_deref()
 			.or(service.pull_policy.as_deref());
-		libpod_pull_policy(requested).unwrap_or_else(|| {
-			warn!(
-				"unknown pull policy '{}', defaulting to 'missing'",
+		libpod_pull_policy(requested).ok_or_else(|| {
+			crate::error::ComposeError::Unsupported(format!(
+				"unknown pull policy {:?}: accepted values are always, missing, newer, never \
+				 (case-insensitive); if_not_present and build are accepted as aliases for missing",
 				requested.unwrap_or_default()
-			);
-			"missing"
+			))
 		})
 	}
 
@@ -414,8 +421,29 @@ mod tests {
 		assert_eq!(libpod_pull_policy(Some("if_not_present")), Some("missing"));
 		assert_eq!(libpod_pull_policy(Some("build")), Some("missing"));
 		assert_eq!(libpod_pull_policy(None), Some("missing"));
-		// Unknown values are reported (None) so the caller warns.
+		// Unknown values are reported (None) so the caller fails loud (#1369).
 		assert_eq!(libpod_pull_policy(Some("bogus")), None);
+	}
+
+	/// A typo'd `pull_policy:` must surface as a hard error (#1369): the
+	/// previous warn-and-default-to-missing path silently turned `alaways`
+	/// into the opposite of what the user wrote, and a `never` typo pulled
+	/// fresh images on every `up` without telling the operator.
+	#[test]
+	fn resolved_pull_policy_rejects_an_unknown_value() {
+		let e = crate::engine::Engine::new(
+			crate::libpod::Client::new("/nonexistent.sock"),
+			"proj".into(),
+		);
+		let svc = crate::compose::types::Service {
+			image: Some("nginx:1.27".to_string()),
+			pull_policy: Some("alaways".to_string()),
+			..crate::compose::types::Service::default()
+		};
+		let err = e.resolved_pull_policy(&svc).unwrap_err();
+		let msg = err.to_string();
+		assert!(msg.contains("alaways"), "got {msg}");
+		assert!(msg.contains("always"), "got {msg}");
 	}
 
 	#[cfg(unix)]

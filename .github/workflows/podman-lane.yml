@@ -152,7 +152,7 @@ jobs:
                 # This used to say the drops were specific to the nested-virt
                 # (VM-in-runner) transport, and that a single-level VM "never
                 # drops a byte". **That is measured false** (2026-08-03, #1322):
-                # on a plain KVM guest with Podman 6.0.1, the same suite fails
+                # on a plain KVM guest with Podman 6.0.2, the same suite fails
                 # 17 of 27 at eight test threads and 3 at one — a clean
                 # dose-response curve in thread count, reproducible across
                 # repetitions. Nesting makes it worse; it does not cause it.
@@ -321,15 +321,27 @@ jobs:
           # log (the console here is tail-truncated, so don't recount from it).
           SUM=$(grep -oE 'PODUP_SUMMARY pass=[0-9]+ fail=[0-9]+ flaky=[0-9]+' "$L" | tail -1)
           [ -n "$SUM" ] || { echo "::error::no PODUP_SUMMARY from VM on Podman $VER — suite did not report"; exit 1; }
-          # Coverage, when this run asked for it. Reported into the job summary and
-          # never gated: the org standard's 90% floor belongs here rather than on
-          # the Podman-less job that can only see 79% (#1326), but a threshold set
-          # from a number never observed in THIS environment would be a phantom
-          # check. Observe first, then gate, in a separate change.
+          # Coverage, when this run asked for it. Reported into the job summary.
+          # Gated on the scheduled + manual paths only, on Podman 6 (the leg that
+          # represents the latest stable major). The CI coverage job without
+          # Podman sees 79% because every integration test skips itself; the
+          # lane's full suite sees ~91.5%. A 88% floor is below the observed
+          # value with room for natural drift and above the level where a real
+          # regression would hide (#1326). PR runs do not produce a coverage
+          # number, so the gate is skipped there.
           COV=$(grep -oE 'PODUP_COVERAGE=[^ ]+' "$L" | tail -1 | cut -d= -f2)
           if [ -n "$COV" ]; then
             echo "coverage on Podman $VER (full suite, integration tests included): $COV"
             echo "- **Podman $VER coverage:** $COV" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$VER" = "6" ] && [ "${{ github.event_name }}" = "schedule" ]; then
+              # Strip the trailing `%` and compare as integers (the lane prints
+              # `91.5` for `91.5%`).
+              COV_INT=$(printf '%.0f' "${COV%%%}")
+              if [ "$COV_INT" -lt 88 ]; then
+                echo "::error::Podman 6 coverage $COV is below the 88% nightly floor (#1326). The full suite measured $COV — likely a regression that the floor is here to catch."
+                exit 1
+              fi
+            fi
           fi
           PASS=$(echo "$SUM" | grep -oE 'pass=[0-9]+' | cut -d= -f2)
           FAIL=$(echo "$SUM" | grep -oE 'fail=[0-9]+' | cut -d= -f2)

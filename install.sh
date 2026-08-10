@@ -121,30 +121,48 @@ PUBKEYS=()
 
 # Verify the Ed25519 signature over SHA256SUMS.
 #   ed25519_verify <sig-file> <data-file>
-# Exit: 0 verified, 1 signature present but INVALID (tampered), 2 cannot verify.
+# Exit: 0 verified, 1 signature present but INVALID (tampered),
+#       2 cannot verify (no python3/cryptography, no key configured),
+#       3 the configured release key is malformed (a configuration problem,
+#         not a release-tampering problem - kept distinct from rc=1 so the
+#         caller can report it without scaring the user about the release).
 ed25519_verify() {
 	[[ ${#PUBKEYS[@]} -gt 0 ]] || return 2
 	command -v python3 >/dev/null 2>&1 || return 2
 	python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey" 2>/dev/null || return 2
-	if python3 - "$1" "$2" "${PUBKEYS[@]}" <<'PYEOF'
-import base64, sys
+	python3 - "$1" "$2" "${PUBKEYS[@]}" <<'PYEOF'
+import base64, binascii, sys
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
 sig_file, data_file = sys.argv[1], sys.argv[2]
 sig = open(sig_file, "rb").read()
 data = open(data_file, "rb").read()
-for pubkey_b64 in sys.argv[3:]:
+for slot, pubkey_b64 in enumerate(sys.argv[3:]):
     try:
-        Ed25519PublicKey.from_public_bytes(base64.b64decode(pubkey_b64 + "==")).verify(sig, data)
+        # Pad to a 4-byte boundary the way sign.py does: the installer stores
+        # the key unpadded, and a stricter decoder would reject a fixed two-"="
+        # suffix when the key is already a multiple of four chars long.
+        raw = base64.b64decode(pubkey_b64 + "=" * (-len(pubkey_b64) % 4))
+        Ed25519PublicKey.from_public_bytes(raw).verify(sig, data)
         sys.exit(0)
-    except (InvalidSignature, ValueError):
+    except (binascii.Error, ValueError) as exc:
+        # The key is set but cannot be decoded into 32 bytes. This is a
+        # configuration problem (a bad PODUP_RELEASE_PUBKEY*_B64 override), not
+        # a release-tampering problem - do not lump it in with rc=1.
+        print(f"configured release key slot {slot} is malformed: {exc}", file=sys.stderr)
+        sys.exit(3)
+    except InvalidSignature:
         continue
 sys.exit(1)
 PYEOF
-	then
-		return 0
-	fi
-	return 1
+	# Preserve the Python exit code: 0 verified, 3 malformed key, 1 mismatch.
+	# An `if/then/return 1` wrapper would fold rc=3 into rc=1, defeating the
+	# L7 distinction the install.ps1 side already exposes.
+	case $? in
+		0) return 0 ;;
+		3) return 3 ;;
+		*) return 1 ;;
+	esac
 }
 
 # Confirm a downloaded file matches its entry in SHA256SUMS.
@@ -164,6 +182,82 @@ run_root() {
 	else
 		fail "root privileges required and sudo is not available for: $*"
 	fi
+}
+
+# Resolve the actual release tag from the GitHub releases API when the
+# caller leaves the version at its default ("latest"). The signature over
+# SHA256SUMS binds the asset bytes but not the release tag, so a CDN or
+# transparent-proxy replay can serve an older, *legitimately* signed
+# binary and matching manifest - both still verify cryptographically.
+# We pin the staged binary's reported --version to this resolved tag in
+# the self-test (verify_version_self_test) to close that window. Without
+# this resolution we cannot self-test against the literal string
+# "latest", and using the binary's own --version as the truth would be
+# circular (that is exactly the attack).
+#
+# Echoes the tag with the `v` prefix (the convention every published
+# release follows). python3 is already required for the Ed25519
+# signature check, so leaning on it for JSON parsing here does not add
+# a new dependency.
+resolve_release_tag() {
+	local api_url="https://api.github.com/repos/${REPO}/releases/latest"
+	local body
+	body="$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+		--max-time 60 -fsSL \
+		-H 'Accept: application/vnd.github+json' \
+		"$api_url")" || fail "Cannot resolve latest release tag from ${api_url}"
+	python3 - "$body" <<'PYEOF' || fail "Malformed GitHub releases JSON from /releases/latest"
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+except (json.JSONDecodeError, ValueError) as exc:
+    sys.exit(f"malformed GitHub releases JSON: {exc}")
+tag = data.get("tag_name", "")
+if not isinstance(tag, str) or not tag:
+    sys.exit(f"GitHub releases response missing tag_name: {tag!r}")
+print(tag)
+PYEOF
+}
+
+# Confirm the staged binary's --version reports the resolved release
+# tag. This closes the signed-release rollback window: a replayed older
+# binary passes the Ed25519 signature, the SHA-256 digest, and the build
+# provenance (the manifest and the asset are both legitimately signed),
+# but its --version still reports the old release. The self-test refuses
+# such an install the same way the Rust `podup update` does
+# (internal/update/install.rs:152-205).
+#
+# Strict equality, with one optional leading `v`. Each whitespace-
+# delimited token in the staged binary's --version output is compared
+# in full; a starts_with / substring match would let `3.7.0-dev` slip
+# past the `3.7.0` check, which is the rollback case this gate exists
+# to reject. Matches the Rust behaviour token-for-token.
+#
+#   verify_version_self_test <staged-path> <resolved-tag>
+verify_version_self_test() {
+	local staged="$1" expected_tag="$2"
+	local expected="${expected_tag#v}"
+
+	local reported
+	# The staged file lives in INSTALL_DIR (possibly sudo-owned) with a
+	# hidden name; reading --version requires execute permission but no
+	# read/ownership on the parent.
+	if ! reported="$("$staged" --version 2>/dev/null)"; then
+		rm -f "$staged" 2>/dev/null || true
+		fail "Could not run ${staged} --version to self-test the staged binary"
+	fi
+
+	local token
+	# shellcheck disable=SC2086  # word-splitting is intentional: $reported is the raw --version line.
+	for token in $reported; do
+		if [[ "$token" == "$expected" || "$token" == "v$expected" ]]; then
+			log_ok "Reported --version matches ${expected_tag}"
+			return 0
+		fi
+	done
+	rm -f "$staged" 2>/dev/null || true
+	log_error "Staged binary reports '${reported}', expected ${expected_tag}"
+	fail "Refusing to install: staged binary's --version does not match the resolved release tag (possible rollback) - the staged file has been removed"
 }
 
 # --- apt mode ----------------------------------------------------------------
@@ -193,6 +287,7 @@ install_apt() {
 		0) log_ok "Keyring signature verified" ;;
 		1) fail "Keyring signature verification failed - aborting (package may be tampered)" ;;
 		2) fail "Cannot verify keyring signature: install python3 with the 'cryptography' package (and a configured release key) - aborting" ;;
+		3) fail "Configured release key is malformed - check PODUP_RELEASE_PUBKEY_B64 / _PUBKEY2_B64 values and re-run" ;;
 	esac
 
 	run_root dpkg -i "${TMP_DIR}/${kr}"
@@ -235,6 +330,7 @@ install_binary() {
 release signature against the pinned key. Install it and re-run."
 			fi
 			;;
+		3) fail "Configured release key is malformed - check PODUP_RELEASE_PUBKEY_B64 / _PUBKEY2_B64 values and re-run" ;;
 	esac
 
 	# Build-provenance attestation: proves the binary was produced by this repo's
@@ -263,21 +359,86 @@ or python3 with the 'cryptography' package, or set PODUP_RELEASE_PUBKEY_B64, the
 
 	verify_checksum "$ARTIFACT"
 
+	# Resolve the actual release tag for the self-test. With an explicit
+	# PODUP_VERSION=vX.Y.Z this is just that tag; with the default
+	# "latest" we hit the GitHub releases API to discover it. The signed
+	# manifest binds asset bytes but not the release tag, so we cannot
+	# use the staged binary's --version as the source of truth - that
+	# would be the attack vector.
+	local resolved_tag
+	if [[ "$VERSION" == "latest" ]]; then
+		log_info "Resolving latest release tag ..."
+		resolved_tag="$(resolve_release_tag)"
+	else
+		resolved_tag="$VERSION"
+	fi
+
 	# Stage next to the target and rename into place, so a kill mid-install can
-	# never leave a partial yet executable binary on PATH.
+	# never leave a partial yet executable binary on PATH. The version
+	# self-test runs against the staged binary before the move: a failed
+	# self-test removes the staged file and aborts the install the same
+	# way the Rust self_test does.
+	#
+	# The staged binary is created private (0600) under a 077 umask so the
+	# verified bytes are never world-readable in a shared directory like
+	# /usr/local/bin during the window before the rename. The target's mode
+	# is then applied explicitly, masked with ~0o777 so a setuid/setgid/
+	# sticky bit on the target (planted or inherited) cannot ride onto the
+	# freshly installed binary — the same discipline the Rust updater
+	# follows at internal/update/install.rs:237-298. Mirrors what the
+	# Rust `install_at` does, with `install` swapped for the equivalent
+	# `cp + chmod` because `-m` only sets the mode of the *new* file and
+	# cannot start private then widen.
 	local staged="${INSTALL_DIR}/.podup.install-$$"
-	local install_cmd=(install -m 0755 "${TMP_DIR}/${ARTIFACT}" "$staged")
-	local move_cmd=(mv -f "$staged" "${INSTALL_DIR}/podup")
+	local target="${INSTALL_DIR}/podup"
+	# Read the target's mode if it exists, so the new binary takes over
+	# whatever mode the operator chose. A default install lands at 0755.
+	# stat -c %a prints the mode as an octal string ("755", "4755"…); strip
+	# the special bits explicitly rather than relying on arithmetic, so
+	# the value fed to chmod is always a plain permission string.
+	local target_mode
+	if [[ -e "$target" ]]; then
+		target_mode="$(stat -c '%a' "$target")"
+		# 4 digits → setuid/setgid/sticky + perm; 3 digits → perm only.
+		# Strip the leading digit and any special bits from the value the
+		# operator set, so a tampered planted setuid bit never propagates.
+		local perm="${target_mode: -3}"
+		# final sanity: only octal digits 0-7 survive.
+		if [[ "$perm" =~ ^[0-7]{3}$ ]]; then
+			target_mode="$perm"
+		else
+			target_mode="755"
+		fi
+	else
+		target_mode="755"
+	fi
+	# Stage next to the target: copy under a 077 umask so the verified bytes
+	# are never world-readable in a shared directory (e.g. /usr/local/bin)
+	# during the window before the chmod applies the target's mode. The
+	# chmod then widens the file to the target's ordinary permission bits,
+	# with the special bits stripped — same discipline the Rust updater
+	# follows at internal/update/install.rs:237-298.
+	local copy_cmd=(install -m 0600 "${TMP_DIR}/${ARTIFACT}" "$staged")
+	local perms_cmd=(chmod "$target_mode" "$staged")
+	local move_cmd=(mv -f "$staged" "$target")
 	if [[ -w "$INSTALL_DIR" ]]; then
-		"${install_cmd[@]}" && "${move_cmd[@]}"
+		(umask 077 && "${copy_cmd[@]}" && "${perms_cmd[@]}")
 	elif command -v sudo >/dev/null 2>&1; then
 		log_info "Installing to ${INSTALL_DIR} (requires sudo) ..."
-		sudo "${install_cmd[@]}" && sudo "${move_cmd[@]}"
+		sudo sh -c "umask 077 && $(printf '%q ' "${copy_cmd[@]}") && $(printf '%q ' "${perms_cmd[@]}")"
 	else
 		fail "Cannot write to ${INSTALL_DIR} and sudo is not available. Set PODUP_INSTALL_DIR to a writable directory."
 	fi
 
-	log_ok "podup installed: $("${INSTALL_DIR}/podup" --version)"
+	verify_version_self_test "$staged" "$resolved_tag"
+
+	if [[ -w "$INSTALL_DIR" ]]; then
+		"${move_cmd[@]}"
+	elif command -v sudo >/dev/null 2>&1; then
+		sudo "${move_cmd[@]}"
+	fi
+
+	log_ok "podup installed: $("${target}" --version)"
 }
 
 # --- Dispatch ----------------------------------------------------------------

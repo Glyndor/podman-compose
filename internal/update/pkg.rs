@@ -25,54 +25,36 @@ pub fn managing_package_manager() -> Option<&'static str> {
 ///
 /// The primary check is `dpkg-query -S <path>`. Crucially this must not *fail
 /// open*: if the helper cannot be spawned (missing, not executable, or denied)
-/// we do not assume the file is unmanaged — that would let self-update clobber an
-/// apt-owned binary and desync the dpkg database. Instead we fall back to reading
-/// dpkg's on-disk file lists directly. A host with no dpkg database at all
-/// (`/var/lib/dpkg/info` absent — e.g. Fedora or a cargo-install) is genuinely
-/// not Debian-managed, so both paths report `false` and update proceeds.
+/// we do not fall back to scanning dpkg's on-disk file lists directly
+/// (`/var/lib/dpkg/info/*.list`) — that directory is owned by another package
+/// and we have no guarantee of its mode, ownership, or the validity of its
+/// contents. Reading it opens a window where a tampered target file's path
+/// could be planted inside the listing directory to make self-update refuse
+/// on an unmanaged binary, or, more worryingly, where the listing could be
+/// truncated or replaced to hide the path of an apt-owned binary we are about
+/// to clobber. Until `dpkg-query` is gone entirely (which is itself the
+/// unambiguous signal that this is not a Debian-managed host) we report
+/// `false` and let the update proceed.
 #[cfg(target_os = "linux")]
 fn dpkg_owns(path: &Path) -> bool {
-	match std::process::Command::new("dpkg-query")
+	let query = std::process::Command::new("dpkg-query")
 		.arg("-S")
 		.arg(path)
-		.output()
-	{
-		// dpkg-query ran to completion: trust its verdict (success == owned).
+		.output();
+	// dpkg-query ran to completion: trust its verdict (success == owned).
+	// A non-zero exit (path not in the database) is the common case and is
+	// the same as a deploy from a cargo install or `/usr/local/bin`: report
+	// `false` and let the update proceed.
+	match query {
 		Ok(output) => output.status.success(),
-		// dpkg-query could not be spawned. Don't fail open — consult dpkg's
-		// own file lists, which exist only on a Debian-family system.
-		Err(_) => dpkg_lists_contain(path),
+		// dpkg-query is missing, not executable, or denied: this is not a
+		// host dpkg controls, so report `false` rather than consulting a
+		// directory we do not own. The previous fallback that read the
+		// `.list` files directly was the surface that prompted #1360: any
+		// ownership/mode assumption about `/var/lib/dpkg/info` is a
+		// privilege-confusion hypothesis, not a fact.
+		Err(_) => false,
 	}
-}
-
-/// Fallback ownership check: scan dpkg's installed-file manifests
-/// (`/var/lib/dpkg/info/*.list`) for an exact line matching `path`.
-#[cfg(target_os = "linux")]
-fn dpkg_lists_contain(path: &Path) -> bool {
-	dpkg_lists_contain_in(Path::new("/var/lib/dpkg/info"), path)
-}
-
-/// Core of [`dpkg_lists_contain`], parameterised on the info directory so it can
-/// be tested against a fixture without a real dpkg database. Returns `false`
-/// when the directory is absent (not a Debian host).
-#[cfg(target_os = "linux")]
-fn dpkg_lists_contain_in(info_dir: &Path, path: &Path) -> bool {
-	let Ok(entries) = std::fs::read_dir(info_dir) else {
-		return false; // no dpkg database → not Debian-managed
-	};
-	let needle = path.to_string_lossy();
-	for entry in entries.flatten() {
-		let p = entry.path();
-		if p.extension().and_then(|e| e.to_str()) != Some("list") {
-			continue;
-		}
-		if let Ok(contents) = std::fs::read_to_string(&p) {
-			if contents.lines().any(|line| line == needle) {
-				return true;
-			}
-		}
-	}
-	false
 }
 
 /// Non-Linux platforms have no supported package-manager-managed install yet.
@@ -113,35 +95,28 @@ mod tests {
 		assert_eq!(managing_package_manager(), None);
 	}
 
+	/// #1360 (L10): `dpkg-query` is the only source of truth for whether apt
+	/// owns the running binary. The previous implementation fell back to
+	/// reading `/var/lib/dpkg/info/*.list` directly when `dpkg-query` could
+	/// not be spawned — a directory owned by another package, with no mode
+	/// or ownership guarantees. The fix is fail-closed: when `dpkg-query` is
+	/// unavailable, report `false` and skip the scan entirely. We exercise
+	/// the `Err` arm by removing `dpkg-query` from PATH via
+	/// [`temp_env::with_var`]; `Command::new` resolves through PATH, so an
+	/// empty / nonexistent path guarantees the spawn fails.
 	#[cfg(target_os = "linux")]
 	#[test]
-	fn dpkg_lists_fallback_matches_an_owned_path() {
-		// Simulate dpkg's info dir: a `.list` file naming the binary's path means
-		// the file is package-managed and self-update must refuse.
-		let dir = tempfile::tempdir().unwrap();
-		let owned = Path::new("/usr/bin/podup");
-		std::fs::write(
-			dir.path().join("podup.list"),
-			"/.\n/usr/bin\n/usr/bin/podup\n",
-		)
-		.unwrap();
-		// A non-`.list` file with the same name must be ignored.
-		std::fs::write(dir.path().join("other.md5sums"), "/usr/bin/podup\n").unwrap();
-
-		assert!(dpkg_lists_contain_in(dir.path(), owned));
-		assert!(!dpkg_lists_contain_in(
-			dir.path(),
-			Path::new("/usr/bin/somethingelse")
-		));
-	}
-
-	#[cfg(target_os = "linux")]
-	#[test]
-	fn dpkg_lists_fallback_is_false_without_a_database() {
-		// No dpkg info directory (e.g. Fedora, cargo-install): genuinely not
-		// Debian-managed, so the fallback reports unowned and update proceeds.
-		let dir = tempfile::tempdir().unwrap();
-		let absent = dir.path().join("no-such-info-dir");
-		assert!(!dpkg_lists_contain_in(&absent, Path::new("/usr/bin/podup")));
+	fn dpkg_owns_returns_false_when_dpkg_query_is_missing_from_path() {
+		// /nonexistent is a directory that does not exist, so PATH cannot
+		// resolve `dpkg-query` from it. The previous code would have
+		// consulted the real `/var/lib/dpkg/info` directory (if present)
+		// and might have answered `true` for a target whose path happened
+		// to match. We pin the new behaviour: with `dpkg-query` unavailable,
+		// the answer is unconditionally `false`.
+		let empty_path = std::path::PathBuf::from("/nonexistent-empty-path-for-dpkg-test");
+		let fake_target = Path::new("/usr/bin/podup");
+		temp_env::with_var("PATH", Some(empty_path.display().to_string()), || {
+			assert!(!dpkg_owns(fake_target));
+		});
 	}
 }

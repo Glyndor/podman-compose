@@ -9,6 +9,9 @@ on:
       - "install.ps1"
       - ".github/workflows/release.yml"
       - ".github/workflows/asset-contract.yml"
+      - ".github/scripts/verify-signing-key.py"
+      - "internal/update/install.rs"
+      - "tests/fixtures/releases/**"
   pull_request:
     branches:
       - main
@@ -18,6 +21,9 @@ on:
       - "install.ps1"
       - ".github/workflows/release.yml"
       - ".github/workflows/asset-contract.yml"
+      - ".github/scripts/verify-signing-key.py"
+      - "internal/update/install.rs"
+      - "tests/fixtures/releases/**"
 
 permissions:
   contents: read
@@ -25,3 +31,102 @@ permissions:
 jobs:
   check:
     uses: Glyndor/.github/.github/workflows/installer-contract.yml@e61aaf0e920345b3dbb82cacd3bd36a499951a92 # v1.13.0
+  # Per-asset .sig loop, three-slot regex, and ed25519 error classification
+  # regression (issue #1359). The fixture carries a release with three
+  # populated rotation slots; the test verifies every .sig against the
+  # slots, then exercises the install.sh's ed25519_verify directly to
+  # pin the L7 error class on Linux.
+  shell-signing-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v6.0.0
+        with:
+          python-version: "3.13"
+      - name: Install pinned cryptography
+        # The fixture only imports `cryptography` to exercise the verifier -
+        # the release-side version pin lives in sign-requirements.txt. We
+        # don't use --require-hashes here because the fixture is verification
+        # only, not signing: the cryptographic risk of skipping the hash
+        # check is a wrong-version cryptography doing the wrong thing, which
+        # the fixture would notice immediately (a wrong key would not verify
+        # the test signatures). The release.yml signing step keeps the
+        # stricter --require-hashes mode for the actual publish path.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/fixturevenv"
+          "$RUNNER_TEMP/fixturevenv/bin/python" -m pip install --quiet 'cryptography==50.0.0' cffi==2.1.1 pycparser==3.0
+      - name: Run the release-signing shell fixture
+        run: |
+          export PATH="$RUNNER_TEMP/fixturevenv/bin:$PATH"
+          bash tests/fixtures/releases/test.sh
+  # Same fixture on Windows so the install.ps1 path (Windows PowerShell
+  # 5.1 and PowerShell 7+) is covered. The PowerShell script is a thin
+  # test harness: it exercises the same per-asset loop and asserts the
+  # same L7 error class.
+  powershell-signing-fixture:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v6.0.0
+        with:
+          python-version: "3.13"
+      - name: Install pinned cryptography
+        # See the shell fixture for the rationale on --require-hashes.
+        run: |
+          python -m venv "$env:RUNNER_TEMP\fixturevenv"
+          & "$env:RUNNER_TEMP\fixturevenv\Scripts\python.exe" -m pip install --quiet 'cryptography==50.0.0' cffi==2.1.1 pycparser==3.0
+      - name: Run the release-signing PowerShell fixture
+        # `pwsh` is installed by default on `windows-latest`; the explicit
+        # shell keeps the runner off the Windows cmd default and matches
+        # the rest of the org's PowerShell jobs (lint-powershell etc).
+        # We pin the venv's python ahead of the PATH so the fixture sees
+        # the pinned cryptography from the install step above.
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:RUNNER_TEMP\fixturevenv\Scripts;$env:PATH"
+          pwsh -NoProfile -File tests/fixtures/releases/test.ps1
+  # Version self-test in the shell installer (issue #1356). The Rust
+  # `podup update` already pins the staged binary's --version to the
+  # resolved tag (internal/update/install.rs:152-205) and refuses a
+  # rollback. The shell installer path was missing the equivalent gate
+  # - a CDN or transparent proxy could replay an older, *legitimately*
+  # signed binary and matching SHA256SUMS and the install would accept
+  # it. The fixture exercises verify_version_self_test in install.sh
+  # directly with stub binaries (matching version, older version, -dev
+  # suffix, garbage, non-zero exit, missing file) so a regression in
+  # the strict-equality-with-optional-v comparison fails here.
+  shell-version-self-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run the version-self-test shell fixture
+        run: bash tests/fixtures/releases/version-self-test.sh
+  # Same fixture on Windows so install.ps1's Test-StagedVersion is
+  # covered. The PowerShell script extracts the function via AST and
+  # runs it against .cmd stubs, so a regression in the strict-equality
+  # comparison or in the staged-file-removal on failure fails here.
+  powershell-version-self-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run the version-self-test PowerShell fixture
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/fixtures/releases/version-self-test.ps1
+  # Rust reference test for the self_test in internal/update/install.rs.
+  # Gates against the shell-side regression by pinning the canonical
+  # behaviour: the shell installer mirrors this test token-for-token.
+  # Installs rustup directly (dtolnay/rust-toolchain is not on the
+  # org's allowed-actions list) at the project's MSRV, the same way
+  # release.yml sets up the release build.
+  rust-self-test-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        env:
+          RUST_TOOLCHAIN: "1.85"
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+      - name: Run the install self-test
+        run: cargo test --locked -p podup install::tests::self_test

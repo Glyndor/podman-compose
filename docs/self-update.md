@@ -65,16 +65,61 @@ release public key is configured. There is **no opt-out**: a checksum alone is
 not a trust anchor. The `--apt` path likewise verifies the keyring package's
 Ed25519 signature before installing it as root.
 
+### Version self-test (rollback gate)
+
+The signed manifest binds the asset bytes but **not** the release tag — a CDN
+or transparent proxy able to spoof release metadata could replay an older,
+*legitimately* signed binary and matching `SHA256SUMS`, and both would still
+verify. Both `install.sh` and `install.ps1` therefore run the staged binary's
+`--version` and pin it to the resolved tag (resolved via the GitHub releases
+API when `PODUP_VERSION=latest`, or used as-is when an explicit `vX.Y.Z` is
+given). The comparison is **strict equality with one optional `v` prefix**, so
+a `3.7.0-dev` report does not slip past a `3.7.0` check — that is the rollback
+case this gate exists to reject. A mismatch removes the staged file and aborts
+the install with exit code `1`; the operator sees:
+
+```
+[fail] Staged binary reports 'podup version v3.6.0', expected v3.7.0
+Refusing to install: staged binary's --version does not match the resolved
+release tag (possible rollback) - the staged file has been removed
+```
+
+The same gate runs inside `podup update` (`internal/update/install.rs:152-205`)
+and a failed self-test there rolls back to the previous binary.
+
 `install.sh` and `install.ps1` are themselves listed in the signed `SHA256SUMS`
 manifest and carry their own `install.sh.sig` / `install.ps1.sig`, so a user
 pinning a version can verify the script before piping it to a shell — the script
 is no longer the one unverifiable link in the chain.
 
+The embedded Python in both installers classifies a verification failure into
+two distinct exit codes, so the calling shell can report the right problem to
+the user:
+
+- **rc=1 (signature mismatch, `Fail`)** — every embedded key rejected the
+  signature. Treat as a release-tampering problem; do not retry.
+- **rc=3 (key malformed, `Fail`)** — at least one embedded key was set but
+  could not be decoded into a 32-byte Ed25519 point. This is a user-side
+  configuration problem (a bad `PODUP_RELEASE_PUBKEY_B64` /
+  `PODUP_RELEASE_PUBKEY2_B64` override, a stray whitespace, a non-base64
+  character), not a release-tampering problem — the release itself may be
+  fine. The CLI distinguishes them so a fork maintainer debugging a
+  configuration slip isn't told to chase a phantom signature mismatch.
+  `install.sh` maps rc=3 to its own `return 3`; the bash and PowerShell
+  wrappers fail closed with a config-specific message either way.
+
+A missing python3, a missing `cryptography` package, or an empty key set
+remains rc=2 (cannot verify), to keep the "release may be tampered" warning
+reserved for actual signature mismatches.
+
 ## The embedded public keys
 
-Each consumer holds **up to two** accepted release keys. Slot 0 holds the
-active key; slot 1 is the empty rotation slot, populated only during a
-rotation. Embedded in three places:
+Each consumer holds **up to two** accepted release keys today; the regex that
+the release-time verifier (`scripts/verify-signing-key.py`) uses to read the
+installers' slot variables matches any third (or further) rotation slot too, so
+adding a `PODUP_RELEASE_PUBKEY3_B64` to `install.sh` is a one-line change when
+a third key is needed. Slot 0 holds the active key; later slots are the empty
+rotation slots, populated only during a rotation. Embedded in three places:
 
 - `internal/update/verify.rs` — `RELEASE_PUBKEYS[0]` and `[1]` (raw 32 bytes).
 - `install.sh` — `PODUP_RELEASE_PUBKEY_B64` and `PODUP_RELEASE_PUBKEY2_B64`.

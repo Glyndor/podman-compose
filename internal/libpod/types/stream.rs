@@ -24,17 +24,32 @@ pub enum LogOutput {
 /// Boxed stream alias used for parse_multiplexed and parse_json_lines return types.
 pub type BoxStream<T> = Pin<Box<dyn Stream<Item = Result<T, PodmanError>> + Send>>;
 
-/// Upper bound on the reassembly buffer for a single frame or JSON line. Bounds
-/// memory when the daemon advertises a huge frame size or never terminates a
-/// line, so a rogue or runaway daemon cannot exhaust memory.
-const MAX_STREAM_BUF: usize = 256 * 1024 * 1024;
+/// Upper bound on one multiplexed frame or buffered NDJSON record. This matches
+/// moby's maximum frame size and limits daemon-controlled allocations.
+pub const MAX_STREAM_BUF: usize = 1024 * 1024;
 
-/// Error returned when the reassembly buffer exceeds [`MAX_STREAM_BUF`].
-fn stream_buf_overflow() -> PodmanError {
-	PodmanError::Api {
-		status: 0,
-		message: format!("stream chunk exceeds the {MAX_STREAM_BUF} byte limit"),
+/// Add received bytes to a stream's current buffered-byte count.
+///
+/// Returns [`PodmanError::StreamTooLarge`] without changing the count when the
+/// addition would exceed [`MAX_STREAM_BUF`]. Call this before extending the
+/// corresponding [`BytesMut`] so rejected input cannot trigger the allocation.
+pub fn record_stream_bytes(total_received: &mut u64, received: usize) -> Result<(), PodmanError> {
+	record_buffered_bytes(total_received, received, MAX_STREAM_BUF)
+}
+
+fn record_buffered_bytes(
+	total_received: &mut u64,
+	received: usize,
+	limit: usize,
+) -> Result<(), PodmanError> {
+	let next = total_received
+		.checked_add(received as u64)
+		.ok_or(PodmanError::StreamTooLarge)?;
+	if next > limit as u64 {
+		return Err(PodmanError::StreamTooLarge);
 	}
+	*total_received = next;
+	Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -43,26 +58,31 @@ fn stream_buf_overflow() -> PodmanError {
 
 /// Try to consume one complete multiplexed frame from the front of `buf`.
 ///
-/// On success the 8-byte header and its payload are split off the front of
-/// `buf` (the remaining bytes stay buffered for the next frame) and
-/// `Some((stream_type, payload))` is returned. The payload is a zero-copy
-/// [`Bytes`] sharing the original allocation, so no per-frame copy or tail
-/// memmove occurs. Returns `None` (leaving `buf` untouched) when fewer than a
-/// full frame is buffered and more data is needed.
-pub fn parse_frame(buf: &mut BytesMut) -> Option<(u8, Bytes)> {
+/// The wire header is 8 bytes: 4 bytes of stream metadata followed by a
+/// big-endian `u32` payload size. On success the header and payload are split
+/// off the front of `buf` (the remaining bytes stay buffered for the next
+/// frame) and `Some((stream_type, payload))` is returned. The payload is a
+/// zero-copy [`Bytes`] sharing the original allocation, so no per-frame copy or
+/// tail memmove occurs. Returns `Ok(None)` (leaving `buf` untouched) when fewer
+/// than a full frame is buffered and more data is needed. Returns
+/// [`PodmanError::StreamTooLarge`] before splitting when the announced payload
+/// exceeds [`MAX_STREAM_BUF`].
+pub fn parse_frame(buf: &mut BytesMut) -> Result<Option<(u8, Bytes)>, PodmanError> {
 	if buf.len() < 8 {
-		return None;
+		return Ok(None);
 	}
 	let size = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
-	if buf.len() < 8 + size {
-		return None;
+	if size > MAX_STREAM_BUF {
+		return Err(PodmanError::StreamTooLarge);
+	}
+	let frame_len = 8 + size;
+	if buf.len() < frame_len {
+		return Ok(None);
 	}
 	let stream_type = buf[0];
-	// Split the header + payload off the front of `buf` in O(1); the leftover
-	// bytes remain in `buf` without being moved.
-	let mut frame = buf.split_to(8 + size);
+	let mut frame = buf.split_to(frame_len);
 	let payload = frame.split_off(8).freeze();
-	Some((stream_type, payload))
+	Ok(Some((stream_type, payload)))
 }
 
 /// Pop the next newline-terminated line from the front of `buf`, excluding the
@@ -89,26 +109,29 @@ pub fn take_json_line(buf: &mut BytesMut) -> Option<Bytes> {
 /// the response body is fully consumed.
 pub fn parse_multiplexed(body: Incoming) -> BoxStream<LogOutput> {
 	Box::pin(futures_util::stream::try_unfold(
-		(body, BytesMut::new()),
-		|(mut body, mut buf)| async move {
+		(body, BytesMut::new(), 0u64),
+		|(mut body, mut buf, mut total_received)| async move {
 			loop {
-				if let Some((stream_type, payload)) = parse_frame(&mut buf) {
+				if let Some((stream_type, payload)) = parse_frame(&mut buf)? {
 					let output = match stream_type {
 						1 => LogOutput::StdOut { message: payload },
 						2 => LogOutput::StdErr { message: payload },
-						_ => continue, // skip stdin / tty frames
+						_ => continue,
 					};
-					return Ok(Some((output, (body, buf))));
+					return Ok(Some((output, (body, buf, total_received))));
 				}
 
-				// Need more data from the HTTP response body.
 				match body.frame().await {
 					Some(Ok(frame)) => {
 						if let Ok(data) = frame.into_data() {
+							// The frame header can sit ahead of the payload, so
+							// permit a small lead-in past the per-frame cap.
+							record_buffered_bytes(
+								&mut total_received,
+								data.len(),
+								MAX_STREAM_BUF + 8,
+							)?;
 							buf.extend_from_slice(&data);
-							if buf.len() > MAX_STREAM_BUF {
-								return Err(stream_buf_overflow());
-							}
 						}
 					}
 					Some(Err(e)) => return Err(PodmanError::from(e)),
@@ -152,37 +175,42 @@ pub fn parse_json_lines<T: serde::de::DeserializeOwned + Send + 'static>(
 	body: Incoming,
 ) -> BoxStream<T> {
 	Box::pin(futures_util::stream::try_unfold(
-		(body, BytesMut::new()),
-		|(mut body, mut buf)| async move {
+		(body, BytesMut::new(), 0u64),
+		|(mut body, mut buf, mut total_received)| async move {
 			loop {
 				if let Some(line) = take_json_line(&mut buf) {
+					// A line plus its trailing newline are no longer buffered
+					// once the line is parsed; account for the freed space so
+					// the cumulative counter reflects what the daemon still
+					// owes the parser, not the bytes the parser has already
+					// consumed.
+					total_received = total_received.saturating_sub((line.len() + 1) as u64);
 					if line.is_empty() {
 						continue;
 					}
 					let item: T = serde_json::from_slice(&line).map_err(PodmanError::Json)?;
-					return Ok(Some((item, (body, buf))));
+					return Ok(Some((item, (body, buf, total_received))));
 				}
 
 				match body.frame().await {
 					Some(Ok(frame)) => {
 						if let Ok(data) = frame.into_data() {
+							record_stream_bytes(&mut total_received, data.len())?;
 							buf.extend_from_slice(&data);
-							if buf.len() > MAX_STREAM_BUF {
-								return Err(stream_buf_overflow());
-							}
 						}
 					}
 					Some(Err(e)) => return Err(PodmanError::from(e)),
+					None if buf.is_empty() => return Ok(None),
 					None => {
-						// Trailing bytes with no terminating newline: parse the
-						// remainder as a final line.
+						// Trailing bytes with no terminating newline: a complete
+						// record still parses, and a truncated one is the
+						// "stream ended early" case the issue calls out, not a
+						// serde error whose cause is the daemon's cut.
 						let line = std::mem::take(&mut buf);
-						if !line.is_empty() {
-							let item: T =
-								serde_json::from_slice(&line).map_err(PodmanError::Json)?;
-							return Ok(Some((item, (body, buf))));
-						}
-						return Ok(None);
+						total_received = 0;
+						let item: T = serde_json::from_slice(&line)
+							.map_err(|_| PodmanError::StreamEndedEarly)?;
+						return Ok(Some((item, (body, buf, total_received))));
 					}
 				}
 			}
@@ -199,9 +227,19 @@ mod tests {
 	// ---------------------------------------------------------------------------
 
 	#[test]
+	fn parse_frame_rejects_oversized_payload_before_split() {
+		let mut buf = BytesMut::from(&[0x01, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff][..]);
+		assert!(matches!(
+			parse_frame(&mut buf),
+			Err(PodmanError::StreamTooLarge)
+		));
+		assert_eq!(buf.len(), 8);
+	}
+
+	#[test]
 	fn parse_frame_incomplete_header() {
 		let mut buf = BytesMut::from(&[0x01, 0x00, 0x00, 0x00][..]);
-		assert!(parse_frame(&mut buf).is_none());
+		assert!(parse_frame(&mut buf).unwrap().is_none());
 		// A `None` result must leave the buffer untouched.
 		assert_eq!(buf.as_ref(), &[0x01, 0x00, 0x00, 0x00]);
 	}
@@ -214,7 +252,7 @@ mod tests {
 				0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, b'a', b'b', b'c',
 			][..],
 		);
-		assert!(parse_frame(&mut buf).is_none());
+		assert!(parse_frame(&mut buf).unwrap().is_none());
 		// Partial frame stays buffered for the next read.
 		assert_eq!(buf.len(), 11);
 	}
@@ -223,7 +261,7 @@ mod tests {
 	fn parse_frame_stdout_complete() {
 		let mut buf = BytesMut::from(&[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05][..]);
 		buf.extend_from_slice(b"hello");
-		let (stype, data) = parse_frame(&mut buf).unwrap();
+		let (stype, data) = parse_frame(&mut buf).unwrap().unwrap();
 		assert_eq!(stype, 1);
 		assert_eq!(data.as_ref(), b"hello");
 		// The full frame is consumed from the front.
@@ -234,7 +272,7 @@ mod tests {
 	fn parse_frame_stderr_complete() {
 		let mut buf = BytesMut::from(&[0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03][..]);
 		buf.extend_from_slice(b"err");
-		let (stype, data) = parse_frame(&mut buf).unwrap();
+		let (stype, data) = parse_frame(&mut buf).unwrap().unwrap();
 		assert_eq!(stype, 2);
 		assert_eq!(data.as_ref(), b"err");
 		assert!(buf.is_empty());
@@ -243,7 +281,7 @@ mod tests {
 	#[test]
 	fn parse_frame_zero_length_payload() {
 		let mut buf = BytesMut::from(&[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
-		let (stype, data) = parse_frame(&mut buf).unwrap();
+		let (stype, data) = parse_frame(&mut buf).unwrap().unwrap();
 		assert_eq!(stype, 1);
 		assert!(data.is_empty());
 		assert!(buf.is_empty());
@@ -255,7 +293,7 @@ mod tests {
 		let mut buf =
 			BytesMut::from(&[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, b'h', b'i'][..]);
 		buf.extend_from_slice(b"leftover");
-		let (_, data) = parse_frame(&mut buf).unwrap();
+		let (_, data) = parse_frame(&mut buf).unwrap().unwrap();
 		assert_eq!(data.as_ref(), b"hi");
 		// Only the consumed frame is removed; the remainder is left in place.
 		assert_eq!(buf.as_ref(), b"leftover");
@@ -268,14 +306,14 @@ mod tests {
 		let mut buf =
 			BytesMut::from(&[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, b'h', b'i'][..]);
 		buf.extend_from_slice(&[0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, b'e', b'r']);
-		let (stype1, data1) = parse_frame(&mut buf).unwrap();
+		let (stype1, data1) = parse_frame(&mut buf).unwrap().unwrap();
 		assert_eq!(stype1, 1);
 		assert_eq!(data1.as_ref(), b"hi");
-		let (stype2, data2) = parse_frame(&mut buf).unwrap();
+		let (stype2, data2) = parse_frame(&mut buf).unwrap().unwrap();
 		assert_eq!(stype2, 2);
 		assert_eq!(data2.as_ref(), b"er");
 		assert!(buf.is_empty());
-		assert!(parse_frame(&mut buf).is_none());
+		assert!(parse_frame(&mut buf).unwrap().is_none());
 	}
 
 	#[test]
@@ -284,10 +322,10 @@ mod tests {
 		// must not parse until the rest arrives in a second read.
 		let mut buf = BytesMut::from(&[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05][..]);
 		buf.extend_from_slice(b"hel");
-		assert!(parse_frame(&mut buf).is_none());
+		assert!(parse_frame(&mut buf).unwrap().is_none());
 		// Second read completes the payload.
 		buf.extend_from_slice(b"lo");
-		let (stype, data) = parse_frame(&mut buf).unwrap();
+		let (stype, data) = parse_frame(&mut buf).unwrap().unwrap();
 		assert_eq!(stype, 1);
 		assert_eq!(data.as_ref(), b"hello");
 		assert!(buf.is_empty());
@@ -364,24 +402,29 @@ mod tests {
 	/// (`buf.len() > MAX_STREAM_BUF`). Returns the overflow error when, and only
 	/// when, the reassembly buffer has grown strictly past the limit.
 	fn cap_check(buf_len: usize) -> Option<PodmanError> {
-		if buf_len > MAX_STREAM_BUF {
-			Some(stream_buf_overflow())
-		} else {
-			None
-		}
+		let mut total_received = 0;
+		record_stream_bytes(&mut total_received, buf_len).err()
+	}
+
+	#[test]
+	fn cumulative_buffered_bytes_are_rejected_before_extend() {
+		let mut total_received = 0;
+		record_stream_bytes(&mut total_received, MAX_STREAM_BUF - 1).unwrap();
+		assert!(matches!(
+			record_stream_bytes(&mut total_received, 2),
+			Err(PodmanError::StreamTooLarge)
+		));
+		assert_eq!(total_received, (MAX_STREAM_BUF - 1) as u64);
 	}
 
 	#[test]
 	fn over_cap_buffer_is_rejected() {
 		// A buffer that grows one byte past the cap must trip the overflow guard
-		// with the documented Api error (status 0, message naming the limit).
-		match cap_check(MAX_STREAM_BUF + 1) {
-			Some(PodmanError::Api { status, message }) => {
-				assert_eq!(status, 0);
-				assert!(message.contains(&MAX_STREAM_BUF.to_string()));
-			}
-			other => panic!("expected Api overflow error, got {other:?}"),
-		}
+		// with the documented StreamTooLarge variant.
+		assert!(matches!(
+			cap_check(MAX_STREAM_BUF + 1),
+			Some(PodmanError::StreamTooLarge)
+		));
 	}
 
 	#[test]

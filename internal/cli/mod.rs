@@ -135,6 +135,13 @@ pub(crate) struct Cli {
 	#[arg(long, env = "PODMAN_SOCKET", global = true)]
 	pub(crate) socket: Option<String>,
 
+	/// Maximum number of HTTP/1.1 connections the libpod client keeps open
+	/// to the Podman socket for reuse (or `PODUP_LIBCOD_POOL`). Buffered calls
+	/// share the pool; streaming calls each take a dedicated connection
+	/// outside this cap. Default: 8.
+	#[arg(long, env = "PODUP_LIBCOD_POOL", global = true, value_name = "N")]
+	pub(crate) connection_pool_size: Option<usize>,
+
 	/// Active profiles (comma-separated).  May also be set via `COMPOSE_PROFILES`.
 	#[arg(long, value_delimiter = ',', env = "COMPOSE_PROFILES", global = true)]
 	pub(crate) profile: Vec<String>,
@@ -153,6 +160,19 @@ pub(crate) struct Cli {
 	/// `NO_COLOR` also forces plain output; `--ansi always` overrides `NO_COLOR`.
 	#[arg(long, value_enum, default_value_t = AnsiMode::Auto, global = true)]
 	pub(crate) ansi: AnsiMode,
+
+	/// Suppress the host-binding / privilege-escalation warnings the engine
+	/// emits during `up`/`create`/`run`/`exec` (e.g. `network_mode: host`,
+	/// `privileged: true`, `pid: host`, `container:<id>` namespace sharing).
+	/// Operators who wrote the compose file deliberately use this to silence
+	/// the per-run warning. `podup config` still surfaces the active modes —
+	/// that command is the "show me what will happen" path, where the
+	/// warning is the whole point.
+	// `global` so it works on every subcommand that may build a container spec
+	// (`up`, `create`, `run`, `exec`). The subcommand flags use `-q` for their
+	// own `--quiet`, so the long form is the only spelling here.
+	#[arg(long, global = true)]
+	pub(crate) no_warn: bool,
 
 	#[command(subcommand)]
 	pub(crate) command: Commands,

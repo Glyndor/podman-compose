@@ -46,6 +46,13 @@ pub(crate) fn render_config(
 	// dependency graph) before the `--quiet`/projection short-circuits, so
 	// validate-only (`--quiet`) actually validates — matching `docker compose config`.
 	podup::validate_config(file)?;
+	// Surface the active host-binding / privilege-escalation modes for every
+	// service at the default log level (`warn`), so CI logs picking up
+	// `podup config` output see them even when the operator never ran an
+	// `up`. `config` is the "show me what will happen" command, so this
+	// surface is unaffected by `--no-warn` (which exists to silence the
+	// per-run copy on `up`/`create`/`run`/`exec`, not this one).
+	surface_host_modes(file);
 	if out.quiet {
 		return Ok(());
 	}
@@ -254,6 +261,15 @@ fn is_empty_yaml(v: &serde_yaml::Value) -> bool {
 		// overrides the image's value, so dropping it would change meaning.
 		_ => false,
 	}
+}
+
+/// Walk every service and emit one `tracing::warn!` per active host-binding
+/// mode. The warning is the same line the live `up` engine emits, so an
+/// operator reading `config` output before running `up` sees the same set of
+/// flags. `config` does not honour `--no-warn` for this surface — the whole
+/// point of the command is to surface what is about to run.
+fn surface_host_modes(file: &podup::compose::types::ComposeFile) {
+	podup::surface_host_modes(file);
 }
 
 #[cfg(test)]

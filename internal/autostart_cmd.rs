@@ -18,6 +18,9 @@ pub(crate) struct AutostartEnv<'a> {
 	pub profile: &'a [String],
 	pub env_files: &'a [String],
 	pub socket: Option<String>,
+	/// Connection-pool cap forwarded to [`Client::with_pool_size`]. `None`
+	/// means use [`Client::DEFAULT_POOL_SIZE`].
+	pub connection_pool_size: Option<usize>,
 }
 
 /// Handle the `autostart` command group. `install` and `status` never contact
@@ -106,7 +109,11 @@ pub(crate) async fn dispatch(
 			if *purge {
 				// `--purge` is the only autostart branch that touches Podman: tear the
 				// stack down and remove its named volumes via the normal `down -v` path.
-				let client = podup::podman::connect(env.socket.as_deref())?;
+				let client = podup::podman::connect_with_pool_size(
+					env.socket.as_deref(),
+					env.connection_pool_size
+						.unwrap_or(podup::Client::DEFAULT_POOL_SIZE),
+				)?;
 				let engine = podup::Engine::with_base_dir(client, project, base_dir);
 				let _lock = engine.lock_project()?;
 				engine.down_with_options(file, true).await?;

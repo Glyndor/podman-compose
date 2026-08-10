@@ -54,7 +54,7 @@ impl Engine {
 		// Without this every container here fell back to the per-label hash
 		// instead of the sequential identity colour `ps` and the compose-file
 		// `down` path use — the same class of defect fixed for `logs` (#1082).
-		let by_service = self.list_project_containers_by_service().await?;
+		let by_service = self.live_project_replicas().await?;
 		let mut service_names: Vec<String> = by_service.keys().cloned().collect();
 		service_names.sort();
 		crate::ui::set_services(&service_names);
@@ -104,11 +104,9 @@ impl Engine {
 	pub(super) async fn remove_project_networks_by_label(
 		&self,
 	) -> Option<crate::error::ComposeError> {
-		let net_filters =
-			serde_json::json!({ "label": [format!("podup.project={}", self.project)] });
 		let list_path = format!(
 			"{API_PREFIX}/networks/json?filters={}",
-			urlencoded(&net_filters.to_string()),
+			self.project_network_filter_encoded(),
 		);
 		let Ok(nets) = self
 			.client

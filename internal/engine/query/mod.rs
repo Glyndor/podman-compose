@@ -20,7 +20,7 @@ pub(crate) mod terminal;
 pub use ps::{PsDisplayOptions, PsFilterOptions, PsOptions};
 
 pub use exec::ExecOptions;
-pub(crate) use exec::{stdin_is_terminal, stdout_is_terminal};
+#[allow(unused_imports)]
 use log_prefix::LinePrefixer;
 
 pub use inspect::AttachOutcome;
@@ -290,8 +290,8 @@ impl Engine {
 		// replica beyond the first (falls back to the static names when none are
 		// running yet).
 		// One `live_replica_names` round-trip per selected service (a future
-		// optimization: batch this through scale.rs's
-		// `list_project_containers_by_service` instead). A resolution failure for
+		// optimization: batch this through scale.rs's `live_project_replicas`
+		// instead). A resolution failure for
 		// one service must not blank the whole command the way an `.await?` would:
 		// warn and skip that service so the rest still stream, matching the
 		// per-container tolerance below.
@@ -552,10 +552,9 @@ impl Engine {
 	/// the end was expected, so the caller keeps the original error rather than
 	/// masking a possible failure. Mirrors the fail-closed rule `stats` uses.
 	pub(super) async fn container_still_running(&self, container_name: &str) -> Option<bool> {
-		let filters = serde_json::json!({ "label": [format!("podup.project={}", self.project)] });
 		let path = format!(
 			"{API_PREFIX}/containers/json?all=true&filters={}",
-			urlencoded(&filters.to_string()),
+			self.project_label_filter_encoded(),
 		);
 		let entries = self
 			.client
@@ -578,11 +577,9 @@ impl Engine {
 	/// Names of this project's containers (by label) that the current compose file
 	/// no longer defines — the orphans, shared by removal and the warning.
 	async fn orphan_container_names(&self, file: &ComposeFile) -> Result<Vec<String>> {
-		let label = format!("podup.project={}", self.project);
-		let filters = serde_json::json!({ "label": [label] });
 		let path = format!(
 			"{API_PREFIX}/containers/json?all=true&filters={}",
-			urlencoded(&filters.to_string()),
+			self.project_label_filter_encoded(),
 		);
 
 		let running = self

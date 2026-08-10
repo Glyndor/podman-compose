@@ -17,11 +17,13 @@ These appear before the subcommand and may also come from the environment.
 | `-f, --file <PATH>` | `COMPOSE_FILE` | Compose file. Repeatable; later files merge over earlier ones. When unset, the compose-spec precedence list is probed: `compose.yaml`, `compose.yml`, `docker-compose.yaml`, `docker-compose.yml`. |
 | `-p, --project <NAME>` | `COMPOSE_PROJECT_NAME` | Project name, prefixing container/network/volume names. When unset: the top-level `name:`, then the sanitized project-directory basename. |
 | `--socket <PATH>` | `PODMAN_SOCKET` | Podman socket path; overrides auto-detection. |
+| `--connection-pool-size <N>` | `PODUP_LIBCOD_POOL` | Maximum HTTP/1.1 connections the libpod client keeps open to the Podman socket for reuse. Streaming calls each take a dedicated connection outside this cap. Default: 8. |
 | `--profile <NAMES>` | `COMPOSE_PROFILES` | Active profiles, comma-separated. |
 
 | `--project-directory <PATH>` | | Base directory for relative paths (env_file, build context, bind mounts, config/secret sources). Defaults to the compose file's directory. |
 | `--ansi <WHEN>` | | Colour output: `auto`, `always` or `never`. `always` forces colour even into a pipe or file. | 
 | `--env-file <PATH>` | | Env file(s) for interpolation. Repeatable; later files win. **Replaces** a project `.env` rather than adding to it — when this is given, `.env` is not read. The process environment still takes precedence over both. |
+| `--no-warn` | | Suppress the host-binding / privilege-escalation warnings the engine emits during `up`/`create`/`run`/`exec` (e.g. `network_mode: host`, `privileged: true`, `pid: host`, `container:<id>` namespace sharing). Operators who wrote the compose file deliberately use this to silence the per-run warning. `podup config` still surfaces the active modes at default log level — that command is the "show me what will happen" path, where the warning is the whole point. | off |
 
 **Profiles activate their dependencies.** A service left out by profile
 filtering is still started when a service that *is* running declares
@@ -633,7 +635,13 @@ Replace the running binary with the latest signed release.
 | `--force` | Reinstall even if the latest release is not newer. | off |
 
 Verification fails closed: a missing key, bad Ed25519 signature, or SHA-256
-mismatch aborts before the installed binary is touched. See
+mismatch aborts before the installed binary is touched. After the binary is
+written, a self-test runs `<binary> --version` and refuses the install if the
+reported version does not match the resolved release tag (strict equality,
+optional single `v` prefix) — a CDN or proxy that replays an older,
+*legitimately* signed release passes the signature and digest checks but fails
+this one, and the previous binary is restored. The shell installers
+(`install.sh`, `install.ps1`) run the same gate. See
 [self-update.md](self-update.md) for the trust model.
 
 ### `autostart` (alias `boot`)
@@ -733,6 +741,7 @@ when both are set.
 | `COMPOSE_PROJECT_NAME` | Default project name (`--project`). |
 | `COMPOSE_PROFILES` | Default active profiles (`--profile`). |
 | `PODMAN_SOCKET` | Podman socket path (`--socket`). |
+| `PODUP_LIBCOD_POOL` | HTTP/1.1 connection-pool size for the libpod client (`--connection-pool-size`). Default 8. |
 | `DOCKER_HOST` | Docker-compatible fallback for the Podman socket, used only when `PODMAN_SOCKET` is unset. Must be a local `unix://` socket (or `npipe://` on Windows); a remote `tcp://`/`ssh://` value is rejected. |
 | `RUST_LOG` | Log verbosity filter. Unset shows warnings and errors; e.g. `RUST_LOG=podup=info` or `RUST_LOG=podup=debug` for more detail. |
 

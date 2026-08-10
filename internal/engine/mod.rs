@@ -14,37 +14,13 @@ pub use copy::CpOptions;
 pub use image::{resolve_image_digests, CommitOptions};
 pub use lifecycle::{validate_stop_timeout, RunOptions, RunOverrides};
 pub use lock::ProjectLock;
-/// Whether `run` should allocate a pseudo-TTY and attach stdin.
-///
-/// A TTY on both ends by default, `-T` to opt out, `-d` excluded because there
-/// is nobody to be interactive with — and **both** stdin and stdout must be
-/// terminals.
-///
-/// Requiring stdout too is not symmetry for its own sake. A pty merges stdout
-/// and stderr and emits CRLF, so `podup run app cmd > out.txt` typed at a shell
-/// — stdin still a terminal, stdout a file — would have written pty bytes with
-/// stderr folded in, where it used to write clean demultiplexed output. That is
-/// the most common redirect there is, and `docker compose` keeps it clean
-/// (measured). Checking stdin alone silently changed the format of a file.
-pub(crate) fn wants_interactive_run(no_tty: bool, detach: bool) -> bool {
-	wants_interactive_with(
-		no_tty,
-		detach,
-		query::stdin_is_terminal(),
-		query::stdout_is_terminal(),
-	)
-}
+mod interactive;
+pub(crate) use interactive::wants_interactive_run;
+mod project_label;
+use project_label::{build_project_label_parts, ProjectLabelParts};
+mod replicas;
+use replicas::resolve_replica_name;
 
-/// The decision with the environment passed in, so both terminal cases are
-/// testable rather than depending on how the suite happened to be invoked.
-fn wants_interactive_with(no_tty: bool, detach: bool, stdin_tty: bool, stdout_tty: bool) -> bool {
-	!no_tty && !detach && stdin_tty && stdout_tty
-}
-
-pub use query::{
-	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsDisplayOptions,
-	PsFilterOptions, PsOptions, DEFAULT_LOG_TAIL,
-};
 mod container_config;
 pub(crate) use container_config::build_log_config;
 #[cfg(test)]
@@ -59,6 +35,10 @@ pub use profiles::{retain_active_profiles, retain_active_profiles_with_targets};
 mod projects;
 pub use projects::{list_projects, list_projects_filtered, LsOptions};
 pub(crate) mod query;
+pub use query::{
+	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsDisplayOptions,
+	PsFilterOptions, PsOptions, DEFAULT_LOG_TAIL,
+};
 mod secrets;
 mod staging;
 mod stats;
@@ -67,6 +47,7 @@ pub use stats::StatsOptions;
 mod volume;
 pub use volume::{VolumesDisplayOptions, VolumesOptions};
 mod volume_mounts;
+mod walk;
 #[cfg(feature = "watch")]
 mod watch;
 
@@ -140,35 +121,48 @@ pub struct Engine {
 	/// matters because podup is consumed as a library and a caller may hold more
 	/// than one engine.
 	pub(super) images_seen_present: std::sync::Mutex<std::collections::HashSet<String>>,
+	/// CLI `--no-warn`: suppress the host-binding / privilege-escalation
+	/// warnings the engine emits during `up`/`create`/`run`/`exec`. The
+	/// operator wrote the compose file deliberately, so the default-warning
+	/// behaviour is opt-out per run rather than per command. `config`'s
+	/// surface-mode listing is unaffected — `config` is the "show me what will
+	/// happen" command, where the warnings stay visible there.
+	pub(super) no_warn: bool,
+	/// The pre-URL-encoded libpod `filters` JSON object that scopes a
+	/// container-list call to this project's `podup.project={name}` label,
+	/// plus the raw `podup.project={name}` label string. Built once per
+	/// [`Engine`] so call sites do not pay `format!` + `serde_json::to_string`
+	/// + `urlencoded` on every invocation (#1364).
+	project_label: ProjectLabelParts,
 }
 
 impl Engine {
-	/// Create an engine for `project_name` using the working directory as the base path for relative volume mounts.
+	/// Create an engine for `project_name` using the working directory as the
+	/// base path for relative volume mounts.
+	///
+	/// If the working directory cannot be resolved (the process's CWD was
+	/// deleted or is unreadable at construction time), the engine falls back
+	/// to an empty `base_dir` and a warning is logged. Callers that need a
+	/// definite base directory — the CLI does — should use
+	/// [`Engine::with_base_dir`] instead, which surfaces a missing or
+	/// unreadable directory as a hard error rather than a silent empty
+	/// path that later surfaces as a confusing "compose file not found".
 	pub fn new(client: Client, project: String) -> Self {
+		let base_dir = match std::env::current_dir() {
+			Ok(dir) => dir,
+			Err(e) => {
+				tracing::warn!(
+					"cannot resolve the current working directory ({e}); base_dir is empty \
+					 and relative paths (compose files, volume mounts, env_file sources) \
+					 will not resolve. Use Engine::with_base_dir to set an explicit base \
+					 directory."
+				);
+				PathBuf::new()
+			}
+		};
 		Self {
 			client,
-			project,
-			base_dir: std::env::current_dir().unwrap_or_default(),
-			compose_files: Vec::new(),
-			stop_timeout: None,
-			scale_overrides: std::collections::HashMap::new(),
-			pull_policy_override: None,
-			no_build: false,
-			quiet_pull: false,
-			run_overrides: lifecycle::RunOverrides::default(),
-			run_env_files: Vec::new(),
-			run_labels: Vec::new(),
-			run_no_tty: false,
-			renew_anon_volumes: false,
-			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
-		}
-	}
-
-	/// Create an engine with an explicit base directory — use when the compose file is not in the working directory.
-	pub fn with_base_dir(client: Client, project: String, base_dir: PathBuf) -> Self {
-		Self {
-			client,
-			project,
+			project: project.clone(),
 			base_dir,
 			compose_files: Vec::new(),
 			stop_timeout: None,
@@ -182,6 +176,31 @@ impl Engine {
 			run_no_tty: false,
 			renew_anon_volumes: false,
 			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
+			no_warn: false,
+			project_label: build_project_label_parts(&project),
+		}
+	}
+
+	/// Create an engine with an explicit base directory — use when the compose file is not in the working directory.
+	pub fn with_base_dir(client: Client, project: String, base_dir: PathBuf) -> Self {
+		Self {
+			client,
+			project: project.clone(),
+			base_dir,
+			compose_files: Vec::new(),
+			stop_timeout: None,
+			scale_overrides: std::collections::HashMap::new(),
+			pull_policy_override: None,
+			no_build: false,
+			quiet_pull: false,
+			run_overrides: lifecycle::RunOverrides::default(),
+			run_env_files: Vec::new(),
+			run_labels: Vec::new(),
+			run_no_tty: false,
+			renew_anon_volumes: false,
+			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
+			no_warn: false,
+			project_label: build_project_label_parts(&project),
 		}
 	}
 
@@ -265,6 +284,18 @@ impl Engine {
 		self
 	}
 
+	/// Set the CLI `--no-warn` flag. Builder-style; when set, the engine
+	/// suppresses the host-binding / privilege-escalation warnings it emits
+	/// during `up`/`create`/`run`/`exec`. Operators who deliberately wrote
+	/// `privileged: true` (or any other host-binding mode) into the compose
+	/// file use this to silence the per-run warning; `config`'s surface-mode
+	/// listing is unaffected (`config` is the "show me what will happen"
+	/// command, where the warning is the whole point).
+	pub fn with_no_warn(mut self, no_warn: bool) -> Self {
+		self.no_warn = no_warn;
+		self
+	}
+
 	/// Resolve the replica count for a service: a CLI `--scale` override wins,
 	/// else the compose `scale:`, else `deploy.replicas`, else 1. The single
 	/// source of truth so `up`, naming, and teardown never drift.
@@ -276,6 +307,46 @@ impl Engine {
 			.scale
 			.or(service.deploy.as_ref().and_then(|d| d.replicas))
 			.unwrap_or(1) as usize
+	}
+
+	/// The cached URL-encoded `{"label":["podup.project=…"]}` JSON for the
+	/// container-list call sites that scope by the project label only
+	/// (#1364).
+	pub(super) fn project_label_filter_encoded(&self) -> &str {
+		&self.project_label.encoded
+	}
+
+	/// The cached URL-encoded `{"label":["podup.project=…"]}` JSON for
+	/// network-list call sites. Identical to the container version because
+	/// libpod's network and container label filters take the same shape
+	/// (#1364).
+	pub(super) fn project_network_filter_encoded(&self) -> &str {
+		&self.project_label.network_encoded
+	}
+
+	/// The cached raw `podup.project={name}` label string, exposed for the
+	/// dynamic sites (those that combine the project label with a second
+	/// predicate like `podup.service={svc}`) so they can splice the project
+	/// half into their own JSON without reformatting it on every call
+	/// (#1364).
+	pub(super) fn project_label_raw(&self) -> &str {
+		&self.project_label.raw
+	}
+
+	/// Build the URL-encoded `{"label":[…]}` filter for a project container
+	/// call that needs one extra label predicate (typically `podup.service=`).
+	/// `extras` carries the additional labels verbatim; the project label is
+	/// spliced in once per call so the only `format!` is on the caller's
+	/// extras (#1364).
+	pub(super) fn project_label_filter_with(
+		&self,
+		extras: impl IntoIterator<Item = String>,
+	) -> String {
+		let mut labels: Vec<String> = Vec::new();
+		labels.push(self.project_label.raw.clone());
+		labels.extend(extras);
+		let filter = serde_json::json!({ "label": labels });
+		crate::libpod::urlencoded(&filter.to_string())
 	}
 
 	pub(super) async fn run_lifecycle_hook(
@@ -328,21 +399,23 @@ impl Engine {
 			.map_err(ComposeError::Podman)?;
 
 		let mut stream = crate::libpod::parse_multiplexed(resp.into_body());
-		// Lock stdout once for the whole stream instead of re-acquiring the lock
-		// (and issuing a syscall) per frame; stdout is ours exclusively on this
-		// path. stderr is locked per frame because the tracing subscriber also
-		// writes there: holding its lock across the await loop would starve
-		// concurrent log emissions. Flush after each frame so output stays prompt.
-		let mut out = std::io::stdout().lock();
+		// Lock both stdout and stderr per frame, symmetric with the rest of
+		// the engine: holding either lock across the await loop would stall any
+		// concurrent log emission, including the tracing subscriber that
+		// writes to stderr. The previous code held stdout's lock for the
+		// whole stream, which serialised the hook behind any other writer for
+		// its entire lifetime (#1369). Flush after each frame so output
+		// stays prompt.
 		while let Some(msg) = stream.next().await {
 			match msg.map_err(ComposeError::Podman)? {
 				LogOutput::StdOut { message } => {
-					let _ = out.write_all(String::from_utf8_lossy(&message).as_bytes());
+					let mut out = std::io::stdout().lock();
+					let _ = write_frame(&mut out, &message);
 					let _ = out.flush();
 				}
 				LogOutput::StdErr { message } => {
 					let mut err = std::io::stderr().lock();
-					let _ = err.write_all(String::from_utf8_lossy(&message).as_bytes());
+					let _ = write_frame(&mut err, &message);
 					let _ = err.flush();
 				}
 			}
@@ -472,142 +545,173 @@ impl Engine {
 }
 
 // ---------------------------------------------------------------------------
-// Replica resolution helpers
+// JSON serialisation helpers
 // ---------------------------------------------------------------------------
 
-/// Resolve a replica container name from the set of names that exist for a
-/// service (the running replicas, or the statically derived names before
-/// anything is created) and a 1-based `--index`. Each name is either the
-/// unsuffixed base (the sole replica) or `{base}-{n}`.
+/// Serialise `v` to a compact JSON string for embedding into a libpod query
+/// parameter or NDJSON row.
 ///
-/// `--index n` targets the replica numbered `n` — by name, not by position —
-/// so it stays correct after a runtime `scale`/`up --scale` and regardless of
-/// the order Podman lists containers; `0` is rejected (indexes are 1-based);
-/// `None` picks the lowest-numbered replica. Pure so it is unit-testable
-/// without a Podman socket.
-fn resolve_replica_name(
-	service_name: &str,
-	base: &str,
-	names: &[String],
-	index: Option<u32>,
-) -> Result<String> {
-	match index {
-		Some(0) => Err(ComposeError::ReplicaIndex {
-			service: service_name.to_string(),
-			index: 0,
-		}),
-		Some(i) => {
-			let suffixed = format!("{base}-{i}");
-			if names.iter().any(|n| n == &suffixed) {
-				return Ok(suffixed);
-			}
-			// A single, unsuffixed replica answers to index 1 only.
-			if i == 1 && names.iter().any(|n| n == base) {
-				return Ok(base.to_string());
-			}
-			Err(ComposeError::ReplicaIndex {
-				service: service_name.to_string(),
-				index: i,
-			})
-		}
-		None => order_replicas(base, names)
-			.into_iter()
-			.next()
-			.ok_or_else(|| ComposeError::ServiceNotFound(service_name.into())),
+/// Six sites flow through this — five in [`build`](super::build) (`cachefrom`,
+/// `buildargs`, `labels`, `secrets`, `cacheto`) and one in
+/// [`events`](super::events) (the `--format json` event row). Each of them
+/// used to call `serde_json::to_string(...).unwrap_or_default()`, which
+/// silently emitted `""` on a serialisation failure; the empty string was
+/// then placed verbatim into the query parameter, where libpod treats it as
+/// "no value provided", so the user's args were ignored and the build ran
+/// with image defaults. The events side dropped the row and corrupted the
+/// NDJSON stream a parser was reading line-by-line (#1366).
+///
+/// `what` names the offending field in the error so the operator sees which
+/// value was rejected.
+pub(super) fn to_query_json<T: serde::Serialize>(what: &str, v: &T) -> Result<String> {
+	serde_json::to_string(v).map_err(|e| ComposeError::Build(format!("invalid {what}: {e}")))
+}
+
+/// Write one log frame without creating a lossy `Cow` for valid UTF-8.
+///
+/// `String::from_utf8_lossy` allocates a `Cow<String>` even on the happy path;
+/// `std::str::from_utf8` returns `&str` directly with no allocation. The
+/// lossy path is the rare one (an arbitrary byte stream from `run`/`exec`/
+/// hook output), so a single shared helper keeps the two call sites
+/// (`Engine::run` and `run_lifecycle_hook`) honest and matches the previous
+/// observable output (#1369).
+pub(crate) fn write_frame<W: std::io::Write>(out: &mut W, bytes: &[u8]) -> std::io::Result<()> {
+	match std::str::from_utf8(bytes) {
+		Ok(text) => out.write_all(text.as_bytes()),
+		Err(_) => out.write_all(String::from_utf8_lossy(bytes).as_bytes()),
 	}
 }
 
-/// Order replica container names by their 1-based replica number so callers can
-/// pick the lowest-numbered one independently of Podman's listing order. A name
-/// is the unsuffixed base (the sole replica → number 1) or `{base}-{n}`; names
-/// matching neither are dropped.
-fn order_replicas(base: &str, names: &[String]) -> Vec<String> {
-	let prefix = format!("{base}-");
-	let mut numbered: Vec<(usize, String)> = names
-		.iter()
-		.filter_map(|name| {
-			if name == base {
-				Some((1, name.clone()))
-			} else {
-				name.strip_prefix(&prefix)
-					.and_then(|s| s.parse::<usize>().ok())
-					.map(|n| (n, name.clone()))
-			}
-		})
-		.collect();
-	numbered.sort_by_key(|(n, _)| *n);
-	numbered.into_iter().map(|(_, name)| name).collect()
-}
-
-// ---------------------------------------------------------------------------
-// Filesystem helpers
-// ---------------------------------------------------------------------------
-
-fn walk_dir(root: &std::path::Path) -> std::io::Result<Vec<PathBuf>> {
-	let mut out = Vec::new();
-	walk_collect(root, &mut out)?;
-	Ok(out)
-}
-
-fn walk_collect(dir: &std::path::Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
-	let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
-	entries.sort_by_key(|e| e.file_name());
-	for entry in entries {
-		let path = entry.path();
-		let file_type = entry.file_type()?;
-		out.push(path.clone());
-		if file_type.is_dir() {
-			walk_collect(&path, out)?;
+/// Emit one `tracing::warn!` per active host-binding / privilege-escalation mode
+/// across every service in `file`.
+///
+/// The `config` command uses this to surface the active modes at the default
+/// log level (CI logs see them even when the operator never runs `up`). It is
+/// deliberately not gated on `--no-warn` — `config` is the "show me what will
+/// happen" command, where the warning is the whole point. The live
+/// `up`/`create`/`run`/`exec` paths emit the same warnings per-call but honour
+/// `--no-warn`.
+pub fn surface_host_modes(file: &crate::compose::types::ComposeFile) {
+	for (name, service) in &file.services {
+		for w in self::container::check_host_mode(name, service) {
+			tracing::warn!("{}", w.message);
 		}
 	}
-	Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Replica resolution helpers (see `replicas.rs`)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Filesystem helpers (see `walk.rs`)
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod to_query_json_tests {
+	use super::to_query_json;
+	use crate::error::ComposeError;
+	use serde::ser::{Error as _, Serializer};
+	use serde::Serialize;
+	use std::collections::HashMap;
+
+	/// A `Serialize` impl that always errors, so a unit test can pin the
+	/// "surface the failure" contract without depending on a particular type
+	/// in the build path.
+	struct AlwaysFails {
+		reason: &'static str,
+	}
+
+	impl Serialize for AlwaysFails {
+		fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
+			Err(S::Error::custom(self.reason))
+		}
+	}
+
+	/// The happy path: a `Vec<String>` round-trips through `to_query_json`
+	/// unchanged. This is the same shape the `cachefrom` and `cacheto` sites
+	/// serialise.
+	#[test]
+	fn to_query_json_serialises_vec_string() {
+		let v: Vec<String> = vec!["alpine".into(), "quay.io/lib/alpine".into()];
+		assert_eq!(
+			to_query_json("build.cache_from", &v).unwrap(),
+			r#"["alpine","quay.io/lib/alpine"]"#
+		);
+	}
+
+	/// The happy path for the `buildargs` and `labels` sites: a `HashMap<String,
+	/// String>` serialises to a JSON object.
+	#[test]
+	fn to_query_json_serialises_hashmap_string_string() {
+		let mut m: HashMap<String, String> = HashMap::new();
+		m.insert("VERSION".into(), "1.2.3".into());
+		let s = to_query_json("build.args", &m).unwrap();
+		// Object order isn't stable across HashMap iterations, so parse and
+		// check rather than comparing the literal.
+		let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
+		assert_eq!(parsed["VERSION"], "1.2.3");
+	}
+
+	/// The happy path for the `secrets` site: a `Vec<String>` of `id=…,src=…`
+	/// specs.
+	#[test]
+	fn to_query_json_serialises_secrets_vec() {
+		let v: Vec<String> = vec!["id=tok,src=.podup-build-secret-tok".into()];
+		assert_eq!(
+			to_query_json("build.secrets", &v).unwrap(),
+			r#"["id=tok,src=.podup-build-secret-tok"]"#
+		);
+	}
+
+	/// A serialisation failure must surface as `Err(ComposeError::Build)`
+	/// whose message names the field and the underlying reason. Each of the
+	/// five build sites passes a distinct `what`, so all five labels are
+	/// pinned to a test.
+	#[test]
+	fn to_query_json_failure_names_build_cache_from() {
+		let err = to_query_json("build.cache_from", &AlwaysFails { reason: "boom" })
+			.expect_err("must surface the error");
+		assert!(matches!(err, ComposeError::Build(_)), "got {err:?}");
+		let msg = err.to_string();
+		assert!(msg.contains("build.cache_from"), "got {msg:?}");
+		assert!(msg.contains("boom"), "got {msg:?}");
+	}
+
+	#[test]
+	fn to_query_json_failure_names_build_args() {
+		let err = to_query_json("build.args", &AlwaysFails { reason: "boom" })
+			.expect_err("must surface the error");
+		assert!(err.to_string().contains("build.args"), "got {err}");
+	}
+
+	#[test]
+	fn to_query_json_failure_names_build_labels() {
+		let err = to_query_json("build.labels", &AlwaysFails { reason: "boom" })
+			.expect_err("must surface the error");
+		assert!(err.to_string().contains("build.labels"), "got {err}");
+	}
+
+	#[test]
+	fn to_query_json_failure_names_build_secrets() {
+		let err = to_query_json("build.secrets", &AlwaysFails { reason: "boom" })
+			.expect_err("must surface the error");
+		assert!(err.to_string().contains("build.secrets"), "got {err}");
+	}
+
+	#[test]
+	fn to_query_json_failure_names_build_cache_to() {
+		let err = to_query_json("build.cache_to", &AlwaysFails { reason: "boom" })
+			.expect_err("must surface the error");
+		assert!(err.to_string().contains("build.cache_to"), "got {err}");
+	}
+}
 
 #[cfg(test)]
 mod tests;
 
 #[cfg(test)]
 mod stream_end_tests;
-
-#[cfg(test)]
-mod interactive_run_tests {
-	use super::wants_interactive_run;
-
-	/// `-T` opts out, matching `docker compose run` — which has no `-i` because
-	/// a TTY on both ends is the default.
-	#[test]
-	fn no_tty_disables_the_pty() {
-		assert!(!wants_interactive_run(true, false));
-	}
-
-	/// `-d` detaches, so there is nobody to be interactive with.
-	#[test]
-	fn detach_disables_the_pty() {
-		assert!(!wants_interactive_run(false, true));
-	}
-
-	/// The decisive one for existing users: in a test harness — as in any script
-	/// or pipeline — stdin is not a terminal, so `run` stays on the unchanged
-	/// streaming path. Allocating a pty there would change output framing for
-	/// every script that already calls `podup run`.
-	#[test]
-	fn a_non_terminal_stdin_stays_on_the_streaming_path() {
-		assert!(!wants_interactive_run(false, false));
-	}
-
-	/// Both ends are required, and this is the case that made it necessary:
-	/// `podup run app cmd > out.txt` typed at a shell leaves stdin a terminal
-	/// while stdout is a file. Checking stdin alone allocated a pty, and a pty
-	/// merges stdout with stderr and writes CRLF — so the redirect silently
-	/// changed the bytes the file received. Verified against `docker compose`,
-	/// which keeps it clean.
-	#[test]
-	fn a_redirected_stdout_stays_on_the_streaming_path() {
-		assert!(!super::wants_interactive_with(false, false, true, false));
-		assert!(super::wants_interactive_with(false, false, true, true));
-	}
-}

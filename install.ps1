@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 #
 # podup installer for Windows - downloads a release binary, verifies it and
 # installs it.
@@ -89,6 +89,80 @@ try {
 		return $dest
 	}
 
+	# Resolve the actual release tag from the GitHub releases API when the
+	# caller leaves the version at its default ('latest'). The signature over
+	# SHA256SUMS binds the asset bytes but not the release tag, so a CDN or
+	# transparent-proxy replay can serve an older, *legitimately* signed
+	# binary and matching manifest - both still verify cryptographically. We
+	# pin the staged binary's reported --version to this resolved tag in
+	# the self-test (Test-StagedVersion) to close that window. Without this
+	# resolution we cannot self-test against the literal string 'latest',
+	# and using the binary's own --version as the truth would be circular
+	# (that is exactly the attack).
+	function Resolve-ReleaseTag {
+		$apiUrl = "https://api.github.com/repos/$Repo/releases/latest"
+		try {
+			$resp = Invoke-WebRequest -Uri $apiUrl -Headers @{ 'Accept' = 'application/vnd.github+json' } -UseBasicParsing -TimeoutSec 60
+		} catch {
+			Fail "Cannot resolve latest release tag from $apiUrl"
+		}
+		# Use ErrorAction to surface a bad response as a fatal condition rather
+		# than silently emitting $null and moving on.
+		try {
+			$json = $resp.Content | ConvertFrom-Json -ErrorAction Stop
+		} catch {
+			Fail "Malformed GitHub releases JSON from /releases/latest"
+		}
+		if (-not $json.tag_name) {
+			Fail "GitHub releases response missing tag_name"
+		}
+		return [string]$json.tag_name
+	}
+
+	# Confirm the staged binary's --version reports the resolved release
+	# tag. This closes the signed-release rollback window: a replayed older
+	# binary passes the Ed25519 signature, the SHA-256 digest, and the build
+	# provenance (the manifest and the asset are both legitimately signed),
+	# but its --version still reports the old release. The self-test refuses
+	# such an install the same way the Rust `podup update` does
+	# (internal/update/install.rs:152-205).
+	#
+	# Strict equality, with one optional leading 'v'. Each whitespace-
+	# delimited token in the staged binary's --version output is compared
+	# in full; a starts_with / substring match would let `3.7.0-dev` slip
+	# past the `3.7.0` check, which is the rollback case this gate exists
+	# to reject. Matches the Rust behaviour token-for-token.
+	function Test-StagedVersion {
+		param(
+			[string]$StagedPath,
+			[string]$ResolvedTag
+		)
+		$expected = if ($ResolvedTag.StartsWith('v')) { $ResolvedTag.Substring(1) } else { $ResolvedTag }
+		# Run the staged binary's --version. A non-zero exit (or a missing
+		# file) fails closed.
+		try {
+			$reported = & $StagedPath --version 2>&1
+		} catch {
+			Remove-Item -Path $StagedPath -Force -ErrorAction SilentlyContinue
+			Fail "Could not run $StagedPath --version to self-test the staged binary"
+		}
+		if ($LASTEXITCODE -ne 0) {
+			Remove-Item -Path $StagedPath -Force -ErrorAction SilentlyContinue
+			Fail "Could not run $StagedPath --version to self-test the staged binary"
+		}
+		$reportedStr = ($reported | Out-String).TrimEnd()
+		$tokens = $reportedStr -split '\s+'
+		foreach ($token in $tokens) {
+			if (($token -eq $expected) -or ($token -eq "v$expected")) {
+				Write-LogOk "Reported --version matches $ResolvedTag"
+				return
+			}
+		}
+		Remove-Item -Path $StagedPath -Force -ErrorAction SilentlyContinue
+		Write-LogError "Staged binary reports `"$reportedStr`", expected $ResolvedTag"
+		Fail "Refusing to install: staged binary's --version does not match the resolved release tag (possible rollback) - the staged file has been removed"
+	}
+
 	Write-LogInfo "Downloading $Artifact ($Version) ..."
 	$artifactPath = Get-ReleaseFile $Artifact
 	$sumsPath = Get-ReleaseFile 'SHA256SUMS'
@@ -136,27 +210,42 @@ try {
 		if ($python) {
 			$pyScript = Join-Path $TmpDir 'verify_ed25519.py'
 			# Python source - indentation is significant, keep as-is.
+			# Exit codes: 0 verified, 1 signature present but INVALID (tampered),
+			# 2 unused on this path (no python3/cryptography already handled
+			# above), 3 the configured release key is malformed (a configuration
+			# problem, kept distinct from rc=1 so the caller can report it
+			# without scaring the user about the release).
 			$pySource = @'
-import base64, sys
+import base64, binascii, sys
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
 sig_file, data_file = sys.argv[1], sys.argv[2]
 sig = open(sig_file, "rb").read()
 data = open(data_file, "rb").read()
-for pubkey_b64 in sys.argv[3:]:
+for slot, pubkey_b64 in enumerate(sys.argv[3:]):
     try:
-        Ed25519PublicKey.from_public_bytes(base64.b64decode(pubkey_b64 + "==")).verify(sig, data)
+        # Pad to a 4-byte boundary the way sign.py does: the installer stores
+        # the key unpadded, and a stricter decoder would reject a fixed two-"="
+        # suffix when the key is already a multiple of four chars long.
+        raw = base64.b64decode(pubkey_b64 + "=" * (-len(pubkey_b64) % 4))
+        Ed25519PublicKey.from_public_bytes(raw).verify(sig, data)
         sys.exit(0)
-    except (InvalidSignature, ValueError):
+    except (binascii.Error, ValueError) as exc:
+        print("configured release key slot %d is malformed: %s" % (slot, exc), file=sys.stderr)
+        sys.exit(3)
+    except InvalidSignature:
         continue
 sys.exit(1)
 '@
 			Set-Content -Path $pyScript -Value $pySource -Encoding ASCII
 			$pyArgs = $python.Pre + @($pyScript, $sigPath, $sumsPath) + $PubKeys
 			& $python.Exe @pyArgs
-			if ($LASTEXITCODE -eq 0) {
+			$pyExit = $LASTEXITCODE
+			if ($pyExit -eq 0) {
 				Write-LogOk 'SHA256SUMS signature verified'
 				$verified = $true
+			} elseif ($pyExit -eq 3) {
+				Fail 'Configured release key is malformed - check PODUP_RELEASE_PUBKEY_B64 / PODUP_RELEASE_PUBKEY2_B64 environment variables and re-run'
 			} else {
 				Fail 'SHA256SUMS signature verification failed - release may be tampered'
 			}
@@ -205,17 +294,78 @@ sys.exit(1)
 	if ($expected -ne $actual) { Fail "Checksum verification failed for $Artifact" }
 	Write-LogOk 'Checksum verified'
 
+	# Resolve the actual release tag for the self-test. With an explicit
+	# PODUP_VERSION=vX.Y.Z this is just that tag; with the default 'latest'
+	# we hit the GitHub releases API to discover it. The signed manifest
+	# binds asset bytes but not the release tag, so we cannot use the
+	# staged binary's --version as the source of truth - that would be
+	# the attack vector.
+	$ResolvedTag = if ($Version -eq 'latest') {
+		Write-LogInfo 'Resolving latest release tag ...'
+		Resolve-ReleaseTag
+	} else {
+		$Version
+	}
+
 	# --- Install -------------------------------------------------------------
 
 	if (-not (Test-Path $InstallDir)) {
 		New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 	}
 	$target = Join-Path $InstallDir 'podup.exe'
-	# Stage next to the target and rename into place, so an interrupted install
-	# can never leave a partial yet executable binary on PATH.
-	$staged = Join-Path $InstallDir ".podup.install-$PID.exe"
+	# A running .exe cannot be overwritten, but it can be renamed. Unify
+	# with the Rust updater (internal/update/install.rs:307-325): rename
+	# the in-use target aside to *.old, move the staged binary in, then
+	# best-effort remove the leftover. If the staged → target rename
+	# fails, the old binary is restored from *.old so the user is never
+	# left without a working podup. The *.old path follows the target's
+	# basename rather than a PID-suffix, so a kill between the two
+	# renames leaves a single recoverable sibling rather than a
+	# stale partial.
+	$backup = [System.IO.Path]::ChangeExtension($target, '.old')
+	$staged = Join-Path $InstallDir '.podup.install.exe'
+	if (Test-Path -LiteralPath $staged) {
+		Remove-Item -LiteralPath $staged -Force
+	}
 	Copy-Item -Path $artifactPath -Destination $staged -Force
-	Move-Item -Path $staged -Destination $target -Force
+
+	# Self-test against the staged binary BEFORE the move into place. The
+	# signed manifest binds the asset bytes but not the release tag, so a
+	# CDN or transparent-proxy replay can serve an older, *legitimately*
+	# signed binary and matching SHA256SUMS - both still verify. The
+	# staged binary's --version still reports the old release, and we
+	# refuse. Mirrors the Rust self_test at
+	# internal/update/install.rs:152-205.
+	Test-StagedVersion -StagedPath $staged -ResolvedTag $ResolvedTag
+
+	# Move the in-use target aside. Drop any stale leftover from a prior
+	# interrupted install (a best-effort removal we still clean up at the
+	# start of the next run, but the install path itself should not blow
+	# up on it).
+	if (Test-Path -LiteralPath $backup) {
+		Remove-Item -LiteralPath $backup -Force
+	}
+	if (Test-Path -LiteralPath $target) {
+		Move-Item -LiteralPath $target -Destination $backup -Force
+	}
+	# Move the verified staged binary into place. If this fails (target
+	# directory read-only, AV scanner has the file open, …) restore the
+	# old binary so podup is not uninstalled by a failed upgrade.
+	try {
+		Move-Item -LiteralPath $staged -Destination $target -Force
+	} catch {
+		if (Test-Path -LiteralPath $backup) {
+			try {
+				Move-Item -LiteralPath $backup -Destination $target -Force
+			} catch {
+				Fail "Failed to install the new binary AND to restore the previous one from $backup - re-run the installer: $($_.Exception.Message)"
+			}
+		}
+		Fail "Failed to install the new binary, restored the previous one from $backup: $($_.Exception.Message)"
+	}
+	# Best-effort remove the *.old: it may still be locked by the running
+	# process, in which case the next updater run reaps it on entry.
+	Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
 
 	# Add the install dir to the user PATH if it is not already there.
 	$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
