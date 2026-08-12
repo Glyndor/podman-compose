@@ -11,7 +11,7 @@ permissions:
 jobs:
   fuzz:
     name: cargo fuzz (smoke)
-    uses: Glyndor/.github/.github/workflows/rust-fuzz.yml@e61aaf0e920345b3dbb82cacd3bd36a499951a92 # v1.13.0
+    uses: Glyndor/.github/.github/workflows/rust-fuzz.yml@3a46ffe91ecadcce7f14c99ea8b23ead4274f325 # v1.13.2
     with:
       targets: '["parse_compose", "substitute", "size", "dotenv", "stream_frame", "stream_ndjson"]'
       max-total-time: "60"
