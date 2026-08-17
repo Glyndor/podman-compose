@@ -20,4 +20,4 @@ permissions:
 
 jobs:
   shellcheck:
-    uses: Glyndor/.github/.github/workflows/shell-ci.yml@e61aaf0e920345b3dbb82cacd3bd36a499951a92 # v1.13.0
+    uses: Glyndor/.github/.github/workflows/shell-ci.yml@c958978687af37dc2d826a967d9c549589afb39f # v1.14.1
