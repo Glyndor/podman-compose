@@ -453,7 +453,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Glyndor/.github
-          ref: 118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # main (pre-tag)
+          ref: 118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
           persist-credentials: false
           path: upstream
 
