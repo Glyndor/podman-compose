@@ -453,7 +453,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Glyndor/.github
-          ref: e429f62795b09d17452c6d45db8018390d606483 # ci/installer-contract-verify-substance
+          ref: 69a553aa1b3fb26a0ddc13051c2f5713ca1db07f # ci/installer-contract-verify-substance
           persist-credentials: false
           path: upstream
 
