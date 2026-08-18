@@ -524,13 +524,25 @@ impl Engine {
 	/// created by an earlier `up --scale`/`scale` rather than the current
 	/// invocation, matching `docker compose cp/exec --index`. Shared by the
 	/// replica-targeting commands (`exec`, `cp`).
+	///
+	/// Reads off the bulk project listing ([`Engine::live_project_replicas_sorted`])
+	/// instead of issuing a per-service container-list round-trip (#1445):
+	/// one shared GET powers the rest of the per-replica query paths
+	/// (`port`, `logs`) when a command needs more than one of them.
 	pub(super) async fn live_replica_name_at(
 		&self,
 		service_name: &str,
 		service: &Service,
 		index: Option<u32>,
 	) -> Result<String> {
-		let names = self.live_replica_names(service_name, service).await?;
+		let live_by_service = self.live_project_replicas_sorted().await?;
+		let names = match live_by_service.get(service_name) {
+			Some(names) if !names.is_empty() => names.clone(),
+			// Service has no live container yet — fall back to the static
+			// compose names so a never-created service still has an
+			// addressable replica.
+			_ => self.replica_names(service_name, service),
+		};
 		let base = self.container_name(service_name, service);
 		resolve_replica_name(service_name, &base, &names, index)
 	}
