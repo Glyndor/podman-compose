@@ -179,8 +179,8 @@ jobs:
                 PASS=$(grep -oE 'test result: .* [0-9]+ passed' /tmp/cargo.log | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
                 FAIL=$(grep -oE '[0-9]+ failed' /tmp/cargo.log | grep -oE '[0-9]+' | tail -1)
                 FLAKY=$(grep -cE "$DROPPED" /tmp/cargo.log)
-                echo "PODUP_TESTS_RC=$RC"
-                echo "PODUP_SUMMARY pass=${PASS:-0} fail=${FAIL:-0} flaky=${FLAKY:-0}"
+                echo "PODUP_TESTS_RC_BEGIN rc=$RC PODUP_TESTS_RC_END"
+                echo "PODUP_SUMMARY_BEGIN pass=${PASS:-0} fail=${FAIL:-0} flaky=${FLAKY:-0} PODUP_SUMMARY_END"
                 # Coverage, measured where the integration tests can actually run.
                 # Reported, never gated — see the note where COVERAGE is set. A
                 # failure here must not redden the leg: this is an observation, and
@@ -252,14 +252,14 @@ jobs:
                 # detail lines, which the 4-space-exact match skips); no failures
                 # yields an empty list, not an error.
                 FAILED_TESTS=$(sed -n '/^failures:$/,/^test result:/p' /tmp/cargo.log | grep -oE '^    [A-Za-z0-9_:]+$' | tr -d ' ' | paste -sd, -)
-                echo "PODUP_FAILED_TESTS=${FAILED_TESTS}"
+                echo "PODUP_FAILED_TESTS_BEGIN tests=${FAILED_TESTS} PODUP_FAILED_TESTS_END"
           runcmd:
-            - bash -c 'F=$(findmnt -no FSTYPE /); case $F in btrfs) btrfs filesystem resize max / ;; xfs) xfs_growfs / ;; ext4) resize2fs $(findmnt -no SOURCE /) ;; esac >/dev/console 2>&1; echo "DISK=$(df -h / | tail -1)" >/dev/console'
+            - bash -c 'F=$(findmnt -no FSTYPE /); case $F in btrfs) btrfs filesystem resize max / ;; xfs) xfs_growfs / ;; ext4) resize2fs $(findmnt -no SOURCE /) ;; esac >/dev/console 2>&1; echo "DISK_BEGIN value=$(df -h / | tail -1) DISK_END" >/dev/console'
             - bash -c 'dnf install -y podman rust cargo gcc git llvm >/dev/console 2>&1'
             # Prove the driver took, so a silently-ignored config cannot put the
             # logs tests back to passing without reading anything.
-            - bash -c 'echo "LOGDRIVER=$(podman info --format {{.Host.LogDriver}} 2>/dev/null)" >/dev/console'
-            - bash -c 'echo "PODMAN=$(podman --version)  RUST=$(rustc --version)" >/dev/console'
+            - bash -c 'echo "LOGDRIVER_BEGIN value=$(podman info --format {{.Host.LogDriver}} 2>/dev/null) LOGDRIVER_END" >/dev/console'
+            - bash -c 'echo "PODMAN_BEGIN version=$(podman --version)  RUST=$(rustc --version) PODMAN_END" >/dev/console'
             - bash -c 'echo "tester:100000:65536" >/etc/subuid; echo "tester:100000:65536" >/etc/subgid'
             - bash -c 'loginctl enable-linger tester; sleep 6'
             - bash -c 'mkdir -p /mnt/repo && mount -t 9p -o trans=virtio,version=9p2000.L repo /mnt/repo && cp -a /mnt/repo /home/tester/podup && chown -R tester:tester /home/tester/podup'
@@ -294,10 +294,10 @@ jobs:
       - name: Verify podup core suite passed on the target Podman
         run: |
           L="$RUNNER_TEMP/vm.log"
-          echo "=== key lines ==="; grep -E 'DISK=|PODMAN=|test result:|PODUP_TESTS_RC|No space' "$L" | tail -10 || true
+          echo "=== key lines ==="; grep -E 'DISK_BEGIN|PODMAN_BEGIN|test result:|PODUP_TESTS_RC_BEGIN|No space' "$L" | tail -10 || true
           grep -q 'No space left' "$L" && { echo "::error::VM disk full — run invalid"; exit 1; }
-          VER=$(grep -oE 'PODMAN=podman version [0-9.]+' "$L" | grep -oE '[0-9.]+' | tail -1)
-          grep -qE 'PODMAN=podman version [0-9]' "$L" || { echo "::error::Podman not detected in VM"; exit 1; }
+          VER=$(perl -0777 -ne 'while (/PODMAN_BEGIN\s+version=podman version ([0-9.]+)(?s:.*?)PODMAN_END/g) { print "$1\n" }' "$L" | tail -1)
+          [ -n "$VER" ] || { echo "::error::Podman not detected in VM"; exit 1; }
           # The VM must be able to serve logs. Gate on that, not on which driver
           # provides it: Fedora 44's journald cannot open its library here and every
           # logs request 500s, while rawhide's works fine — so requiring a specific
@@ -307,7 +307,7 @@ jobs:
           # `unwrap()` the result passed without fetching a byte, because `logs`
           # swallowed the 500 and returned success. Green-and-meaningless is worse
           # than red, so the signature is a hard failure.
-          echo "log driver: $(grep -oE 'LOGDRIVER=[a-z0-9-]+' "$L" | tail -1)"
+          echo "log driver: $(perl -0777 -ne 'while (/LOGDRIVER_BEGIN\s+value=([a-z0-9-]+)(?s:.*?)LOGDRIVER_END/g) { print "$1\n" }' "$L" | tail -1)"
           if grep -q 'unable to open a handle to the library' "$L"; then
             echo "::error::the VM could not serve logs (journald cannot open its library) — the logs tests would pass without reading anything"
             exit 1
@@ -319,7 +319,7 @@ jobs:
           esac
           # Read the machine-readable summary the VM computed from the FULL cargo
           # log (the console here is tail-truncated, so don't recount from it).
-          SUM=$(grep -oE 'PODUP_SUMMARY pass=[0-9]+ fail=[0-9]+ flaky=[0-9]+' "$L" | tail -1)
+          SUM=$(perl -0777 -ne 'while (/PODUP_SUMMARY_BEGIN\s+pass=(\d+)(?s:.*?)fail=(\d+)(?s:.*?)flaky=(\d+)\s+PODUP_SUMMARY_END/g) { print "PODUP_SUMMARY pass=$1 fail=$2 flaky=$3\n" }' "$L" | tail -1)
           [ -n "$SUM" ] || { echo "::error::no PODUP_SUMMARY from VM on Podman $VER — suite did not report"; exit 1; }
           # Coverage, when this run asked for it. Reported into the job summary.
           # Gated on the scheduled + manual paths only, on Podman 6 (the leg that
@@ -363,7 +363,7 @@ jobs:
           # its final element — which then matches nothing in the classified list
           # and reports the last failing test as an unexpected regression. That is
           # exactly how this gate false-reddened on its first run.
-          FAILED_TESTS=$(grep -oE 'PODUP_FAILED_TESTS=.*' "$L" | tail -1 | cut -d= -f2- | tr -d '\r' || true)
+          FAILED_TESTS=$(perl -0777 -ne 'while (/PODUP_FAILED_TESTS_BEGIN\s+tests=(.*?)\s+PODUP_FAILED_TESTS_END/sg) { print "$1\n" }' "$L" | tail -1 | tr -d '\r' || true)
           if [ -n "$FAILED_TESTS" ]; then
             echo "Failing tests on Podman $VER: $FAILED_TESTS"
           fi
