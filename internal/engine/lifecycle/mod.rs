@@ -494,9 +494,16 @@ impl Engine {
 				);
 				return Ok(());
 			}
-			// Services with a build section are rebuilt on every up, so
-			// their container must be recreated to pick up the fresh
-			// image even when the compose config is unchanged.
+			// A service with a `build:` section is recreated even when its hash
+			// matches: the compose-config hash compared below does not cover
+			// the build context's source files, so the existing container may
+			// still hold an image built from an older tree. Recreating forces
+			// the new container to bind whatever image is current.
+			//
+			// `up` stopped rebuilding these unconditionally in #1094 — it now
+			// builds only when the image is missing — so the fresh-image
+			// guarantee this recreate used to inherit from that rebuild no
+			// longer comes for free.
 			if service.build.is_none()
 				&& existing_hash.get(&container_name).map(String::as_str) == Some(new_hash)
 			{
