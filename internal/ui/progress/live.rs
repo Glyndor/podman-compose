@@ -28,19 +28,6 @@ fn cursor_up(n: usize) -> String {
 	format!("\x1b[{n}A")
 }
 
-/// A tail region being repainted on a real terminal.
-///
-/// Owns the count of rows it last painted, which is the only state the repaint
-/// arithmetic needs — and the reason every line handed to it must already be
-/// truncated to the terminal width. A line that wraps makes the terminal count
-/// two rows where this counted one, and from then on every repaint erases the
-/// wrong lines.
-///
-/// Deliberately knows nothing about what it is drawing. It takes two blocks of
-/// finished text: lines that become permanent scrollback, and lines that are
-/// erased on the next call. That is what lets the board and `stats` share it —
-/// they disagree about everything except needing a block of text repainted in
-/// place.
 /// Which stream a region draws on.
 ///
 /// Not always stderr. The lifecycle board goes there so stdout stays a clean
@@ -64,6 +51,19 @@ impl Target {
 	}
 }
 
+/// A tail region being repainted on a real terminal.
+///
+/// Owns the count of rows it last painted, which is the only state the repaint
+/// arithmetic needs — and the reason every line handed to it must already be
+/// truncated to the terminal width. A line that wraps makes the terminal count
+/// two rows where this counted one, and from then on every repaint erases the
+/// wrong lines.
+///
+/// Deliberately knows nothing about what it is drawing. It takes two blocks of
+/// finished text: lines that become permanent scrollback, and lines that are
+/// erased on the next call. That is what lets the board and `stats` share it —
+/// they disagree about everything except needing a block of text repainted in
+/// place.
 pub struct Region {
 	/// Rows painted by the previous repaint, to be walked back over.
 	painted: usize,
