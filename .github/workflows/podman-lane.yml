@@ -296,7 +296,7 @@ jobs:
           L="$RUNNER_TEMP/vm.log"
           echo "=== key lines ==="; grep -E 'DISK_BEGIN|PODMAN_BEGIN|test result:|PODUP_TESTS_RC_BEGIN|No space' "$L" | tail -10 || true
           grep -q 'No space left' "$L" && { echo "::error::VM disk full — run invalid"; exit 1; }
-          VER=$(perl -0777 -ne 'while (/PODMAN_BEGIN\s+version=podman version ([0-9.]+)(?s:.*?)PODMAN_END/g) { print "$1\n" }' "$L" | tail -1)
+          VER=$(perl -0777 -ne 'while (/PODMAN_BEGIN\s+version=podman version ([0-9.]+)(?s:(?:(?!PODMAN_BEGIN).)*?)PODMAN_END/g) { print "$1\n" }' "$L" | tail -1)
           [ -n "$VER" ] || { echo "::error::Podman not detected in VM"; exit 1; }
           # The VM must be able to serve logs. Gate on that, not on which driver
           # provides it: Fedora 44's journald cannot open its library here and every
@@ -307,7 +307,7 @@ jobs:
           # `unwrap()` the result passed without fetching a byte, because `logs`
           # swallowed the 500 and returned success. Green-and-meaningless is worse
           # than red, so the signature is a hard failure.
-          echo "log driver: $(perl -0777 -ne 'while (/LOGDRIVER_BEGIN\s+value=([a-z0-9-]+)(?s:.*?)LOGDRIVER_END/g) { print "$1\n" }' "$L" | tail -1)"
+          echo "log driver: $(perl -0777 -ne 'while (/LOGDRIVER_BEGIN\s+value=([a-z0-9-]+)(?s:(?:(?!LOGDRIVER_BEGIN).)*?)LOGDRIVER_END/g) { print "$1\n" }' "$L" | tail -1)"
           if grep -q 'unable to open a handle to the library' "$L"; then
             echo "::error::the VM could not serve logs (journald cannot open its library) — the logs tests would pass without reading anything"
             exit 1
@@ -319,7 +319,7 @@ jobs:
           esac
           # Read the machine-readable summary the VM computed from the FULL cargo
           # log (the console here is tail-truncated, so don't recount from it).
-          SUM=$(perl -0777 -ne 'while (/PODUP_SUMMARY_BEGIN\s+pass=(\d+)(?s:.*?)fail=(\d+)(?s:.*?)flaky=(\d+)\s+PODUP_SUMMARY_END/g) { print "PODUP_SUMMARY pass=$1 fail=$2 flaky=$3\n" }' "$L" | tail -1)
+          SUM=$(perl -0777 -ne 'while (/PODUP_SUMMARY_BEGIN\s+pass=(\d+)(?s:(?:(?!PODUP_SUMMARY_BEGIN).)*?)fail=(\d+)(?s:(?:(?!PODUP_SUMMARY_BEGIN).)*?)flaky=(\d+)\s+PODUP_SUMMARY_END/g) { print "PODUP_SUMMARY pass=$1 fail=$2 flaky=$3\n" }' "$L" | tail -1)
           [ -n "$SUM" ] || { echo "::error::no PODUP_SUMMARY from VM on Podman $VER — suite did not report"; exit 1; }
           # Coverage, when this run asked for it. Reported into the job summary.
           # Gated on the scheduled + manual paths only, on Podman 6 (the leg that
@@ -363,7 +363,7 @@ jobs:
           # its final element — which then matches nothing in the classified list
           # and reports the last failing test as an unexpected regression. That is
           # exactly how this gate false-reddened on its first run.
-          FAILED_TESTS=$(perl -0777 -ne 'while (/PODUP_FAILED_TESTS_BEGIN\s+tests=(.*?)\s+PODUP_FAILED_TESTS_END/sg) { print "$1\n" }' "$L" | tail -1 | tr -d '\r' || true)
+          FAILED_TESTS=$(perl -0777 -ne 'while (/PODUP_FAILED_TESTS_BEGIN\s+tests=((?:(?!PODUP_FAILED_TESTS_BEGIN).)*?)\s+PODUP_FAILED_TESTS_END/sg) { print "$1\n" }' "$L" | tail -1 | tr -d '\r' || true)
           if [ -n "$FAILED_TESTS" ]; then
             echo "Failing tests on Podman $VER: $FAILED_TESTS"
           fi
