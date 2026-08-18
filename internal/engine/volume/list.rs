@@ -147,7 +147,7 @@ impl Engine {
 					})
 				})
 				.collect();
-			println!("{}", serde_json::to_string_pretty(&arr).unwrap_or_default());
+			println!("{}", super::super::to_pretty_json("volumes.row", &arr)?);
 			return Ok(());
 		}
 

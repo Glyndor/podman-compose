@@ -153,10 +153,7 @@ impl Engine {
 					})
 				})
 				.collect();
-			println!(
-				"{}",
-				serde_json::to_string_pretty(&json).unwrap_or_default()
-			);
+			println!("{}", super::super::to_pretty_json("images.row", &json)?);
 			return Ok(());
 		}
 
