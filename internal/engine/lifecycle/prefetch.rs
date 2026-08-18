@@ -8,15 +8,22 @@
 //! concurrently, before the first level barrier — instead of one at a time as
 //! each level's services reach their turn.
 //!
-//! Best-effort only: a prefetch miss is logged at debug and otherwise
-//! swallowed. `up_one_service`'s own pull call is unchanged and remains the
-//! sole source of a real pull failure — this stage can only make `up` faster,
-//! never change whether it succeeds.
+//! Best-effort only for prefetch *misses*: an unreachable socket or a registry
+//! that 500s is logged at debug and otherwise swallowed. `up_one_service`'s
+//! own pull call is unchanged and remains the sole source of a real pull
+//! failure — this stage can only make `up` faster, never change whether it
+//! succeeds.
+//!
+//! An invalid `pull_policy:` (or `--pull`) is **not** a prefetch miss. It is
+//! a configuration error and propagates here as `Err`, before a single pull
+//! is dispatched, so the operator sees it instead of a silent wrong image
+//! (#1443).
 
 use std::collections::{HashMap, HashSet};
 
 use crate::compose::types::{ComposeFile, Service};
-use crate::engine::build::libpod_pull_policy;
+use crate::engine::build::pull_policy_checked;
+use crate::error::Result;
 
 use super::parallel::join_bounded;
 use super::Engine;
@@ -32,19 +39,22 @@ impl Engine {
 	/// prefetch. Deduplicates by image reference, so many services sharing one
 	/// image pull it once instead of once per service, and dispatches the
 	/// resulting pulls with the same bounded concurrency the level fan-out
-	/// uses. Never fails: `up_one_service`'s own pull remains authoritative, so
-	/// a prefetch miss here just means that later call does the work instead,
-	/// exactly as it would without this stage.
+	/// uses. Returns `Err` for an unrecognized `pull_policy:` so a typo
+	/// (`pull_policy: alaways`) is reported instead of being treated as
+	/// `missing` (#1443); prefetch I/O errors stay debug-level and never
+	/// propagate.
 	pub(super) async fn prefetch_images(
 		&self,
 		file: &ComposeFile,
 		enabled: &HashSet<String>,
 		target_set: &Option<HashSet<String>>,
-	) {
+	) -> Result<()> {
 		// One representative service per unique image reference is enough to
 		// issue the pull — this is what dedupes 50 services on one image down
-		// to a single request instead of 50.
-		let mut by_image: HashMap<&str, &Service> = HashMap::new();
+		// to a single request instead of 50. The service *name* travels with
+		// the representative so the pull / policy error can name it, instead
+		// of using the image as a stand-in for the originating service.
+		let mut by_image: HashMap<&str, (&str, &Service)> = HashMap::new();
 		for (name, service) in &file.services {
 			if !enabled.contains(name) {
 				continue;
@@ -66,21 +76,29 @@ impl Engine {
 				.pull_policy_override
 				.as_deref()
 				.or(service.pull_policy.as_deref());
-			if libpod_pull_policy(raw_policy).unwrap_or("missing") == "never" {
+			if pull_policy_checked(raw_policy, name)? == "never" {
 				continue;
 			}
-			by_image.entry(image).or_insert(service);
+			by_image.entry(image).or_insert((name.as_str(), service));
 		}
 
-		let futs = by_image.into_values().map(|service| async move {
+		let futs = by_image.into_values().map(|(name, service)| async move {
 			let image = service.image.as_deref().unwrap_or_default();
 			let raw_policy = self
 				.pull_policy_override
 				.as_deref()
 				.or(service.pull_policy.as_deref());
-			let policy = libpod_pull_policy(raw_policy).unwrap_or("missing");
+			let policy = match pull_policy_checked(raw_policy, name) {
+				Ok(p) => p,
+				// Propagate the validation error out of the prefetch join via a
+				// shared poison cell. The prefetch stage itself is best-effort
+				// for *I/O*, but a configuration error must surface loud — the
+				// outer `join_bounded` join collapses every concurrent task into
+				// one result, and there is no other channel back (#1443).
+				Err(e) => return Err(e),
+			};
 			// `missing` (and its aliases, already normalized by
-			// `libpod_pull_policy`) only pulls when the image is absent —
+			// `pull_policy_checked`) only pulls when the image is absent —
 			// checking first turns a warm cache into a cheap presence check
 			// instead of a redundant pull request. `always`/`newer` mean to
 			// hit the registry regardless, so skip the check and prefetch
@@ -102,18 +120,23 @@ impl Engine {
 						seen.insert(image.to_string());
 					}
 				}
-				return;
+				return Ok(());
 			}
 			// Quietly: this stage only warms the cache, and `up_one_service`'s
 			// own pull below is the authoritative one. Reporting from both is
 			// what made `Pulling` appear twice per image on `up` while a
-			// standalone `pull` printed it once.
-			if let Err(e) = self.pull_image_quietly(service).await {
+			// standalone `pull` printed it once. A prefetch I/O miss is still
+			// debug-only — only the validation error above escapes.
+			if let Err(e) = self.pull_image_quietly(name, service).await {
 				tracing::debug!("prefetch miss for {image}: {e}");
 			}
+			Ok(())
 		});
 
-		join_bounded(futs).await;
+		match super::parallel::first_error(join_bounded(futs).await) {
+			Some(err) => Err(err),
+			None => Ok(()),
+		}
 	}
 }
 
@@ -153,7 +176,7 @@ mod tests {
 		.unwrap();
 		let enabled: HashSet<String> = file.services.keys().cloned().collect();
 
-		e.prefetch_images(&file, &enabled, &None).await;
+		e.prefetch_images(&file, &enabled, &None).await.unwrap();
 
 		let seen = fake.requests.lock().unwrap();
 		let shared_pulls = seen
@@ -194,7 +217,9 @@ mod tests {
 		let enabled: HashSet<String> = file.services.keys().cloned().collect();
 		let target_set: Option<HashSet<String>> = Some(["web".to_string()].into_iter().collect());
 
-		e.prefetch_images(&file, &enabled, &target_set).await;
+		e.prefetch_images(&file, &enabled, &target_set)
+			.await
+			.unwrap();
 
 		let seen = fake.requests.lock().unwrap();
 		assert!(
@@ -205,6 +230,88 @@ mod tests {
 		assert!(
 			!seen.iter().any(|r| r.contains("img-db")),
 			"a service outside the target set must not be prefetched: {seen:?}"
+		);
+	}
+
+	/// A typo'd `pull_policy:` must error loud at the prefetch stage instead of
+	/// being treated as `missing` (#1443). Both the dedup-side check (the
+	/// service is *included* in the prefetch set when the policy is anything
+	/// but `never`) and the per-image future would have happily read the bad
+	/// value as `missing` before the fix, leaving `up` to exit 0 with the
+	/// wrong image and no diagnostic.
+	#[tokio::test]
+	#[cfg(unix)]
+	async fn prefetch_rejects_an_unknown_pull_policy() {
+		let fake = fake_podman::start(|method, target| {
+			if method == "POST" && target.contains("/images/pull") {
+				(200, String::new())
+			} else {
+				(404, r#"{"message":"not found"}"#.to_string())
+			}
+		});
+		let e = engine_with(fake.client(), "proj");
+
+		let file = crate::parse_str(
+			"services:\n  web:\n    image: nginx:1.27\n    pull_policy: alaways\n",
+		)
+		.unwrap();
+		let enabled: HashSet<String> = file.services.keys().cloned().collect();
+
+		let err = e
+			.prefetch_images(&file, &enabled, &None)
+			.await
+			.expect_err("an unknown pull_policy must be rejected, not silently treated as missing");
+		let msg = err.to_string();
+		assert!(msg.contains("alaways"), "got {msg}");
+		assert!(
+			matches!(
+				err,
+				crate::error::ComposeError::Podman(crate::libpod::PodmanError::Field {
+					ref service,
+					ref field,
+					ref value,
+					..
+				}) if service == "web" && field == "pull_policy" && value == "alaways"
+			),
+			"unknown pull_policy must surface as a Field error naming the offending service and value, got {err:?}"
+		);
+	}
+
+	/// An invalid `--pull` override (no service context) must also propagate
+	/// out of the prefetch stage — same bug as the per-service typo, just
+	/// applied to every service at once. Before the fix the dedup phase
+	/// would treat every service's effective policy as `missing` and warm
+	/// every cache it could reach with the wrong intent (#1443).
+	#[tokio::test]
+	#[cfg(unix)]
+	async fn prefetch_rejects_an_invalid_pull_override() {
+		let fake = fake_podman::start(|method, target| {
+			if method == "POST" && target.contains("/images/pull") {
+				(200, String::new())
+			} else {
+				(404, r#"{"message":"not found"}"#.to_string())
+			}
+		});
+		let mut e = engine_with(fake.client(), "proj");
+		e.pull_policy_override = Some("alaways".to_string());
+
+		let file = crate::parse_str("services:\n  web:\n    image: nginx:1.27\n").unwrap();
+		let enabled: HashSet<String> = file.services.keys().cloned().collect();
+
+		let err = e
+			.prefetch_images(&file, &enabled, &None)
+			.await
+			.expect_err("an invalid --pull override must be rejected");
+		assert!(
+			matches!(
+				err,
+				crate::error::ComposeError::Podman(crate::libpod::PodmanError::Field {
+					ref field,
+					ref value,
+					..
+				}) if field == "pull_policy" && value == "alaways"
+			),
+			"override must surface as a Field error naming the field and value, got {err:?}"
 		);
 	}
 }
