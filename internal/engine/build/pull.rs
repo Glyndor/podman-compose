@@ -118,15 +118,19 @@ impl Engine {
 			// and then the per-service `pull_image` would fail downstream
 			// with the same error, N times. Resolve once and let the
 			// offending value short-circuit the whole batch (#1369).
+			//
+			// Collect into `Result`: the previous `.expect` here assumed the
+			// `up` path had already rejected an unknown value, but standalone
+			// `pull` never reaches `pull_image` before this dedup, so the
+			// invariant was false and the binary panicked on every typo
+			// (#1450).
 			.map(|(name, s)| {
 				let image = s.image.as_deref().unwrap_or_default();
-				let policy = self
-					.resolved_pull_policy(name.as_str(), s)
-					.expect("unknown pull policy already rejected in pull_image");
+				let policy = self.resolved_pull_policy(name.as_str(), s)?;
 				let key = (image, policy, s.platform.as_deref());
-				(name.as_str(), s, key)
+				Ok((name.as_str(), s, key))
 			})
-			.collect();
+			.collect::<Result<Vec<_>>>()?;
 
 		// Dedup by that key: 50 services agreeing on image, resolved policy
 		// and platform must issue one pull, not 50. Two services naming the
@@ -442,6 +446,10 @@ mod tests {
 		);
 	}
 
+	// `pull_rejects_an_unknown_pull_policy_without_panicking` lives in the
+	// sibling `pull_typo_tests.rs` to keep this file below the source-line
+	// limit (#1450).
+
 	#[test]
 	fn pull_policy_maps_every_spec_value() {
 		assert_eq!(libpod_pull_policy(Some("always")), Some("always"));
@@ -719,3 +727,7 @@ mod tests {
 		.expect("--ignore-pull-failures must stay exit 0");
 	}
 }
+
+#[cfg(test)]
+#[path = "pull_typo_tests.rs"]
+mod typo_tests;
