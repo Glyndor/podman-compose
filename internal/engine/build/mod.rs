@@ -27,6 +27,7 @@ use crate::compose::types::{BuildConfig, Service};
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::image::BuildOutput;
 use crate::libpod::urlencoded;
+use crate::libpod::validate::pre_validate_build;
 use crate::libpod::API_PREFIX;
 use crate::size;
 
@@ -248,6 +249,14 @@ impl Engine {
 		if let BuildConfig::Config { labels: l, .. } = build {
 			labels.extend(l.to_map());
 		}
+
+		// Pre-validate the keys libpod's buildkit-fronted parser rejects
+		// (anything outside `[A-Za-z0-9_.-]`), so a bad `build.args` or
+		// `build.labels` key surfaces as a `PodmanError::Field` naming the
+		// compose-side field rather than libpod's `400` body. Runs before
+		// the build URL is assembled so a bad key fails before any POST to
+		// the daemon (#1357).
+		pre_validate_build(&build_args, &labels)?;
 
 		let network = if let BuildConfig::Config {
 			network: Some(n), ..

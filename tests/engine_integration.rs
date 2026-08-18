@@ -172,6 +172,8 @@ mod commands_networking;
 mod cp_flags;
 #[path = "engine_integration/dns_resolution.rs"]
 mod dns_resolution;
+#[path = "engine_integration/error_surfacing.rs"]
+mod error_surfacing;
 #[path = "engine_integration/exec_flags.rs"]
 mod exec_flags;
 #[path = "engine_integration/health_targeting.rs"]
