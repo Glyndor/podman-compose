@@ -10,9 +10,10 @@ mod pull;
 mod push;
 mod stream;
 mod tags;
-/// Shared with the `up` image-prefetch stage so it resolves a service's
-/// effective pull policy identically to the pull path below.
-pub(in crate::engine) use pull::libpod_pull_policy;
+/// Shared with the `up` image-prefetch and `up`/pull decision paths so they
+/// resolve a service's effective pull policy identically to the pull path
+/// below, and reject an unrecognized value the same way (#1443).
+pub(in crate::engine) use pull::pull_policy_checked;
 pub use pull::PullOptions;
 pub use push::PushOptions;
 /// Shared with the container-create path so an `up`/`create` references the same

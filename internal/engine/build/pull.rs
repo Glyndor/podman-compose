@@ -121,7 +121,7 @@ impl Engine {
 			.map(|(name, s)| {
 				let image = s.image.as_deref().unwrap_or_default();
 				let policy = self
-					.resolved_pull_policy(s)
+					.resolved_pull_policy(name.as_str(), s)
 					.expect("unknown pull policy already rejected in pull_image");
 				let key = (image, policy, s.platform.as_deref());
 				(name.as_str(), s, key)
@@ -193,8 +193,12 @@ impl Engine {
 		Ok(())
 	}
 
-	pub(in crate::engine) async fn pull_image(&self, service: &Service) -> Result<()> {
-		let pull_policy = self.resolved_pull_policy(service)?;
+	pub(in crate::engine) async fn pull_image(
+		&self,
+		service_name: &str,
+		service: &Service,
+	) -> Result<()> {
+		let pull_policy = self.resolved_pull_policy(service_name, service)?;
 		self.pull_image_with_policy(service, pull_policy, self.quiet_pull)
 			.await
 	}
@@ -206,8 +210,12 @@ impl Engine {
 	/// pull is the authoritative one, and reporting from both is what printed
 	/// `Pulling` twice per image on `up` while a standalone `pull` printed it
 	/// once.
-	pub(in crate::engine) async fn pull_image_quietly(&self, service: &Service) -> Result<()> {
-		let pull_policy = self.resolved_pull_policy(service)?;
+	pub(in crate::engine) async fn pull_image_quietly(
+		&self,
+		service_name: &str,
+		service: &Service,
+	) -> Result<()> {
+		let pull_policy = self.resolved_pull_policy(service_name, service)?;
 		self.pull_image_with_policy(service, pull_policy, true)
 			.await
 	}
@@ -215,24 +223,18 @@ impl Engine {
 	/// Resolve the effective libpod pull policy for `service`: the
 	/// engine-wide `--pull` override ([`Engine::with_up_overrides`]) takes
 	/// precedence over the service's own `pull_policy:`, and an unrecognized
-	/// value warns and falls back to `missing`. Shared by [`Self::pull_image`]
-	/// and by the standalone-pull fan-out's dedup key
+	/// value is rejected via [`pull_policy_checked`]. Shared by
+	/// [`Self::pull_image`] and by the standalone-pull fan-out's dedup key
 	/// ([`Self::pull_services_with_options`]), so both agree on exactly the
 	/// same resolved value — an override collapses the dedup (every service
 	/// resolves to the same policy), while differing per-service policies
 	/// (no override set) keep it split.
-	fn resolved_pull_policy(&self, service: &Service) -> Result<&'static str> {
+	fn resolved_pull_policy(&self, service_name: &str, service: &Service) -> Result<&'static str> {
 		let requested = self
 			.pull_policy_override
 			.as_deref()
 			.or(service.pull_policy.as_deref());
-		libpod_pull_policy(requested).ok_or_else(|| {
-			crate::error::ComposeError::Unsupported(format!(
-				"unknown pull policy {:?}: accepted values are always, missing, newer, never \
-				 (case-insensitive); if_not_present and build are accepted as aliases for missing",
-				requested.unwrap_or_default()
-			))
-		})
+		pull_policy_checked(requested, service_name)
 	}
 
 	/// Issue the actual pull request for `service` against an
@@ -367,6 +369,35 @@ pub(in crate::engine) fn libpod_pull_policy(policy: Option<&str>) -> Option<&'st
 	}
 }
 
+/// Map a compose `pull_policy:` value to the libpod images/pull `policy`
+/// parameter, rejecting an unrecognized value with a structured
+/// [`PodmanError::Field`] that names both the compose service and the
+/// offending value (#1443).
+///
+/// `service_name` is the compose service the policy was read from (e.g.
+/// `"web"`); pass the empty string when the value came from the engine-wide
+/// `--pull` override (no service context). The rejected value lands in the
+/// error so a typo'd `pull_policy: alaways` on a specific service is reported
+/// as `service.<name>: pull_policy: unknown pull policy "alaways" (value:
+/// alaways)` — the actionable bit is which service and which value, not the
+/// abstract policy name.
+pub(in crate::engine) fn pull_policy_checked(
+	policy: Option<&str>,
+	service_name: &str,
+) -> crate::error::Result<&'static str> {
+	if let Some(p) = libpod_pull_policy(policy) {
+		return Ok(p);
+	}
+	let value = policy.unwrap_or_default();
+	let message = format!(
+		"unknown pull policy {value:?}: accepted values are always, missing, newer, never \
+		 (case-insensitive); if_not_present and build are accepted as aliases for missing"
+	);
+	Err(crate::error::ComposeError::Podman(
+		crate::libpod::validate::spec_field_error(service_name, "pull_policy", value, message),
+	))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::{libpod_pull_policy, pull_dep_closure};
@@ -440,10 +471,21 @@ mod tests {
 			pull_policy: Some("alaways".to_string()),
 			..crate::compose::types::Service::default()
 		};
-		let err = e.resolved_pull_policy(&svc).unwrap_err();
+		let err = e.resolved_pull_policy("web", &svc).unwrap_err();
 		let msg = err.to_string();
 		assert!(msg.contains("alaways"), "got {msg}");
 		assert!(msg.contains("always"), "got {msg}");
+		assert!(
+			matches!(
+				err,
+				crate::error::ComposeError::Podman(crate::libpod::PodmanError::Field {
+					ref service,
+					ref field,
+					..
+				}) if service == "web" && field == "pull_policy"
+			),
+			"unknown pull policy must surface as a Field error carrying the service and field name, got {err:?}"
+		);
 	}
 
 	#[cfg(unix)]
