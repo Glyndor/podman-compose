@@ -127,50 +127,17 @@ async fn logs_targets_every_live_replica_after_scale() {
 /// Resolving replicas for one selected service must not abort `logs` before
 /// a single line prints for the others: `logs` already documents that it
 /// tolerates a missing/not-yet-created container this way (see the
-/// per-container `get_stream` handling in `logs_with_display`), and a
-/// transient libpod error resolving one service's live replicas deserves the
-/// same tolerance, not a whole-command failure. Service "a" 500s on its
-/// container-list lookup; service "b" resolves normally. Pre-fix, the
-/// resolution loop's `.await?` propagates "a"'s error and `logs` never
-/// reaches "b" at all.
-#[tokio::test]
-#[cfg(unix)]
-async fn logs_skips_a_service_whose_replica_resolution_errors_but_still_targets_the_rest() {
-	let fake = fake_podman::start(move |method, target| {
-		if method == "GET" && target.contains("/containers/json") {
-			if target.contains("podup.service%3Da") {
-				(500, r#"{"message":"internal server error"}"#.to_string())
-			} else if target.contains("podup.service%3Db") {
-				(200, r#"[{"Names":["/proj-b-1"]}]"#.to_string())
-			} else {
-				(404, r#"{"message":"not found"}"#.to_string())
-			}
-		} else if method == "GET" && target.contains("/logs") {
-			(200, String::new())
-		} else {
-			(404, r#"{"message":"not found"}"#.to_string())
-		}
-	});
-	let e = engine_with(fake.client(), "proj");
-
-	let mut file = ComposeFile::default();
-	file.services.insert("a".into(), Service::default());
-	file.services.insert("b".into(), Service::default());
-
-	e.logs_with_options(
-		&file,
-		&["a".to_string(), "b".to_string()],
-		LogsOptions::default(),
-	)
-	.await
-	.expect("a resolution failure on one service must not blank logs for the rest");
-
-	let seen = fake.requests.lock().unwrap();
-	assert!(
-		seen.iter().any(|r| r.contains("/proj-b-1/logs")),
-		"expected the healthy service's container to still be targeted: {seen:?}"
-	);
-}
+/// per-container `get_stream` handling in `logs_with_display`).
+///
+/// #1445 collapsed the per-service `live_replica_names` resolution into a
+/// single bulk fetch (`live_project_replicas_sorted`), so the per-service
+/// error path this test used to drive no longer exists — there is one
+/// container-list call for the whole project, not one per service, so a
+/// per-service 500 is no longer reachable in this code. The companion
+/// `logs_fails_when_no_service_resolves_at_all` covers the only failure
+/// mode that survives the bulk refactor: the bulk GET errors out, no
+/// target survives, and `logs` exits non-zero instead of printing nothing
+/// and reporting success.
 
 #[test]
 fn filter_orphans_keeps_only_unknown_names() {

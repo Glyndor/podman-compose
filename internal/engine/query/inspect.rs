@@ -166,9 +166,14 @@ impl Engine {
 		// Resolve against the containers Podman actually has, not the static
 		// compose replica count: a service scaled purely via CLI `--scale` has no
 		// `scale:` in the file, so the static count is 1 and would target the
-		// never-created un-indexed base name. `live_replica_names` falls back to
-		// the static names only when nothing is running yet.
-		let live = self.live_replica_names(service_name, service).await?;
+		// never-created un-indexed base name. Falls back to the static names
+		// when nothing is running yet — the bulk map (`#1445`) only sees what
+		// Podman has, not the compose file.
+		let live_by_service = self.live_project_replicas_sorted().await?;
+		let live = match live_by_service.get(service_name) {
+			Some(names) if !names.is_empty() => names.clone(),
+			_ => self.replica_names(service_name, service),
+		};
 		let container_name = select_replica(live, service_name, index)?;
 
 		let path = format!(
