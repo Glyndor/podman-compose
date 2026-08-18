@@ -381,12 +381,30 @@ pub(crate) fn container_unit(
 	// `LogDriver=` / `LogOpt=` set on the generated unit (#1354). The render
 	// path is the same as the live engine's, so `up` and `generate quadlet`
 	// produce equivalent rotation policy.
-	if let Some(logging) = build_log_config(service.logging.as_ref()) {
-		if let Some(driver) = &logging.driver {
-			container.add("LogDriver", driver.clone());
+	match build_log_config(name, service.logging.as_ref()) {
+		Ok(Some(logging)) => {
+			if let Some(driver) = &logging.driver {
+				container.add("LogDriver", driver.clone());
+			}
+			for (key, val) in sorted_label_pairs(logging.options) {
+				container.add("LogOpt", format!("{key}={val}"));
+			}
 		}
-		for (key, val) in sorted_label_pairs(logging.options) {
-			container.add("LogOpt", format!("{key}={val}"));
+		Ok(None) => {}
+		Err(e) => {
+			// A malformed `max-size` does not abort generation; render the
+			// default rotation and surface the parse error as a warning so the
+			// user sees it before `up` rejects the same value outright.
+			warnings.push(format!("{name}: {e}"));
+			let logging = build_log_config(name, None)
+				.expect("default log config is infallible")
+				.expect("default returns Some");
+			if let Some(driver) = &logging.driver {
+				container.add("LogDriver", driver.clone());
+			}
+			for (key, val) in sorted_label_pairs(logging.options) {
+				container.add("LogOpt", format!("{key}={val}"));
+			}
 		}
 	}
 	if let Some(pull) = &service.pull_policy {

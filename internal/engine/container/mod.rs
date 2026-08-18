@@ -125,7 +125,7 @@ impl Engine {
 		let (restart_policy, restart_tries) = build_restart_policy(service);
 
 		// --- Logging ---
-		let log_configuration = build_log_config(service.logging.as_ref());
+		let log_configuration = build_log_config(service_name, service.logging.as_ref())?;
 
 		// --- Networks ---
 		let (netns, networks) = resolve_network_mode(service_name, service, file, &self.project);
