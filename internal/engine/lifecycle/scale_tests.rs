@@ -521,3 +521,55 @@ fn unnamed_service_scales_freely() {
 	let svc = service("services:\n  app:\n    image: x\n");
 	assert!(check_fixed_name_scale("app", &svc, 5).is_ok());
 }
+
+/// #1445 is a round-trip count, so pin the count rather than only the values it
+/// produces. Before it, every selected service cost its own `/containers/json`
+/// GET; a project of N services made N of them. Nothing in the value assertions
+/// above notices if that regresses — the names come back identical either way —
+/// so a later refactor could quietly put the call back inside the loop.
+///
+/// Four services, and the fake records every request it answers. The assertion
+/// is that exactly one container-list GET reaches the socket.
+#[tokio::test]
+#[cfg(unix)]
+async fn logs_issues_one_container_list_for_the_whole_project() {
+	let containers = r#"[
+		{"Names":["/proj-web-1"],"State":"running","Labels":{"podup.service":"web"}},
+		{"Names":["/proj-api-1"],"State":"running","Labels":{"podup.service":"api"}},
+		{"Names":["/proj-db-1"],"State":"running","Labels":{"podup.service":"db"}},
+		{"Names":["/proj-cache-1"],"State":"running","Labels":{"podup.service":"cache"}}
+	]"#;
+	let fake = fake_podman::start(move |method, target| {
+		if method == "GET" && target.contains("/containers/json") {
+			(200, containers.to_string())
+		} else {
+			// Every per-container logs stream 404s: this test is about how many
+			// listing calls are made, not about what the streams carry.
+			(404, r#"{"message":"not found"}"#.to_string())
+		}
+	});
+	let e = engine_with(fake.client(), "proj");
+	let file = crate::parse_str(
+		"services:\n  web:\n    image: x\n  api:\n    image: x\n  db:\n    image: x\n  cache:\n    image: x\n",
+	)
+	.unwrap();
+
+	// The per-container streams all 404, so the call itself is expected to
+	// fail; the request log is what carries the answer.
+	let _ = e.logs(&file, None, false).await;
+
+	let lists = fake
+		.requests
+		.lock()
+		.unwrap()
+		.iter()
+		.filter(|r| r.contains("/containers/json"))
+		.count();
+	assert_eq!(
+		lists,
+		1,
+		"four services must share one container-list round-trip, not one each (#1445); \
+		 requests were {:?}",
+		fake.requests.lock().unwrap()
+	);
+}
