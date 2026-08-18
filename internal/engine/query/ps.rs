@@ -496,10 +496,7 @@ impl Engine {
 
 		if opts.json {
 			let rows: Vec<_> = containers.iter().map(ps_json_row).collect();
-			println!(
-				"{}",
-				serde_json::to_string_pretty(&rows).unwrap_or_default()
-			);
+			println!("{}", super::super::to_pretty_json("ps.row", &rows)?);
 			return Ok(());
 		}
 

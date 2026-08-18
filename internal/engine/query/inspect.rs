@@ -111,10 +111,7 @@ impl Engine {
 			}
 		}
 		if json {
-			println!(
-				"{}",
-				serde_json::to_string_pretty(&json_rows).unwrap_or_default()
-			);
+			println!("{}", super::super::to_pretty_json("top.row", &json_rows)?);
 		}
 		Ok(())
 	}

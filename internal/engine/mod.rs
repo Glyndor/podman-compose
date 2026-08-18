@@ -567,6 +567,28 @@ pub(super) fn to_query_json<T: serde::Serialize>(what: &str, v: &T) -> Result<St
 	serde_json::to_string(v).map_err(|e| ComposeError::Build(format!("invalid {what}: {e}")))
 }
 
+/// Serialise `v` to a pretty-printed JSON string for emitting as the final
+/// `--format json` output of a list command.
+///
+/// Five sites flow through this: `ls` ([`projects::list_projects_filtered`]),
+/// `images` ([`Engine::images_with_services`]), `top`
+/// ([`Engine::top_with_options`]), `ps` ([`Engine::ps_filtered_with_display`]),
+/// and `volumes` ([`Engine::list_volumes_with_display`]). Each used to call
+/// `serde_json::to_string_pretty(...).unwrap_or_default()`, which silently
+/// emitted an empty string on a serialisation failure; the command then
+/// printed the empty string and exited 0, so a script consuming
+/// `podup <cmd> --format json` received an empty document indistinguishable
+/// from "no results" (#1444). Unlike the NDJSON path in
+/// [`to_query_json`](self)/[`events`](super::events) — where one row can be
+/// dropped and the stream continue — `--format json` is the *whole* output,
+/// so a failure must propagate as an error and exit non-zero.
+///
+/// `what` names the offending field in the error so the operator sees which
+/// row or document type was rejected.
+pub(super) fn to_pretty_json<T: serde::Serialize>(what: &str, v: &T) -> Result<String> {
+	serde_json::to_string_pretty(v).map_err(|e| ComposeError::Build(format!("invalid {what}: {e}")))
+}
+
 /// Write one log frame without creating a lossy `Cow` for valid UTF-8.
 ///
 /// `String::from_utf8_lossy` allocates a `Cow<String>` even on the happy path;
@@ -709,6 +731,10 @@ mod to_query_json_tests {
 		assert!(err.to_string().contains("build.cache_to"), "got {err}");
 	}
 }
+
+#[cfg(test)]
+#[path = "to_pretty_json_tests.rs"]
+mod to_pretty_json_tests;
 
 #[cfg(test)]
 mod tests;
