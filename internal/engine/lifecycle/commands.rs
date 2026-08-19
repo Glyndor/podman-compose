@@ -71,11 +71,13 @@ impl Engine {
 	/// so they all behave the same.
 	///
 	/// Returns whether the container was actually acted on. This is the only
-	/// place that knows: `live_replica_names` falls back to the *static* compose
-	/// names when nothing is running, so a command on a project that was never
-	/// created still walks a full list of container names and 404s on every one
-	/// of them. Six commands exited 0 in complete silence that way (#1248), and
-	/// telling that apart from real work requires the answer here, not a count of
+	/// place that knows: the per-replica query helpers (e.g. the bulk
+	/// [`Engine::live_project_replicas_sorted`] lookup used by `exec`/`cp`/
+	/// `port`/`logs`) fall back to the *static* compose names when nothing is
+	/// running, so a command on a project that was never created still walks
+	/// a full list of container names and 404s on every one of them. Six
+	/// commands exited 0 in complete silence that way (#1248), and telling
+	/// that apart from real work requires the answer here, not a count of
 	/// names upstream.
 	pub(super) async fn run_lifecycle_op(
 		&self,
