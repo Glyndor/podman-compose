@@ -1,3 +1,13 @@
+podup (3.7.1) unstable; urgency=medium
+
+  3.7.0 was tagged but never released: its release workflow failed while
+  signing the binaries, so no GitHub release, no .deb and no crates.io
+  version were ever published. Rather than move a tag that already exists,
+  the release ships as 3.7.1. Everything the 3.7.0 stanza below describes
+  is in this release.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Tue, 19 Aug 2026 05:15:00 -0500
+
 podup (3.7.0) unstable; urgency=medium
 
   Added
