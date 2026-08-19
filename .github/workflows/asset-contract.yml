@@ -44,6 +44,29 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0
         with:
           python-version: "3.13"
+      - name: Signing requirements must parse as separate pinned entries
+        # A trailing backslash is a line continuation: if the last hash of a
+        # block keeps one, pip folds the next package name into the previous
+        # entry and sees a single requirement. The other packages then arrive
+        # as unpinned transitive dependencies and `--require-hashes` refuses
+        # the install, which is exactly how the v3.7.0 release died at `Sign
+        # binary` on all six targets while the file looked correct to a
+        # reader. Six pip versions from 21.3.1 to 26.2.1 were measured to
+        # behave identically, so this is the file's shape, not pip's.
+        #
+        # `release.yml` is the only place that runs the real
+        # `--require-hashes` install, and it runs after the tag exists and is
+        # immutable. This check is what makes the failure reachable before
+        # then.
+        run: |
+          set -euo pipefail
+          if awk 'prev ~ /\\$/ && /^[A-Za-z]/ { print FILENAME ":" NR ": " $0; found=1 } { prev=$0 } END { exit !found }' \
+            .github/scripts/sign-requirements.txt; then
+            echo "::error::a package name is being swallowed as a line continuation; drop the trailing backslash from the hash line above each one"
+            exit 1
+          fi
+          echo "Every package entry starts its own requirement."
+
       - name: Install pinned cryptography
         # The fixture only imports `cryptography` to exercise the verifier -
         # the release-side version pin lives in sign-requirements.txt. We
