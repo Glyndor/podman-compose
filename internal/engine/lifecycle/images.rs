@@ -36,12 +36,16 @@ impl Engine {
 	) -> Result<()> {
 		// `up --pull <policy>` overrides the per-service `pull_policy`; `--no-build`
 		// suppresses building even for services with a `build:` section (they fall
-		// back to pulling/using an existing image).
-		let policy = self
+		// back to pulling/using an existing image). Validated through
+		// [`crate::engine::build::pull_policy_checked`] so a typo'd
+		// `pull_policy:` cannot be silently treated as `missing` here — the
+		// skip-only-when-missing arm below would otherwise hide the bad value
+		// from `up` entirely (#1443).
+		let raw_policy = self
 			.pull_policy_override
 			.as_deref()
-			.or(service.pull_policy.as_deref())
-			.unwrap_or("missing");
+			.or(service.pull_policy.as_deref());
+		let policy = crate::engine::build::pull_policy_checked(raw_policy, name)?;
 		// Build on `up` only when the service's image is not already there, which
 		// is what docker compose does: `up` converges on the declared state and
 		// `--build` is the flag that forces a rebuild.
@@ -76,8 +80,8 @@ impl Engine {
 			// host needs no request at all. Skipping only what was observed in
 			// this invocation keeps the decision as fresh as the one the pull
 			// itself would have made.
-			(false, _) if self.image_already_seen_present(service) => {}
-			(false, _) => self.pull_image(service).await?,
+			(false, _) if self.image_already_seen_present(name, service)? => {}
+			(false, _) => self.pull_image(name, service).await?,
 		}
 		Ok(())
 	}
@@ -94,24 +98,28 @@ impl Engine {
 	/// False for a service pinning `platform:`. The observation matched an image
 	/// reference, which carries no architecture, so honouring it there could
 	/// start the wrong variant.
-	fn image_already_seen_present(&self, service: &Service) -> bool {
+	///
+	/// Returns `Err` for an unrecognized `pull_policy:` so the bad value is
+	/// reported rather than silently treated as `missing` (#1443).
+	fn image_already_seen_present(&self, service_name: &str, service: &Service) -> Result<bool> {
 		if service.platform.is_some() {
-			return false;
+			return Ok(false);
 		}
 		let raw_policy = self
 			.pull_policy_override
 			.as_deref()
 			.or(service.pull_policy.as_deref());
-		if crate::engine::build::libpod_pull_policy(raw_policy).unwrap_or("missing") != "missing" {
-			return false;
+		if crate::engine::build::pull_policy_checked(raw_policy, service_name)? != "missing" {
+			return Ok(false);
 		}
 		let Some(image) = service.image.as_deref() else {
-			return false;
+			return Ok(false);
 		};
-		self.images_seen_present
+		Ok(self
+			.images_seen_present
 			.lock()
 			.map(|seen| seen.contains(image))
-			.unwrap_or(false)
+			.unwrap_or(false))
 	}
 }
 
@@ -237,6 +245,47 @@ mod tests {
 		assert!(
 			seen.iter().any(|r| r.contains("/images/pull")),
 			"a platform-pinned service must still pull: a reference match says nothing about the architecture that is local: {seen:?}"
+		);
+	}
+
+	/// A typo'd `pull_policy:` on a warm service must error at the
+	/// `image_already_seen_present` decision (the `#1443` site) rather than
+	/// be silently treated as `missing` and skip the only pull that would have
+	/// surfaced the bad value. The host stands in for one that already has the
+	/// image (so the skip branch *would* fire), and the assertion is that the
+	/// error fires instead — without the fix the call returned `true` and the
+	/// pull was skipped, leaving `up` to exit 0 with the wrong image.
+	#[tokio::test]
+	async fn image_already_seen_present_rejects_an_unknown_pull_policy() {
+		let e = engine_with(crate::libpod::Client::new("/nonexistent.sock"), "proj");
+		// Pre-populate the prefetch's seen-present set as if a previous
+		// `prefetch_images` had confirmed the image on this host. Without the
+		// fix `image_already_seen_present` would then return `true` for any
+		// service whose effective policy it read as `missing` — including a
+		// typo'd `pull_policy:` — and the only pull that could have surfaced
+		// the bad value would be skipped.
+		e.images_seen_present
+			.lock()
+			.unwrap()
+			.insert("shared".to_string());
+
+		let file =
+			crate::parse_str("services:\n  web:\n    image: shared\n    pull_policy: alaways\n")
+				.unwrap();
+		let err = e
+			.image_already_seen_present("web", &file.services["web"])
+			.expect_err("an unknown pull_policy must error at the skip decision");
+		assert!(
+			matches!(
+				err,
+				crate::error::ComposeError::Podman(crate::libpod::PodmanError::Field {
+					ref service,
+					ref field,
+					ref value,
+					..
+				}) if service == "web" && field == "pull_policy" && value == "alaways"
+			),
+			"unknown pull_policy must surface as a Field error naming the offending service and value, got {err:?}"
 		);
 	}
 }

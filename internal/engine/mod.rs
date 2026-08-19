@@ -524,13 +524,25 @@ impl Engine {
 	/// created by an earlier `up --scale`/`scale` rather than the current
 	/// invocation, matching `docker compose cp/exec --index`. Shared by the
 	/// replica-targeting commands (`exec`, `cp`).
+	///
+	/// Reads off the bulk project listing ([`Engine::live_project_replicas_sorted`])
+	/// instead of issuing a per-service container-list round-trip (#1445):
+	/// one shared GET powers the rest of the per-replica query paths
+	/// (`port`, `logs`) when a command needs more than one of them.
 	pub(super) async fn live_replica_name_at(
 		&self,
 		service_name: &str,
 		service: &Service,
 		index: Option<u32>,
 	) -> Result<String> {
-		let names = self.live_replica_names(service_name, service).await?;
+		let live_by_service = self.live_project_replicas_sorted().await?;
+		let names = match live_by_service.get(service_name) {
+			Some(names) if !names.is_empty() => names.clone(),
+			// Service has no live container yet — fall back to the static
+			// compose names so a never-created service still has an
+			// addressable replica.
+			_ => self.replica_names(service_name, service),
+		};
 		let base = self.container_name(service_name, service);
 		resolve_replica_name(service_name, &base, &names, index)
 	}
@@ -565,6 +577,28 @@ impl Engine {
 /// value was rejected.
 pub(super) fn to_query_json<T: serde::Serialize>(what: &str, v: &T) -> Result<String> {
 	serde_json::to_string(v).map_err(|e| ComposeError::Build(format!("invalid {what}: {e}")))
+}
+
+/// Serialise `v` to a pretty-printed JSON string for emitting as the final
+/// `--format json` output of a list command.
+///
+/// Five sites flow through this: `ls` ([`projects::list_projects_filtered`]),
+/// `images` ([`Engine::images_with_services`]), `top`
+/// ([`Engine::top_with_options`]), `ps` ([`Engine::ps_filtered_with_display`]),
+/// and `volumes` ([`Engine::list_volumes_with_display`]). Each used to call
+/// `serde_json::to_string_pretty(...).unwrap_or_default()`, which silently
+/// emitted an empty string on a serialisation failure; the command then
+/// printed the empty string and exited 0, so a script consuming
+/// `podup <cmd> --format json` received an empty document indistinguishable
+/// from "no results" (#1444). Unlike the NDJSON path in
+/// [`to_query_json`](self)/[`events`](super::events) — where one row can be
+/// dropped and the stream continue — `--format json` is the *whole* output,
+/// so a failure must propagate as an error and exit non-zero.
+///
+/// `what` names the offending field in the error so the operator sees which
+/// row or document type was rejected.
+pub(super) fn to_pretty_json<T: serde::Serialize>(what: &str, v: &T) -> Result<String> {
+	serde_json::to_string_pretty(v).map_err(|e| ComposeError::Build(format!("invalid {what}: {e}")))
 }
 
 /// Write one log frame without creating a lossy `Cow` for valid UTF-8.
@@ -709,6 +743,10 @@ mod to_query_json_tests {
 		assert!(err.to_string().contains("build.cache_to"), "got {err}");
 	}
 }
+
+#[cfg(test)]
+#[path = "to_pretty_json_tests.rs"]
+mod to_pretty_json_tests;
 
 #[cfg(test)]
 mod tests;
