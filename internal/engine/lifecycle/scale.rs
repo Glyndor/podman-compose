@@ -317,10 +317,36 @@ impl Engine {
 		Ok(by_service)
 	}
 
+	/// The bulk project listing ([`Self::live_project_replicas`]) with each
+	/// per-service bucket sorted into the same ascending `-1, -2, -3, ...`
+	/// order the static [`Engine::replica_names`] path produces. Lets the
+	/// per-replica query paths (`exec`/`cp` via `live_replica_name_at`,
+	/// `port` via `port_with_index`, `logs`) read each service's names off a
+	/// single shared map instead of issuing one container-list round-trip per
+	/// service (#1445): a `podup logs` over a 40-service project now costs 1
+	/// GET, not 40, with the same ordering the per-service helper it replaced
+	/// was pinned to.
+	///
+	/// Same `all=true` contract as [`Self::live_project_replicas`]: stopped
+	/// replicas are kept on purpose so a service scaled beyond its static
+	/// compose count (or never reaped by a prior `down`) is not silently
+	/// dropped from the bucket. The static-name fallback for a service absent
+	/// from the map is the *caller's* responsibility — this helper returns an
+	/// empty vec for one, since it does not see the compose file.
+	pub(crate) async fn live_project_replicas_sorted(
+		&self,
+	) -> Result<std::collections::HashMap<String, Vec<String>>> {
+		let mut by_service = self.live_project_replicas().await?;
+		for names in by_service.values_mut() {
+			sort_replica_names(names);
+		}
+		Ok(by_service)
+	}
+
 	/// The live containers of a service (matched by the `podup.service` label),
 	/// each paired with its machine-readable state (`running`, `created`,
-	/// `exited`, `paused`, …). Unlike [`Self::live_replica_names`] this does NOT
-	/// fall back to statically-predicted names: a service with no live container
+	/// `exited`, `paused`, …). This does NOT fall back to statically-predicted
+	/// names: a service with no live container
 	/// yields an empty vec, so a lifecycle op (stop/wait/…) on a defined-but-
 	/// never-created service is a quiet no-op instead of POSTing to a phantom
 	/// name and surfacing a raw 404 (#758). The state lets `stop` report
@@ -356,40 +382,16 @@ impl Engine {
 			.collect())
 	}
 
-	/// The container names to act on for a service: the ones Podman actually has
-	/// (matched by the `podup.service` label), so lifecycle and query commands
-	/// keep working after a runtime `scale`/`up --scale` that the compose file's
-	/// static replica count no longer names. Falls back to the statically-derived
-	/// names when none exist yet (e.g. a service not yet created). Live names are
-	/// always returned in ascending `-1, -2, -3, ...` order (see
-	/// [`sort_replica_names`]), matching the static path regardless of the order
-	/// libpod's container list happens to report.
-	pub(crate) async fn live_replica_names(
-		&self,
-		service_name: &str,
-		service: &Service,
-	) -> Result<Vec<String>> {
-		let mut live = self
-			.list_project_container_names(Some(service_name))
-			.await?;
-		Ok(if live.is_empty() {
-			self.replica_names(service_name, service)
-		} else {
-			sort_replica_names(&mut live);
-			live
-		})
-	}
-
 	/// The names of a service's containers that are actually **running**, in the
-	/// same ascending `-1, -2, -3, ...` order as [`Self::live_replica_names`].
+	/// same ascending `-1, -2, -3, ...` order as [`Self::live_project_replicas_sorted`].
 	///
 	/// For the query commands that only mean anything against a live process
 	/// (`top`), where a stopped replica has to be skipped rather than asked: the
 	/// libpod endpoints answer a non-running container with an HTTP 500, which
 	/// callers must not have to tell apart from a real failure by parsing its
-	/// message. Unlike [`Self::live_replica_names`] there is no fallback to
-	/// statically-derived names — a service that was never created has nothing
-	/// running, so it yields an empty vec instead of a phantom name.
+	/// message. There is no fallback to statically-derived names — a service
+	/// that was never created has nothing running, so it yields an empty vec
+	/// instead of a phantom name.
 	pub(crate) async fn running_replica_names(&self, service_name: &str) -> Result<Vec<String>> {
 		let mut running: Vec<String> = self
 			.live_service_containers(service_name)

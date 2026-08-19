@@ -381,12 +381,18 @@ pub(crate) fn container_unit(
 	// `LogDriver=` / `LogOpt=` set on the generated unit (#1354). The render
 	// path is the same as the live engine's, so `up` and `generate quadlet`
 	// produce equivalent rotation policy.
-	if let Some(logging) = build_log_config(service.logging.as_ref()) {
-		if let Some(driver) = &logging.driver {
-			container.add("LogDriver", driver.clone());
-		}
-		for (key, val) in sorted_label_pairs(logging.options) {
-			container.add("LogOpt", format!("{key}={val}"));
+	match build_log_config(name, service.logging.as_ref()) {
+		Ok(Some(logging)) => emit_log_config(&mut container, logging),
+		Ok(None) => {}
+		Err(e) => {
+			// A malformed `max-size` does not abort generation; render the
+			// default rotation and surface the parse error as a warning so the
+			// user sees it before `up` rejects the same value outright.
+			warnings.push(format!("{name}: {e}"));
+			let logging = build_log_config(name, None)
+				.expect("default log config is infallible")
+				.expect("default returns Some");
+			emit_log_config(&mut container, logging);
 		}
 	}
 	if let Some(pull) = &service.pull_policy {
@@ -471,5 +477,30 @@ pub(crate) fn container_unit(
 	QuadletUnit {
 		filename: format!("{}.container", unit_stem(project, name)),
 		contents,
+	}
+}
+
+/// Render a resolved [`LogConfig`] onto a Quadlet `[Container]` section.
+///
+/// Quadlet units run through the podman CLI, which reads rotation from
+/// `--log-opt max-size=` — not from the typed `size` field the libpod API
+/// takes. #1417 moved `max-size` out of `options` into that typed field for
+/// the live path, and rendering `options` alone here dropped rotation from
+/// every generated unit: measured before this helper, a default project
+/// emitted `LogDriver=k8s-file` and no `LogOpt` at all, where it used to
+/// carry `LogOpt=max-size=10m`.
+///
+/// The byte count is emitted verbatim; `podman run --log-opt
+/// max-size=10485760` was measured to produce the same `10.49MB` cap as
+/// `max-size=10m` on Podman 5.7.0, so no suffix has to be reconstructed.
+fn emit_log_config(container: &mut Section, logging: crate::libpod::types::container::LogConfig) {
+	if let Some(driver) = &logging.driver {
+		container.add("LogDriver", driver.clone());
+	}
+	if let Some(size) = logging.size {
+		container.add("LogOpt", format!("max-size={size}"));
+	}
+	for (key, val) in sorted_label_pairs(logging.options) {
+		container.add("LogOpt", format!("{key}={val}"));
 	}
 }
