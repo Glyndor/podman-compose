@@ -8,6 +8,7 @@
 pub mod client;
 pub mod error;
 pub mod types;
+pub(crate) mod validate;
 
 /// Path prefix for every libpod REST route.
 ///

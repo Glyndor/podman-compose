@@ -1,8 +1,10 @@
 //! Tests for the scale module: surplus-replica reconciliation, the
-//! `live_replica_names`/`running_replica_names` helpers, the replica-limit /
-//! port-conflict / fixed-name guard helpers, and the bulk
-//! `live_project_replicas` listing that powers the per-service lifecycle
-//! commands (#1363).
+//! `running_replica_names` helper, the replica-limit / port-conflict /
+//! fixed-name guard helpers, the bulk `live_project_replicas` listing that
+//! powers the per-service lifecycle commands (#1363), and the sorted
+//! `live_project_replicas_sorted` variant the per-replica query paths
+//! (`exec`/`cp`/`port`/`logs`) share so a single container-list round-trip
+//! powers them all (#1445).
 //!
 //! Same fixture pattern as the rest of the lifecycle suite: a unix-socket
 //! fake libpod so the request shape (`all=true`, no `status=` filter) and
@@ -90,14 +92,17 @@ async fn remove_surplus_replicas_tolerates_already_gone() {
 /// other by-service lifecycle/query command must still see a scaled
 /// service's replicas in the same ascending `-1, -2, -3` order the static
 /// `replica_names_for` path always produces, even when the fake (like a
-/// real libpod) hands them back shuffled.
+/// real libpod) hands them back shuffled. The bulk sorted helper
+/// ([`Engine::live_project_replicas_sorted`]) is what now powers the
+/// per-replica query paths (#1445); its per-bucket sort replaces the
+/// per-service sort the old `live_replica_names` helper did.
 #[tokio::test]
 #[cfg(unix)]
-async fn live_replica_names_sorts_shuffled_replicas_ascending() {
+async fn live_project_replicas_sorted_sorts_shuffled_replicas_ascending() {
 	let containers = r#"[
-		{"Names":["/proj-web-3"]},
-		{"Names":["/proj-web-1"]},
-		{"Names":["/proj-web-2"]}
+		{"Names":["/proj-web-3"],"Labels":{"podup.service":"web"}},
+		{"Names":["/proj-web-1"],"Labels":{"podup.service":"web"}},
+		{"Names":["/proj-web-2"],"Labels":{"podup.service":"web"}}
 	]"#;
 	let fake = fake_podman::start(move |method, target| {
 		if method == "GET" && target.contains("/containers/json") {
@@ -108,18 +113,167 @@ async fn live_replica_names_sorts_shuffled_replicas_ascending() {
 	});
 	let e = engine_with(fake.client(), "proj");
 
-	let names = e
-		.live_replica_names("web", &crate::compose::types::Service::default())
+	let by_service = e
+		.live_project_replicas_sorted()
 		.await
-		.expect("live_replica_names should succeed");
+		.expect("live_project_replicas_sorted should succeed");
 
 	assert_eq!(
-		names,
-		vec![
+		by_service.get("web"),
+		Some(&vec![
 			"proj-web-1".to_string(),
 			"proj-web-2".to_string(),
 			"proj-web-3".to_string(),
-		]
+		]),
+		"the bucket must come back in ascending -1, -2, -3 order regardless of \
+		 libpod's hand-back order"
+	);
+}
+
+/// #1445: the bulk GET that the per-replica query paths now share must
+/// cover a scaled service's full replica set, including replicas that are
+/// stopped — `logs`/`port`/`exec` need to see the second replica even when
+/// it is in `exited`, so the bulk request must NOT silently drop them the
+/// way libpod's `runningOnly` default would.
+#[tokio::test]
+#[cfg(unix)]
+async fn live_project_replicas_sorted_includes_stopped_replicas() {
+	let containers = r#"[
+		{"Names":["/proj-web-1"],"State":"running","Labels":{"podup.service":"web"}},
+		{"Names":["/proj-web-2"],"State":"running","Labels":{"podup.service":"web"}},
+		{"Names":["/proj-web-3"],"State":"exited","Labels":{"podup.service":"web"}}
+	]"#;
+	let fake = fake_podman::start(move |method, target| {
+		if method == "GET" && target.contains("/containers/json") {
+			(200, containers.to_string())
+		} else {
+			(404, r#"{"message":"not found"}"#.to_string())
+		}
+	});
+	let e = engine_with(fake.client(), "proj");
+
+	let by_service = e
+		.live_project_replicas_sorted()
+		.await
+		.expect("live_project_replicas_sorted should succeed");
+
+	// All three replicas — running and stopped — must be in the bucket.
+	// A bug that silently filtered to running (libpod's `runningOnly`
+	// default) would return just `proj-web-1` and `proj-web-2`, missing the
+	// third replica entirely.
+	assert_eq!(
+		by_service.get("web"),
+		Some(&vec![
+			"proj-web-1".to_string(),
+			"proj-web-2".to_string(),
+			"proj-web-3".to_string(),
+		]),
+		"the stopped replica must not be filtered out — got {:?}",
+		by_service.get("web")
+	);
+}
+
+/// #1445: a service that exists in the compose file but has no live
+/// container must NOT appear in the bulk map. The bulk helper does not see
+/// the compose file; the per-replica query paths (`exec`/`cp`/`port`/
+/// `logs`) layer the static-name fallback on top. Without that contract,
+/// `logs` could not `docker compose logs`-style behave on a never-created
+/// service — `port`/`exec`/`cp` would 404 immediately instead of letting
+/// the caller see the predictable static name.
+#[tokio::test]
+#[cfg(unix)]
+async fn live_project_replicas_sorted_omits_services_with_no_live_container() {
+	let fake = fake_podman::start(|method, target| {
+		if method == "GET" && target.contains("/containers/json") {
+			// Only `web` has any containers; `db` and `worker` are not yet
+			// created.
+			(
+				200,
+				r#"[{"Names":["/proj-web-1"],"Labels":{"podup.service":"web"}}]"#.to_string(),
+			)
+		} else {
+			(404, r#"{"message":"not found"}"#.to_string())
+		}
+	});
+	let e = engine_with(fake.client(), "proj");
+
+	let by_service = e
+		.live_project_replicas_sorted()
+		.await
+		.expect("live_project_replicas_sorted should succeed");
+
+	assert_eq!(
+		by_service.get("web"),
+		Some(&vec!["proj-web-1".to_string()]),
+		"a service with a live container must appear in the map"
+	);
+	assert!(
+		!by_service.contains_key("db"),
+		"a service with no live container must NOT appear (caller falls back): {by_service:?}"
+	);
+	assert!(
+		!by_service.contains_key("worker"),
+		"a service with no live container must NOT appear (caller falls back): {by_service:?}"
+	);
+}
+
+/// #1445: the per-replica query paths used to fan out one container-list
+/// round-trip per service — 40 services meant 40 GETs for a single
+/// `podup logs`. The bulk helper is the shared single GET. With the fake
+/// pinned to answer only `/containers/json`, a single resolution call must
+/// still satisfy the per-service query helpers without issuing a follow-up
+/// GET. A regression that re-introduced per-service calls would make
+/// `fake.requests` grow by one row for each lookup, so the assertion
+/// below is the discriminator: counting requests is the test that fails if
+/// the bulk path is bypassed.
+#[tokio::test]
+#[cfg(unix)]
+async fn logs_resolves_replicas_in_one_bulk_get_not_one_per_service() {
+	// Three services; `db` is scaled to 3, `web` to 2, `worker` to 1, all
+	// running — so the bulk GET is the only fetch needed for `logs` to
+	// find 6 targets across 3 services.
+	let body = r#"[
+		{"Names":["/proj-db-1"],"Labels":{"podup.service":"db"}},
+		{"Names":["/proj-db-2"],"Labels":{"podup.service":"db"}},
+		{"Names":["/proj-db-3"],"Labels":{"podup.service":"db"}},
+		{"Names":["/proj-web-1"],"Labels":{"podup.service":"web"}},
+		{"Names":["/proj-web-2"],"Labels":{"podup.service":"web"}},
+		{"Names":["/proj-worker-1"],"Labels":{"podup.service":"worker"}}
+	]"#;
+	let fake = fake_podman::start(move |method, target| {
+		if method == "GET" && target.contains("/containers/json") {
+			(200, body.to_string())
+		} else if method == "GET" && target.contains("/logs") {
+			(200, String::new())
+		} else {
+			(404, r#"{"message":"not found"}"#.to_string())
+		}
+	});
+	let e = engine_with(fake.client(), "proj");
+
+	let mut file = crate::compose::types::ComposeFile::default();
+	file.services
+		.insert("db".into(), crate::compose::types::Service::default());
+	file.services
+		.insert("web".into(), crate::compose::types::Service::default());
+	file.services
+		.insert("worker".into(), crate::compose::types::Service::default());
+
+	// Drive `logs` once across all 3 services — the resolution path is the
+	// one under test, not the streaming.
+	let _ = e
+		.logs_with_options(&file, &[], crate::engine::query::LogsOptions::default())
+		.await;
+
+	let seen = fake.requests.lock().unwrap();
+	let bulk_gets = seen
+		.iter()
+		.filter(|r| r.starts_with("GET") && r.contains("/containers/json"))
+		.count();
+	assert_eq!(
+		bulk_gets, 1,
+		"logs must issue exactly one bulk GET for the whole project, \
+		 not one per service. seen = {seen:?}"
 	);
 }
 
@@ -366,4 +520,56 @@ fn fixed_container_name_scaled_above_one_is_rejected() {
 fn unnamed_service_scales_freely() {
 	let svc = service("services:\n  app:\n    image: x\n");
 	assert!(check_fixed_name_scale("app", &svc, 5).is_ok());
+}
+
+/// #1445 is a round-trip count, so pin the count rather than only the values it
+/// produces. Before it, every selected service cost its own `/containers/json`
+/// GET; a project of N services made N of them. Nothing in the value assertions
+/// above notices if that regresses — the names come back identical either way —
+/// so a later refactor could quietly put the call back inside the loop.
+///
+/// Four services, and the fake records every request it answers. The assertion
+/// is that exactly one container-list GET reaches the socket.
+#[tokio::test]
+#[cfg(unix)]
+async fn logs_issues_one_container_list_for_the_whole_project() {
+	let containers = r#"[
+		{"Names":["/proj-web-1"],"State":"running","Labels":{"podup.service":"web"}},
+		{"Names":["/proj-api-1"],"State":"running","Labels":{"podup.service":"api"}},
+		{"Names":["/proj-db-1"],"State":"running","Labels":{"podup.service":"db"}},
+		{"Names":["/proj-cache-1"],"State":"running","Labels":{"podup.service":"cache"}}
+	]"#;
+	let fake = fake_podman::start(move |method, target| {
+		if method == "GET" && target.contains("/containers/json") {
+			(200, containers.to_string())
+		} else {
+			// Every per-container logs stream 404s: this test is about how many
+			// listing calls are made, not about what the streams carry.
+			(404, r#"{"message":"not found"}"#.to_string())
+		}
+	});
+	let e = engine_with(fake.client(), "proj");
+	let file = crate::parse_str(
+		"services:\n  web:\n    image: x\n  api:\n    image: x\n  db:\n    image: x\n  cache:\n    image: x\n",
+	)
+	.unwrap();
+
+	// The per-container streams all 404, so the call itself is expected to
+	// fail; the request log is what carries the answer.
+	let _ = e.logs(&file, None, false).await;
+
+	let lists = fake
+		.requests
+		.lock()
+		.unwrap()
+		.iter()
+		.filter(|r| r.contains("/containers/json"))
+		.count();
+	assert_eq!(
+		lists,
+		1,
+		"four services must share one container-list round-trip, not one each (#1445); \
+		 requests were {:?}",
+		fake.requests.lock().unwrap()
+	);
 }

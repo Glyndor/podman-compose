@@ -320,30 +320,68 @@ impl Client {
 		}
 	}
 
-	/// Check status code; on error parse the Podman error message.
-	fn check_status(status: StatusCode, body: &[u8]) -> Result<()> {
-		if status.is_success() {
-			return Ok(());
-		}
-
+	/// Extract the human-readable message from a libpod error body. The body is
+	/// JSON shaped like `{"message": "...", "cause": "..."}`; prefer `message`,
+	/// fall back to `cause`, and to the raw body when the JSON is malformed (a
+	/// proxy or a 502 from a fronting process can return plain text). Pure, so
+	/// `check_status` and `check_status_with_field` share it without duplication.
+	pub(crate) fn parse_error_message(body: &[u8]) -> String {
 		#[derive(serde::Deserialize)]
 		struct ApiError {
 			cause: Option<String>,
 			message: Option<String>,
 		}
 
-		let msg = if let Ok(e) = serde_json::from_slice::<ApiError>(body) {
+		if let Ok(e) = serde_json::from_slice::<ApiError>(body) {
 			e.message
 				.or(e.cause)
 				.unwrap_or_else(|| String::from_utf8_lossy(body).into_owned())
 		} else {
 			String::from_utf8_lossy(body).into_owned()
-		};
+		}
+	}
 
+	/// Check status code; on error parse the Podman error message.
+	fn check_status(status: StatusCode, body: &[u8]) -> Result<()> {
+		if status.is_success() {
+			return Ok(());
+		}
 		Err(PodmanError::Api {
 			status: status.as_u16(),
-			message: msg,
+			message: Self::parse_error_message(body),
 		})
+	}
+
+	/// Check status code and, on a 4xx/5xx, promote the failure to a
+	/// [`PodmanError::Field`] when a single field is in scope.
+	///
+	/// The pre-validators in [`super::validate`] catch the field-level
+	/// rejections libpod makes on its own (namespace modes, `device_cgroup_rule`
+	/// access, build-arg/label keys). For other fields — `cap_add`, `runtime`,
+	/// `devices`, `extra_hosts` — podup does not have a pre-validator (the
+	/// failure surfaces from the OCI runtime or the cgroup manager, not from
+	/// libpod's specgen), and podup does not know which compose-side key libpod
+	/// rejected. When the caller does know, passing `field` turns an opaque
+	/// `podman API error (HTTP 400): <message>` into the field-shaped
+	/// `field: <message> (value: <value>)` form so the operator sees the
+	/// compose-side key, not the libpod body. The libpod message is preserved
+	/// inside the `Field`'s own `message` so the cause is not lost (#1357).
+	fn check_status_with_field(
+		status: StatusCode,
+		body: &[u8],
+		field: Option<(&'static str, &str)>,
+	) -> Result<()> {
+		if status.is_success() {
+			return Ok(());
+		}
+		let msg = Self::parse_error_message(body);
+		match field {
+			Some((name, value)) => Err(super::validate::spec_field_error("", name, value, msg)),
+			None => Err(PodmanError::Api {
+				status: status.as_u16(),
+				message: msg,
+			}),
+		}
 	}
 
 	/// For streaming endpoints, return the response on success or parse the
