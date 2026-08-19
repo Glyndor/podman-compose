@@ -1,6 +1,6 @@
 use hyper::StatusCode;
 
-use super::{meets_minimum, Client};
+use super::{meets_minimum, Client, PodmanError};
 
 // ---------------------------------------------------------------------------
 // check_status tests
@@ -45,6 +45,132 @@ fn check_status_falls_back_to_raw_body_on_non_json() {
 		Client::check_status(StatusCode::INTERNAL_SERVER_ERROR, b"plain text error").unwrap_err();
 	assert!(err.is_status(500));
 	assert!(err.to_string().contains("plain text error"));
+}
+
+// ---------------------------------------------------------------------------
+// parse_error_message tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parse_error_message_prefers_message_field() {
+	// Podman's libpod JSON error body carries `message` (operator-facing)
+	// and `cause` (lower-level chain). `message` is the one to surface
+	// because it is the human-readable reason; `cause` is the wrapped
+	// driver detail.
+	let body = br#"{"message":"namespace \"evil\" not recognised","cause":"ParseNamespace"}"#;
+	let msg = Client::parse_error_message(body);
+	assert!(msg.contains("namespace"), "got: {msg}");
+	assert!(!msg.contains("ParseNamespace"), "got: {msg}");
+}
+
+#[test]
+fn parse_error_message_falls_back_to_cause() {
+	// Some endpoints populate only `cause`. Falling back keeps the
+	// operator looking at libpod's own wording rather than an empty
+	// placeholder.
+	let body = br#"{"cause":"internal: cgroup mount not found"}"#;
+	let msg = Client::parse_error_message(body);
+	assert!(msg.contains("cgroup mount"), "got: {msg}");
+}
+
+#[test]
+fn parse_error_message_uses_raw_body_when_not_json() {
+	// A proxy or a 502 from a fronting process can return plain text.
+	// The raw body is the only signal then, so it goes through verbatim
+	// rather than being dropped to an empty string.
+	let body = b"upstream connect error: connection refused";
+	let msg = Client::parse_error_message(body);
+	assert!(msg.contains("connection refused"), "got: {msg}");
+}
+
+#[test]
+fn parse_error_message_uses_raw_body_when_json_has_no_message() {
+	// An empty `{}` body is JSON but carries no signal; fall through to
+	// the raw body so the operator sees at least the byte content.
+	let body = b"{}";
+	let msg = Client::parse_error_message(body);
+	assert!(!msg.is_empty(), "got: {msg}");
+}
+
+// ---------------------------------------------------------------------------
+// check_status_with_field tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn check_status_with_field_promotes_to_field_error() {
+	// A 4xx with a field context renders as `field: <libpod message>
+	// (value: <value>)` — the field-shaped form the operator wants,
+	// not the raw HTTP framing. The libpod message is preserved inside
+	// the Field so the cause is not lost (#1357).
+	let body = br#"{"message":"namespace \"evil\" not recognised"}"#;
+	let err = Client::check_status_with_field(
+		hyper::StatusCode::BAD_REQUEST,
+		body,
+		Some(("pid", "evil")),
+	)
+	.unwrap_err();
+	match err {
+		PodmanError::Field {
+			service,
+			field,
+			value,
+			message,
+		} => {
+			assert_eq!(service, "");
+			assert_eq!(field, "pid");
+			assert_eq!(value, "evil");
+			assert!(message.contains("namespace"), "got: {message}");
+		}
+		other => panic!("expected Field variant, got {other:?}"),
+	}
+}
+
+#[test]
+fn check_status_with_field_without_context_keeps_api_shape() {
+	// No field context → the existing `Api` shape is preserved, so
+	// callers that do not opt in to the new method see the same
+	// error as before. The new method is purely additive (#1357).
+	let body = br#"{"message":"bad request"}"#;
+	let err =
+		Client::check_status_with_field(hyper::StatusCode::BAD_REQUEST, body, None).unwrap_err();
+	assert!(err.is_status(400));
+}
+
+#[test]
+fn check_status_with_field_preserves_non_json_message() {
+	// A non-JSON body is fed through `parse_error_message` and lands
+	// inside the `Field`'s `message` verbatim. The libpod detail is
+	// not lost when the body is not the usual JSON shape (#1357).
+	let body = b"plain text body";
+	let err = Client::check_status_with_field(
+		hyper::StatusCode::INTERNAL_SERVER_ERROR,
+		body,
+		Some(("runtime", "/nonexistent")),
+	)
+	.unwrap_err();
+	match err {
+		PodmanError::Field {
+			field,
+			value,
+			message,
+			..
+		} => {
+			assert_eq!(field, "runtime");
+			assert_eq!(value, "/nonexistent");
+			assert_eq!(message, "plain text body");
+		}
+		other => panic!("expected Field variant, got {other:?}"),
+	}
+}
+
+#[test]
+fn check_status_with_field_passes_through_on_success() {
+	// 2xx responses are never promoted to an error regardless of
+	// whether a field context is provided. The field context is
+	// strictly an *error-shaping* tool.
+	let body = b"{}";
+	Client::check_status_with_field(hyper::StatusCode::OK, body, Some(("pid", "evil")))
+		.expect("2xx must be a no-op");
 }
 
 // ---------------------------------------------------------------------------

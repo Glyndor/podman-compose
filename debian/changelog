@@ -20,10 +20,42 @@ podup (3.7.0) unstable; urgency=medium
 
   Fixed
 
+  * Log rotation never reached libpod. The default added in 3.7.0, and any
+    `logging:` block a user wrote, put `max-size` into the driver options map;
+    libpod reads rotation from a sibling typed field and ignores the option, so
+    every container podup created ran with unlimited logs. Measured on Podman
+    5.7.0, a container created by `up` reported a `-1B` cap where it now
+    reports `10.49MB`. `max-file` is gone from the default and dropped from a
+    user block with a warning: neither the API nor the CLI honours it, so
+    emitting it promised a rotation nothing performed. The Quadlet export
+    carries the cap as a byte count in `LogOpt=max-size=`, which is where the
+    podman CLI reads it.
+  * A libpod 4xx/5xx now names the compose field that caused it. The fields
+    libpod validates itself (`pid`, `ipc`, `uts`, `cgroup`, `userns_mode`,
+    `device_cgroup_rule`, `build.args` and `build.labels` keys) are checked
+    before the request is sent and reported as `service.<name>: <field>: ...
+    (value: ...)`; for the fields libpod forwards verbatim, its message is
+    preserved rather than replaced with a generic HTTP body.
+  * An unknown `pull_policy` is rejected at every site that resolves it, not
+    only the one. Three paths still read a typo as `missing`, and the worst of
+    them was the skip that fires when the image is already present locally: the
+    one pull that would have surfaced the bad value never ran, and `up` exited
+    0 having used a stale image. A standalone `podup pull` also panicked on the
+    same input rather than reporting it, because the dedup pass asserted the
+    value had already been rejected by a code path it runs before.
+  * `--format json` no longer prints an empty document when serialisation
+    fails. `ls`, `ps`, `images`, `top` and `volumes` swallowed the error and
+    exited 0, so a script consuming the output could not tell a failure from an
+    empty result set.
+
   * `interpolate_value` gates the parent mapping rebuild on
     `mapping_needs_interp`, which only enters the rebuild when a descendant
     string actually carries a `$`. The 10k key/value pairs on a 100-service
     file no longer move for free.
+  * `logs`, `exec`, `cp` and `port` resolved a service's replicas with one
+    container-list request per service. They now share the single project-wide
+    listing the lifecycle commands already used, so a `logs` over a
+    forty-service project costs one request rather than forty.
   * The progress ticker re-probed terminal capabilities and queried the
     window size on every 100 ms tick; both are now cached at `begin()` and
     re-read only when the size actually matters. `progress_line` also took

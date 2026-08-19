@@ -41,6 +41,64 @@ impl Client {
 		Self::check_status(status, &body)
 	}
 
+	/// `POST` with JSON body → deserialize JSON response, promoting a 4xx/5xx
+	/// to a [`PodmanError::Field`](crate::libpod::PodmanError::Field) when
+	/// `field` names a compose-side key the
+	/// caller knows was being attempted.
+	///
+	/// Prefer this over [`post_json`](Self::post_json) at call sites where a
+	/// single field is in scope: the error then reads `field: <libpod message>
+	/// (value: <value>)` instead of the generic HTTP framing, so the operator
+	/// sees what podup was trying to set. The libpod message is preserved
+	/// inside the `Field` so the cause is not lost (#1357).
+	pub async fn post_json_with_field<B, T>(
+		&self,
+		path: &str,
+		body: &B,
+		field: Option<(&'static str, &str)>,
+	) -> Result<T>
+	where
+		B: Serialize,
+		T: DeserializeOwned,
+	{
+		let json = serde_json::to_vec(body).map_err(super::PodmanError::Json)?;
+		let req = Self::build_request(
+			Method::POST,
+			path,
+			full(Bytes::from(json)),
+			Some("application/json"),
+		)?;
+		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
+		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		Self::check_status_with_field(status, &body, field)?;
+		serde_json::from_slice(&body).map_err(super::PodmanError::Json)
+	}
+
+	/// `POST` with JSON body → ignore response body, promoting a 4xx/5xx to a
+	/// [`PodmanError::Field`](crate::libpod::PodmanError::Field) when `field`
+	/// names a compose-side key. See
+	/// [`post_json_with_field`](Self::post_json_with_field).
+	pub async fn post_json_ok_with_field<B>(
+		&self,
+		path: &str,
+		body: &B,
+		field: Option<(&'static str, &str)>,
+	) -> Result<()>
+	where
+		B: Serialize,
+	{
+		let json = serde_json::to_vec(body).map_err(super::PodmanError::Json)?;
+		let req = Self::build_request(
+			Method::POST,
+			path,
+			full(Bytes::from(json)),
+			Some("application/json"),
+		)?;
+		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
+		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		Self::check_status_with_field(status, &body, field)
+	}
+
 	/// `POST` with JSON body → return raw `Response<Incoming>` for streaming.
 	pub async fn post_json_stream<B: Serialize>(
 		&self,

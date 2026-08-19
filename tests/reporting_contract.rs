@@ -183,9 +183,11 @@ async fn down_does_not_report_removing_what_never_existed() {
 /// Measured before the fix on a project that was never created: `rm`, `stop`,
 /// `restart`, `kill`, `pause` and `unpause` each printed zero lines and exited
 /// 0, which reads exactly like success. Only `start` said anything. The cause is
-/// that `live_replica_names` falls back to the *static* compose names when
-/// nothing is running, so each command dutifully walked a list of container
-/// names and 404'd on every one of them.
+/// that the per-replica query helpers (the bulk
+/// [`Engine::live_project_replicas_sorted`] lookup used by `exec`/`cp`/
+/// `port`/`logs`) fall back to the *static* compose names when nothing is
+/// running, so each command dutifully walked a list of container names and
+/// 404'd on every one of them.
 #[tokio::test]
 async fn idle_lifecycle_commands_say_they_did_nothing() {
 	if !podman_up().await {

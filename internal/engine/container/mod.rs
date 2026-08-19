@@ -7,6 +7,7 @@ use crate::compose::types::{ComposeFile, Service};
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::container::{LinuxResources, Namespace, SpecGenerator};
 use crate::libpod::urlencoded;
+use crate::libpod::validate::pre_validate_spec;
 use crate::libpod::API_PREFIX;
 use crate::{ports, size};
 
@@ -124,7 +125,7 @@ impl Engine {
 		let (restart_policy, restart_tries) = build_restart_policy(service);
 
 		// --- Logging ---
-		let log_configuration = build_log_config(service.logging.as_ref());
+		let log_configuration = build_log_config(service_name, service.logging.as_ref())?;
 
 		// --- Networks ---
 		let (netns, networks) = resolve_network_mode(service_name, service, file, &self.project);
@@ -198,6 +199,19 @@ impl Engine {
 				None
 			})
 		}));
+
+		// Pre-validate the `SpecGenerator` fields libpod validates on its own
+		// (namespace modes, `device_cgroup_rule` access strings), so a rejected
+		// value surfaces as a `PodmanError::Field` carrying the compose-side
+		// field name and offending value instead of libpod's raw validator
+		// text. Podup's `SpecGenerator` is built below; doing this before
+		// assembling it keeps the pre-validator close to the service fields
+		// it inspects (#1357).
+		let device_cgroup_access: Vec<String> = device_cgroup_rule
+			.iter()
+			.filter_map(|r| r.access.clone())
+			.collect();
+		pre_validate_spec(service_name, service, &device_cgroup_access)?;
 
 		// --- Namespace modes ---
 		let pidns = service.pid.as_deref().map(Namespace::parse);

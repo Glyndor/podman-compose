@@ -3,9 +3,12 @@
 //!
 //! Device, blkio, tmpfs, and label-file helpers live in `super::container::fields`.
 
+use std::collections::HashMap;
+
 use crate::compose::types::{
 	Command as ComposeCommand, HealthCheck, LoggingConfig, RestartPolicy as ComposeRestart, Service,
 };
+use crate::error::ComposeError;
 use crate::libpod::types::container::{HealthConfig, LogConfig};
 use crate::size;
 
@@ -78,33 +81,78 @@ pub(super) fn build_restart_policy(service: &Service) -> (Option<String>, Option
 /// Default log rotation applied when a compose file does not carry a
 /// `logging:` block. `k8s-file` is the libpod default since Podman 4; pinning
 /// it explicitly here stops the answer from drifting between podman versions
-/// and distros, and the 10 MB / 5-file shape gives ~50 MB per container —
-/// enough for a week of typical service output, small enough that a runaway
-/// loop will not exhaust the host. The user can override by writing their
-/// own `logging:` in compose.
+/// and distros. The 10 MB cap is enough for a week of typical service output
+/// and small enough that a runaway loop will not exhaust the host. libpod
+/// does not honour `max-file` on any path (see `man podman-run`), so it is
+/// not part of the default; the user can override by writing their own
+/// `logging:` in compose (#1417).
 pub(crate) fn default_log_config() -> LogConfig {
 	LogConfig {
 		driver: Some("k8s-file".into()),
-		options: [
-			("max-size".to_string(), "10m".to_string()),
-			("max-file".to_string(), "5".to_string()),
-		]
-		.into_iter()
-		.collect(),
+		size: Some(10 * 1024 * 1024),
+		options: HashMap::new(),
 	}
 }
 
 /// Resolve the `logging:` block into libpod's `LogConfig`. An absent compose
 /// `logging:` maps to [`default_log_config`] so every container podup creates
-/// has a rotation policy without the user having to set one. The user's
-/// `Some(LoggingConfig)` value is passed through unchanged.
-pub(crate) fn build_log_config(logging: Option<&LoggingConfig>) -> Option<LogConfig> {
-	Some(match logging {
-		Some(l) => LogConfig {
-			driver: l.driver.clone(),
-			options: l.options.clone(),
+/// has a rotation policy without the user having to set one. When the user
+/// supplies a block, `max-size` is parsed into the typed [`LogConfig::size`]
+/// field libpod actually reads rotation from (passing it inside `options` is
+/// silently ignored — #1417); `max-file` is dropped with a warning because
+/// libpod does not implement it. A malformed `max-size` is rejected with a
+/// `PodmanError::Field` so the user gets a compose-flavoured error instead of
+/// a 500 from libpod's JSON unmarshal.
+pub(crate) fn build_log_config(
+	service_name: &str,
+	logging: Option<&LoggingConfig>,
+) -> Result<Option<LogConfig>, ComposeError> {
+	match logging {
+		Some(l) => Ok(Some(translate_user_logging(service_name, l)?)),
+		None => Ok(Some(default_log_config())),
+	}
+}
+
+/// Translate a user-supplied `logging:` block into libpod's [`LogConfig`].
+///
+/// `max-size` is moved into the typed `size` field. `max-file` is dropped
+/// with a warning — libpod does not implement it and would silently ignore
+/// it if forwarded. The user-supplied value of `max-size` is parsed with the
+/// same memory parser used elsewhere in the engine (`10m`, `1g`, plain
+/// bytes); a malformed value is rejected with the service field name so the
+/// error points at the compose key the user wrote (#1417).
+fn translate_user_logging(
+	service_name: &str,
+	l: &LoggingConfig,
+) -> Result<LogConfig, ComposeError> {
+	let mut options = l.options.clone();
+	let size = match options.remove("max-size") {
+		Some(v) => match size::parse_memory(&v) {
+			Some(bytes) => Some(bytes),
+			None => {
+				return Err(ComposeError::Podman(
+					crate::libpod::validate::spec_field_error(
+						service_name,
+						"logging.options.max-size",
+						&v,
+						"must be a byte count (e.g. '10m', '1024', '1g'); \
+						 libpod rejects an invalid `size` outright",
+					),
+				));
+			}
 		},
-		None => default_log_config(),
+		None => None,
+	};
+	if options.remove("max-file").is_some() {
+		tracing::warn!(
+			"logging.options.max-file is ignored by libpod; \
+			 remove it from your compose file or expect unbounded log growth"
+		);
+	}
+	Ok(LogConfig {
+		driver: l.driver.clone(),
+		size,
+		options,
 	})
 }
 
@@ -163,8 +211,7 @@ pub(super) fn build_healthcheck(hc: &HealthCheck) -> HealthConfig {
 mod tests {
 	use super::*;
 	use crate::compose::types::{
-		Command as ComposeCommand, HealthCheck, LoggingConfig, RestartPolicy as ComposeRestart,
-		Service,
+		Command as ComposeCommand, HealthCheck, RestartPolicy as ComposeRestart, Service,
 	};
 
 	fn default_service() -> Service {
@@ -347,41 +394,6 @@ mod tests {
 		assert_eq!(tries, Some(3));
 	}
 
-	// --- log config ---
-
-	#[test]
-	fn log_config_applies_the_default_when_absent() {
-		// A service with no `logging:` block gets the rotation default so
-		// containers cannot run with unbounded log growth (#1354).
-		let cfg = build_log_config(None).expect("absent -> default, not None");
-		assert_eq!(cfg.driver.as_deref(), Some("k8s-file"));
-		assert_eq!(cfg.options.get("max-size").map(String::as_str), Some("10m"));
-		assert_eq!(cfg.options.get("max-file").map(String::as_str), Some("5"));
-	}
-
-	#[test]
-	fn log_config_driver_only() {
-		let logging = LoggingConfig {
-			driver: Some("json-file".into()),
-			options: Default::default(),
-		};
-		let cfg = build_log_config(Some(&logging)).unwrap();
-		assert_eq!(cfg.driver.as_deref(), Some("json-file"));
-		assert!(cfg.options.is_empty());
-	}
-
-	#[test]
-	fn log_config_with_options() {
-		let mut opts = std::collections::HashMap::new();
-		opts.insert("max-size".into(), "10m".into());
-		let logging = LoggingConfig {
-			driver: Some("json-file".into()),
-			options: opts,
-		};
-		let cfg = build_log_config(Some(&logging)).unwrap();
-		assert_eq!(cfg.options["max-size"], "10m");
-	}
-
 	// --- healthcheck ---
 
 	#[test]
@@ -457,3 +469,7 @@ mod tests {
 		assert_eq!(cfg.retries, Some(7));
 	}
 }
+
+#[cfg(test)]
+#[path = "log_config_tests.rs"]
+mod log_config_tests;
