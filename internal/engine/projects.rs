@@ -161,7 +161,7 @@ pub async fn list_projects_filtered(
 			.iter()
 			.map(|(name, t)| project_row(name, t, &t.config_files))
 			.collect();
-		println!("{}", serde_json::to_string_pretty(&arr).unwrap_or_default());
+		println!("{}", super::to_pretty_json("ls.row", &arr)?);
 		return Ok(());
 	}
 

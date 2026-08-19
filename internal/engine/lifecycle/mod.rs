@@ -240,9 +240,12 @@ impl Engine {
 			// Best-effort: warm the image cache for every service this pass will
 			// pull, concurrently, before the per-level walk below serializes a
 			// level-2+ service's image acquisition behind the level-1 barrier.
-			// A prefetch miss here is never fatal — `up_one_service`'s own pull
-			// below is still authoritative and the only path that can fail `up`.
-			self.prefetch_images(file, &enabled, &target_set).await;
+			// A prefetch I/O miss is never fatal — `up_one_service`'s own pull
+			// below is still authoritative and the only path that can fail `up`
+			// on a transport / registry error. A configuration error (an
+			// unrecognized `pull_policy:`) does propagate: it is reported here
+			// so the operator sees it, not a silent wrong image (#1443).
+			self.prefetch_images(file, &enabled, &target_set).await?;
 
 			// Start each dependency level in turn; services within a level have
 			// no `depends_on` relationship to each other (guaranteed by the
@@ -494,9 +497,16 @@ impl Engine {
 				);
 				return Ok(());
 			}
-			// Services with a build section are rebuilt on every up, so
-			// their container must be recreated to pick up the fresh
-			// image even when the compose config is unchanged.
+			// A service with a `build:` section is recreated even when its hash
+			// matches: the compose-config hash compared below does not cover
+			// the build context's source files, so the existing container may
+			// still hold an image built from an older tree. Recreating forces
+			// the new container to bind whatever image is current.
+			//
+			// `up` stopped rebuilding these unconditionally in #1094 — it now
+			// builds only when the image is missing — so the fresh-image
+			// guarantee this recreate used to inherit from that rebuild no
+			// longer comes for free.
 			if service.build.is_none()
 				&& existing_hash.get(&container_name).map(String::as_str) == Some(new_hash)
 			{
