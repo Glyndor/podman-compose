@@ -284,40 +284,55 @@ impl Engine {
 			target_services.iter().map(String::as_str).collect();
 		// (container_name, is_tty) — TTY containers send raw bytes; non-TTY use
 		// multiplexed 8-byte-header framing. Resolved against the containers
-		// Podman actually has (`live_replica_names`), not the static compose
-		// replica count: after a runtime `scale`/`up --scale` the file's count no
-		// longer matches the live replicas, so `logs` would otherwise miss every
-		// replica beyond the first (falls back to the static names when none are
-		// running yet).
-		// One `live_replica_names` round-trip per selected service (a future
-		// optimization: batch this through scale.rs's `live_project_replicas`
-		// instead). A resolution failure for
-		// one service must not blank the whole command the way an `.await?` would:
-		// warn and skip that service so the rest still stream, matching the
-		// per-container tolerance below.
-		// A failure resolving ONE service is tolerated so the others still print —
-		// that is deliberate and tested. But when nothing resolves at all, the
-		// command printed nothing and still reported success, which is how an
-		// unreachable engine looked identical to a project with no logs. Kept and
-		// only consulted when there is no output to salvage.
+		// Podman actually has, not the static compose replica count: after a
+		// runtime `scale`/`up --scale` the file's count no longer matches the
+		// live replicas, so `logs` would otherwise miss every replica beyond
+		// the first. Falls back to the static names for a service absent from
+		// the map (the bulk helper does not see the compose file).
+		//
+		// Hoisted out of the per-service loop so a `logs` over N services
+		// costs one container-list round-trip, not N (#1445) — the same bulk
+		// path the per-service lifecycle commands took in #1363.
+		//
+		// A failure resolving ONE service is tolerated so the others still
+		// print — that is deliberate and tested. The bulk GET is now the only
+		// point where a single engine-side failure can land, so the same
+		// tolerance collapses into "warn + remember, the post-loop empty
+		// check surfaces the error when there is no partial result to
+		// protect" — i.e. an unreachable engine used to look like a project
+		// with no logs and still exit 0; this preserves that fix.
+		//
+		// The skip-on-fetch-error case must NOT fall back to the static
+		// names below: the original per-service loop did `continue` on a
+		// resolution error, leaving `targets` empty so the post-loop check
+		// could surface the error. Falling back to static names would push
+		// phantom containers that 404 per-container, mask the failure, and
+		// make `logs` exit 0 on an unreachable engine again.
 		let mut first_err: Option<ComposeError> = None;
+		let live_by_service = match self.live_project_replicas_sorted().await {
+			Ok(by_service) => by_service,
+			Err(e) => {
+				tracing::warn!("logs: resolving project replicas: {e}");
+				first_err.get_or_insert(e);
+				std::collections::HashMap::new()
+			}
+		};
+		let fetch_failed = first_err.is_some();
 		let mut targets: Vec<(String, bool)> = Vec::new();
-		for (n, s) in file
-			.services
-			.iter()
-			.filter(|(n, _)| selected.is_empty() || selected.contains(n.as_str()))
-		{
-			let is_tty = s.tty.unwrap_or(false);
-			let names = match self.live_replica_names(n, s).await {
-				Ok(names) => names,
-				Err(e) => {
-					tracing::warn!("logs: resolving replicas for service {n}: {e}");
-					first_err.get_or_insert(e);
-					continue;
+		if !fetch_failed {
+			for (n, s) in file
+				.services
+				.iter()
+				.filter(|(n, _)| selected.is_empty() || selected.contains(n.as_str()))
+			{
+				let is_tty = s.tty.unwrap_or(false);
+				let names = match live_by_service.get(n.as_str()) {
+					Some(names) if !names.is_empty() => names.clone(),
+					_ => self.replica_names(n, s),
+				};
+				for cname in names {
+					targets.push((cname, is_tty));
 				}
-			};
-			for cname in names {
-				targets.push((cname, is_tty));
 			}
 		}
 

@@ -10,9 +10,10 @@ mod pull;
 mod push;
 mod stream;
 mod tags;
-/// Shared with the `up` image-prefetch stage so it resolves a service's
-/// effective pull policy identically to the pull path below.
-pub(in crate::engine) use pull::libpod_pull_policy;
+/// Shared with the `up` image-prefetch and `up`/pull decision paths so they
+/// resolve a service's effective pull policy identically to the pull path
+/// below, and reject an unrecognized value the same way (#1443).
+pub(in crate::engine) use pull::pull_policy_checked;
 pub use pull::PullOptions;
 pub use push::PushOptions;
 /// Shared with the container-create path so an `up`/`create` references the same
@@ -27,6 +28,7 @@ use crate::compose::types::{BuildConfig, Service};
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::image::BuildOutput;
 use crate::libpod::urlencoded;
+use crate::libpod::validate::pre_validate_build;
 use crate::libpod::API_PREFIX;
 use crate::size;
 
@@ -248,6 +250,14 @@ impl Engine {
 		if let BuildConfig::Config { labels: l, .. } = build {
 			labels.extend(l.to_map());
 		}
+
+		// Pre-validate the keys libpod's buildkit-fronted parser rejects
+		// (anything outside `[A-Za-z0-9_.-]`), so a bad `build.args` or
+		// `build.labels` key surfaces as a `PodmanError::Field` naming the
+		// compose-side field rather than libpod's `400` body. Runs before
+		// the build URL is assembled so a bad key fails before any POST to
+		// the daemon (#1357).
+		pre_validate_build(&build_args, &labels)?;
 
 		let network = if let BuildConfig::Config {
 			network: Some(n), ..

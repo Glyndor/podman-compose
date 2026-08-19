@@ -13,6 +13,13 @@ use crate::quadlet::generate_at;
 /// generated quadlet units ship the same rotation policy that `up` would
 /// apply at runtime (#1354). Without this, `generate quadlet` would emit a
 /// unit that runs without rotation, diverging from `up` behaviour.
+///
+/// The cap is rendered as a byte count rather than `10m` since #1417 moved
+/// it into libpod's typed `size` field; `podman run --log-opt
+/// max-size=10485760` was measured to produce the same cap as `max-size=10m`
+/// on Podman 5.7.0. `max-file` is deliberately absent: it was measured to be
+/// dropped by both the API and the CLI, so emitting it promised a rotation
+/// nothing performed.
 #[test]
 fn logging_default_is_emitted_when_logging_block_is_absent() {
 	let yaml = r#"
@@ -28,12 +35,13 @@ services:
 		"missing default LogDriver in:\n{c}"
 	);
 	assert!(
-		c.contains("LogOpt=max-size=10m"),
+		c.contains("LogOpt=max-size=10485760"),
 		"missing max-size LogOpt in:\n{c}"
 	);
 	assert!(
-		c.contains("LogOpt=max-file=5"),
-		"missing max-file LogOpt in:\n{c}"
+		!c.contains("max-file"),
+		"max-file is honoured by neither the API nor the CLI; emitting it \
+		 promises a rotation nothing performs:\n{c}"
 	);
 }
 
@@ -62,11 +70,7 @@ services:
 		"user options not applied:\n{c}"
 	);
 	assert!(
-		!c.contains("max-size=10m"),
-		"default leaked through override:\n{c}"
-	);
-	assert!(
-		!c.contains("max-file=5"),
+		!c.contains("max-size"),
 		"default leaked through override:\n{c}"
 	);
 }

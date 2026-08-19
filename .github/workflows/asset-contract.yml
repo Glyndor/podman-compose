@@ -30,7 +30,7 @@ permissions:
 
 jobs:
   check:
-    uses: Glyndor/.github/.github/workflows/installer-contract.yml@e61aaf0e920345b3dbb82cacd3bd36a499951a92 # v1.13.0
+    uses: Glyndor/.github/.github/workflows/installer-contract.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
   # Per-asset .sig loop, three-slot regex, and ed25519 error classification
   # regression (issue #1359). The fixture carries a release with three
   # populated rotation slots; the test verifies every .sig against the
@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python
-        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v6.0.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0
         with:
           python-version: "3.13"
       - name: Install pinned cryptography
@@ -69,7 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python
-        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v6.0.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0
         with:
           python-version: "3.13"
       - name: Install pinned cryptography

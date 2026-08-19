@@ -205,7 +205,7 @@ jobs:
           "$venv_py" .github/scripts/sign.py "${{ matrix.asset }}"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ${{ matrix.asset }}
 
@@ -274,7 +274,7 @@ jobs:
           echo "Staged $(basename "$deb")"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: podup_*_${{ matrix.arch }}.deb
 
@@ -448,6 +448,31 @@ jobs:
             base="${sig%.sig}"
             "$venv_py" .github/scripts/verify-signing-key.py "$base" "$sig"
           done
+
+      - name: Check out Glyndor/.github for the asset-existence script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Glyndor/.github
+          ref: 118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+          persist-credentials: false
+          path: upstream
+
+      - name: Verify every file the installers fetch is staged
+        run: |
+          set -euo pipefail
+          # The asset-contract gate compares install.sh against this file and
+          # answers "do the two agree on the names". It cannot answer "does the
+          # release produce them" — a workflow file is a statement of intent,
+          # not proof that a step ran. This is where that question is
+          # answerable: everything is built, signed and checksummed, and the
+          # release is not immutable yet. The script derives what to look for
+          # from install.sh's own ${BASE_URL} fetches, so it covers
+          # SHA256SUMS.sig too — install.sh aborts without it, and nothing
+          # upstream of here ever checked it was produced.
+          python3 upstream/scripts/verify-release-assets.py \
+            --workdir . \
+            --install-script install.sh \
+            --install-ps1 install.ps1
 
       - name: Create GitHub Release
         env:
