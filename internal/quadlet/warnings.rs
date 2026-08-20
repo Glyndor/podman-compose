@@ -1,11 +1,18 @@
 //! Report compose fields that are set but have no Quadlet mapping.
 
-use crate::compose::types::{DependsOn, Service, ServiceCondition};
+use indexmap::IndexMap;
+
+use crate::compose::types::{DependsOn, HealthCheck, Service, ServiceCondition};
 
 /// Warn for fields that are set but have no Quadlet mapping, so the operator
 /// knows the generated unit is incomplete rather than discovering it at run
 /// time.
-pub(super) fn collect_warnings(name: &str, service: &Service, warnings: &mut Vec<String>) {
+pub(super) fn collect_warnings(
+	name: &str,
+	service: &Service,
+	services: &IndexMap<String, Service>,
+	warnings: &mut Vec<String>,
+) {
 	let mut warn = |field: &str, detail: &str| {
 		warnings.push(format!("{name}: {field} {detail}"));
 	};
@@ -50,16 +57,35 @@ pub(super) fn collect_warnings(name: &str, service: &Service, warnings: &mut Vec
 			"hooks have no Quadlet equivalent and are skipped",
 		);
 	}
-	// systemd `After=`/`Requires=` order startup but cannot gate it on a
-	// dependency becoming healthy or completing; those conditions are dropped.
+	// `service_healthy` IS enforceable, as long as the service it names has a
+	// healthcheck: that service's unit carries `Notify=healthy`, so systemd
+	// does not call it started until the probe passes, and `After=`/`Requires=`
+	// then order against readiness rather than creation. Measured on podman
+	// 5.7.0 — a dependant started 10s into a dependency whose probe took 10s.
+	//
+	// So the warning is now about the cases that really cannot work: a
+	// `service_healthy` naming a service with no healthcheck to wait on, and
+	// `service_completed_successfully`, which would need the dependency to be a
+	// `Type=oneshot` unit that exits.
 	if let DependsOn::Map(deps) = &service.depends_on {
-		if deps
-			.values()
-			.any(|c| c.condition != ServiceCondition::ServiceStarted)
-		{
+		let unwaitable: Vec<&str> = deps
+			.iter()
+			.filter(|(dep_name, c)| match c.condition {
+				ServiceCondition::ServiceStarted => false,
+				ServiceCondition::ServiceHealthy => services
+					.get(dep_name.as_str())
+					.is_none_or(|d| d.healthcheck.as_ref().is_none_or(HealthCheck::is_disabled)),
+				_ => true,
+			})
+			.map(|(dep_name, _)| dep_name.as_str())
+			.collect();
+		if !unwaitable.is_empty() {
 			warn(
 				"depends_on",
-				"condition service_healthy/service_completed_successfully is not enforceable in Quadlet; only start ordering is emitted",
+				&format!(
+					"condition on {} is not enforceable in Quadlet and only start ordering is emitted; service_healthy needs the named service to declare a healthcheck, and service_completed_successfully has no equivalent",
+					unwaitable.join(", ")
+				),
 			);
 		}
 	}

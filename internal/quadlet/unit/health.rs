@@ -35,6 +35,24 @@ pub(super) fn render_healthcheck(
 		};
 		if !cmd.is_empty() {
 			container.add("HealthCmd", cmd);
+			// Tell systemd the unit is not up until the healthcheck passes.
+			// Quadlet renders this as `--sdnotify=healthy`, and without it
+			// systemd calls the service started the moment the container is
+			// created — so `After=`/`Requires=` order the *creation*, not the
+			// readiness, and a dependant starts against a service that is not
+			// serving yet.
+			//
+			// Measured on podman 5.7.0 with a probe that takes ten seconds to
+			// pass: `systemctl start` on the unit itself returned after 11s
+			// rather than immediately, and a second unit with
+			// `After=`/`Requires=` on it started 10s in. That second number is
+			// the one that matters — it is `depends_on: service_healthy`
+			// actually being honoured.
+			//
+			// Only emitted alongside a command. `--sdnotify=healthy` with
+			// nothing to probe would leave the unit starting until
+			// `TimeoutStartSec` expires.
+			container.add("Notify", "healthy".to_string());
 		}
 	}
 	if let Some(v) = &hc.interval {
@@ -140,5 +158,37 @@ mod tests {
 		// No key is emitted for start_interval, but the user is warned.
 		assert_eq!(warnings.len(), 1);
 		assert!(warnings[0].contains("start_interval"));
+	}
+
+	/// Without this systemd calls the unit started as soon as the container is
+	/// created, so `After=`/`Requires=` order creation rather than readiness.
+	/// Measured on podman 5.7.0: a dependant started 10s into a dependency
+	/// whose probe took 10s, instead of immediately.
+	#[test]
+	fn a_healthcheck_brings_notify_healthy() {
+		let (body, _) = render("image: x\nhealthcheck:\n  test: [\"CMD\", \"true\"]\n");
+		assert!(body.contains("Notify=healthy"), "{body}");
+	}
+
+	/// `--sdnotify=healthy` with nothing to probe would leave the unit starting
+	/// until `TimeoutStartSec` expires, so it must never be emitted alone.
+	#[test]
+	fn no_healthcheck_means_no_notify() {
+		let (body, _) = render("image: x\n");
+		assert!(!body.contains("Notify"), "{body}");
+	}
+
+	#[test]
+	fn a_disabled_healthcheck_means_no_notify() {
+		let (body, _) = render("image: x\nhealthcheck:\n  disable: true\n");
+		assert!(!body.contains("Notify"), "{body}");
+	}
+
+	/// An empty command emits no `HealthCmd`, so there is nothing for systemd
+	/// to wait on and `Notify` must not appear either.
+	#[test]
+	fn an_empty_test_means_no_notify() {
+		let (body, _) = render("image: x\nhealthcheck:\n  test: []\n");
+		assert!(!body.contains("Notify"), "{body}");
 	}
 }

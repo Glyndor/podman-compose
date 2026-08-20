@@ -32,6 +32,9 @@ pub(crate) struct UnitContext<'a> {
 	/// Directory compose resolves relative paths against — the compose file's
 	/// own directory, not the unit's. See [`abs_against`].
 	pub base_dir: &'a std::path::Path,
+	/// Every service in the file, so a `depends_on` condition can be judged
+	/// against the service it names rather than in the abstract.
+	pub services: &'a IndexMap<String, Service>,
 }
 
 /// Build the `.container` unit for one compose `service`.
@@ -52,6 +55,7 @@ pub(crate) fn container_unit(
 		declared_networks,
 		secrets,
 		base_dir,
+		services,
 	} = ctx;
 	let mut unit = Section::new("Unit");
 	unit.add("Description", format!("{name} (podup)"));
@@ -460,7 +464,7 @@ pub(crate) fn container_unit(
 		}
 	}
 
-	collect_warnings(name, service, warnings);
+	collect_warnings(name, service, services, warnings);
 
 	// The unforgeable ownership marker comes first, as its own comment line;
 	// see `owner_marker` for why it must stay separate from the `Label=` line.
