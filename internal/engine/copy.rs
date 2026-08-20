@@ -23,7 +23,14 @@ use archive::{extract_archive, pack_path};
 const MAX_CP_ARCHIVE_BYTES: usize = 1024 * 1024 * 1024;
 
 /// Options for [`Engine::cp_with_options`], mirroring `docker compose cp` flags.
+///
+/// `#[non_exhaustive]` since 3.7.2, so a new field can be added in a minor
+/// release without breaking every external caller that built the struct with
+/// a literal. Construct it via [`CpOptions::new`] or the `with_*` builders
+/// below; a struct literal is refused outside this crate, which is what buys
+/// the room to grow.
 #[derive(Default)]
+#[non_exhaustive]
 pub struct CpOptions {
 	/// 1-based replica index for a scaled service, `--index` (default: first).
 	pub index: Option<u32>,
@@ -34,6 +41,46 @@ pub struct CpOptions {
 	/// container→host extraction always applies podup's security-hardened mode
 	/// sanitization, so this flag has no effect on the copied bytes.
 	pub archive: bool,
+}
+
+impl CpOptions {
+	/// Every `docker compose cp` flag, in CLI order. A constructor rather than
+	/// a struct literal because the type is `#[non_exhaustive]`, so the next
+	/// flag to land is not a breaking change for anyone building one.
+	pub fn new(index: Option<u32>, follow_link: bool, archive: bool) -> Self {
+		Self {
+			index,
+			follow_link,
+			archive,
+		}
+	}
+
+	/// 1-based replica index for a scaled service, `--index` (default: first).
+	/// Builder-style.
+	#[must_use]
+	pub fn with_index(mut self, index: Option<u32>) -> Self {
+		self.index = index;
+		self
+	}
+
+	/// Follow symlinks in the host source before packing, `-L/--follow-link`.
+	/// Builder-style.
+	#[must_use]
+	pub fn with_follow_link(mut self, follow_link: bool) -> Self {
+		self.follow_link = follow_link;
+		self
+	}
+
+	/// Archive mode, `-a/--archive`. Accepted for command-line compatibility:
+	/// under rootless Podman the original uid/gid cannot be restored, and
+	/// container→host extraction always applies podup's security-hardened mode
+	/// sanitization, so this flag has no effect on the copied bytes.
+	/// Builder-style.
+	#[must_use]
+	pub fn with_archive(mut self, archive: bool) -> Self {
+		self.archive = archive;
+		self
+	}
 }
 
 impl Engine {

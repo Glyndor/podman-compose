@@ -58,7 +58,14 @@ enum BodyPlan {
 /// `docker compose build`-style CLI overrides. Each augments (never weakens)
 /// the per-service `build:` config: a flag forces the behaviour on even when
 /// the compose file leaves it off.
+///
+/// `#[non_exhaustive]` since 3.7.2, so a new flag can be added in a minor
+/// release without breaking every external caller that built the struct with
+/// a literal. Construct it via [`BuildOptions::new`] or the `with_*` builders
+/// below; a struct literal is refused outside this crate, which is what buys
+/// the room to grow.
 #[derive(Default, Clone)]
+#[non_exhaustive]
 pub struct BuildOptions {
 	/// Force a cache-less build (`--no-cache`).
 	pub no_cache: bool,
@@ -68,6 +75,49 @@ pub struct BuildOptions {
 	pub build_args: Vec<String>,
 	/// Suppress build output (`-q/--quiet`).
 	pub quiet: bool,
+}
+
+impl BuildOptions {
+	/// Every `docker compose build` flag, in CLI order. A constructor rather
+	/// than a struct literal because the type is `#[non_exhaustive]`, so the
+	/// next flag to land is not a breaking change for anyone building one.
+	pub fn new(no_cache: bool, pull: bool, build_args: Vec<String>, quiet: bool) -> Self {
+		Self {
+			no_cache,
+			pull,
+			build_args,
+			quiet,
+		}
+	}
+
+	/// Force a cache-less build (`--no-cache`). Builder-style.
+	#[must_use]
+	pub fn with_no_cache(mut self, no_cache: bool) -> Self {
+		self.no_cache = no_cache;
+		self
+	}
+
+	/// Always attempt to pull a newer base image (`--pull`). Builder-style.
+	#[must_use]
+	pub fn with_pull(mut self, pull: bool) -> Self {
+		self.pull = pull;
+		self
+	}
+
+	/// Extra build args (`KEY=VAL`); override the compose `build.args` on
+	/// conflict. Builder-style.
+	#[must_use]
+	pub fn with_build_args(mut self, build_args: Vec<String>) -> Self {
+		self.build_args = build_args;
+		self
+	}
+
+	/// Suppress build output (`-q/--quiet`). Builder-style.
+	#[must_use]
+	pub fn with_quiet(mut self, quiet: bool) -> Self {
+		self.quiet = quiet;
+		self
+	}
 }
 
 impl Engine {

@@ -11,7 +11,14 @@ use crate::libpod::types::container::ContainerListEntry;
 use crate::libpod::{urlencoded, Client, API_PREFIX};
 
 /// Options for [`list_projects`] (`docker compose ls`).
+///
+/// `#[non_exhaustive]` since 3.7.2, so a new flag can be added in a minor
+/// release without breaking every external caller that built the struct with
+/// a literal. Construct it via [`LsOptions::new`] or the `with_*` builders
+/// below; a struct literal is refused outside this crate, which is what buys
+/// the room to grow.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct LsOptions {
 	/// Include projects whose containers are all stopped.
 	pub all: bool,
@@ -19,6 +26,37 @@ pub struct LsOptions {
 	pub quiet: bool,
 	/// Emit a JSON array instead of a table.
 	pub json: bool,
+}
+
+impl LsOptions {
+	/// Every `docker compose ls` flag, in CLI order. A constructor rather than
+	/// a struct literal because the type is `#[non_exhaustive]`, so the next
+	/// flag to land is not a breaking change for anyone building one.
+	pub fn new(all: bool, quiet: bool, json: bool) -> Self {
+		Self { all, quiet, json }
+	}
+
+	/// Include projects whose containers are all stopped, `-a/--all`.
+	/// Builder-style.
+	#[must_use]
+	pub fn with_all(mut self, all: bool) -> Self {
+		self.all = all;
+		self
+	}
+
+	/// Print only project names, `-q/--quiet`. Builder-style.
+	#[must_use]
+	pub fn with_quiet(mut self, quiet: bool) -> Self {
+		self.quiet = quiet;
+		self
+	}
+
+	/// Emit a JSON array instead of a table, `--format json`. Builder-style.
+	#[must_use]
+	pub fn with_json(mut self, json: bool) -> Self {
+		self.json = json;
+		self
+	}
 }
 
 /// Split `ls --filter KEY=VALUE` predicates into name, status, and unknown

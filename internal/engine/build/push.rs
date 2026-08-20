@@ -72,13 +72,49 @@ where
 
 /// Options for [`Engine::push`], mirroring `docker compose push` (plus a Podman
 /// `--tls-verify` escape hatch for insecure/local registries).
+///
+/// `#[non_exhaustive]` since 3.7.2, so a new flag can be added in a minor
+/// release without breaking every external caller that built the struct with
+/// a literal. Construct it via [`PushOptions::new`] or the `with_*` builders
+/// below; a struct literal is refused outside this crate, which is what buys
+/// the room to grow.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct PushOptions {
 	/// Continue with the remaining services after a push fails.
 	pub ignore_failures: bool,
 	/// Override TLS verification of the registry. `None` leaves Podman's default
 	/// (verify on); `Some(false)` allows an insecure/HTTP registry.
 	pub tls_verify: Option<bool>,
+}
+
+impl PushOptions {
+	/// Every `docker compose push` flag, in CLI order. A constructor rather than
+	/// a struct literal because the type is `#[non_exhaustive]`, so the next
+	/// flag to land is not a breaking change for anyone building one.
+	pub fn new(ignore_failures: bool, tls_verify: Option<bool>) -> Self {
+		Self {
+			ignore_failures,
+			tls_verify,
+		}
+	}
+
+	/// Continue with the remaining services after a push fails,
+	/// `--ignore-push-failures`. Builder-style.
+	#[must_use]
+	pub fn with_ignore_failures(mut self, ignore_failures: bool) -> Self {
+		self.ignore_failures = ignore_failures;
+		self
+	}
+
+	/// Override TLS verification of the registry, `--tls-verify` /
+	/// `--tls-verify=false`. `None` leaves Podman's default (verify on).
+	/// Builder-style.
+	#[must_use]
+	pub fn with_tls_verify(mut self, tls_verify: Option<bool>) -> Self {
+		self.tls_verify = tls_verify;
+		self
+	}
 }
 
 impl Engine {

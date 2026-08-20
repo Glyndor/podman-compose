@@ -25,10 +25,7 @@ async fn engine_cp_index_out_of_range_errors() {
 			&file,
 			local.to_str().unwrap(),
 			"web:/tmp",
-			podup::CpOptions {
-				index: Some(9),
-				..Default::default()
-			},
+			podup::CpOptions::new(Some(9), false, false),
 		)
 		.await;
 	assert!(
@@ -69,10 +66,7 @@ async fn engine_cp_follow_link_uploads_target_contents() {
 			&file,
 			link.to_str().unwrap(),
 			"web:/tmp",
-			podup::CpOptions {
-				follow_link: true,
-				..Default::default()
-			},
+			podup::CpOptions::new(None, true, false),
 		)
 		.await;
 	let out = engine

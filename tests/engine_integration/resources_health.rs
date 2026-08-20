@@ -124,15 +124,18 @@ async fn file_secret_bound() {
 		.run(
 			&file,
 			"web",
-			podup::RunOptions {
-				cmd: vec![
+			podup::RunOptions::new(
+				vec![
 					"sh".to_string(),
 					"-c".to_string(),
 					"test \"$(cat /run/secrets/filesecret)\" = file-secret-content".to_string(),
 				],
-				rm: true,
-				..Default::default()
-			},
+				true,
+				false,
+				Vec::new(),
+				None,
+				false,
+			),
 		)
 		.await;
 	engine.down(&file).await.unwrap();

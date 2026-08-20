@@ -13,9 +13,15 @@ use crate::libpod::{urlencoded, API_PREFIX};
 use super::super::Engine;
 
 /// Options for [`Engine::commit_with_options`], mirroring `docker compose commit`
-/// (`-m/--message`, `-a/--author`, `-p/--pause`, `-c/--change`). Kept off the
-/// frozen `commit` signature so the published library API stays stable across minors.
+/// (`-m/--message`, `-a/--author`, `-p/--pause`, `-c/--change`).
+///
+/// `#[non_exhaustive]` since 3.7.2, so a new field can be added in a minor
+/// release without breaking every external caller that built the struct with
+/// a literal. Construct it via [`CommitOptions::new`] or the `with_*` builders
+/// below; a struct literal is refused outside this crate, which is what buys
+/// the room to grow.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct CommitOptions {
 	/// Commit message recorded on the new image (`-m/--message`).
 	pub message: Option<String>,
@@ -26,6 +32,56 @@ pub struct CommitOptions {
 	pub pause: Option<bool>,
 	/// Dockerfile instructions to apply to the committed image (`-c/--change`).
 	pub changes: Vec<String>,
+}
+
+impl CommitOptions {
+	/// Every `docker compose commit` field, in CLI order. A constructor rather
+	/// than a struct literal because the type is `#[non_exhaustive]`, so the
+	/// next field to land is not a breaking change for anyone building one.
+	pub fn new(
+		message: Option<String>,
+		author: Option<String>,
+		pause: Option<bool>,
+		changes: Vec<String>,
+	) -> Self {
+		Self {
+			message,
+			author,
+			pause,
+			changes,
+		}
+	}
+
+	/// Commit message recorded on the new image (`-m/--message`).
+	/// Builder-style.
+	#[must_use]
+	pub fn with_message(mut self, message: Option<String>) -> Self {
+		self.message = message;
+		self
+	}
+
+	/// Author recorded on the new image (`-a/--author`). Builder-style.
+	#[must_use]
+	pub fn with_author(mut self, author: Option<String>) -> Self {
+		self.author = author;
+		self
+	}
+
+	/// Pause the container during the commit (`-p/--pause`); `None` leaves
+	/// Podman's default (pause on). Builder-style.
+	#[must_use]
+	pub fn with_pause(mut self, pause: Option<bool>) -> Self {
+		self.pause = pause;
+		self
+	}
+
+	/// Dockerfile instructions to apply to the committed image
+	/// (`-c/--change`). Builder-style.
+	#[must_use]
+	pub fn with_changes(mut self, changes: Vec<String>) -> Self {
+		self.changes = changes;
+		self
+	}
 }
 
 /// Split a `commit` image reference into `(repo, tag)`, defaulting the tag to

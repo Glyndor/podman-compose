@@ -42,21 +42,58 @@ pub struct VolumesDisplayOptions {
 }
 
 impl VolumesDisplayOptions {
-	/// Ask for the size columns.
+	/// Ask for the size columns, `-s/--size`. Builder-style.
 	#[must_use]
 	pub fn with_size(mut self, size: bool) -> Self {
 		self.size = size;
 		self
 	}
+
+	/// The single `volumes` display flag, in CLI order. A constructor rather
+	/// than a struct literal because the type is `#[non_exhaustive]`, so the
+	/// next flag to land is not a breaking change for anyone building one.
+	pub fn new(size: bool) -> Self {
+		Self { size }
+	}
 }
 
 /// Options for [`Engine::list_volumes`], mirroring `docker compose volumes`.
+///
+/// `#[non_exhaustive]` since 3.7.2, so a new flag can be added in a minor
+/// release without breaking every external caller that built the struct with
+/// a literal. Construct it via [`VolumesOptions::new`] or the `with_*` builders
+/// below; a struct literal is refused outside this crate, which is what buys
+/// the room to grow.
 #[derive(Default)]
+#[non_exhaustive]
 pub struct VolumesOptions {
 	/// Print only volume names, `-q/--quiet`.
 	pub quiet: bool,
 	/// Emit a JSON array instead of the table, `--format json`.
 	pub json: bool,
+}
+
+impl VolumesOptions {
+	/// Every `docker compose volumes` flag, in CLI order. A constructor rather
+	/// than a struct literal because the type is `#[non_exhaustive]`, so the
+	/// next flag to land is not a breaking change for anyone building one.
+	pub fn new(quiet: bool, json: bool) -> Self {
+		Self { quiet, json }
+	}
+
+	/// Print only volume names, `-q/--quiet`. Builder-style.
+	#[must_use]
+	pub fn with_quiet(mut self, quiet: bool) -> Self {
+		self.quiet = quiet;
+		self
+	}
+
+	/// Emit a JSON array instead of the table, `--format json`. Builder-style.
+	#[must_use]
+	pub fn with_json(mut self, json: bool) -> Self {
+		self.json = json;
+		self
+	}
 }
 
 impl Engine {

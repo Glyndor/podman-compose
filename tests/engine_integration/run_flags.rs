@@ -12,12 +12,15 @@ async fn engine_run_applies_user_workdir_env_and_entrypoint() {
 		None => return,
 	};
 	let proj = proj("ruwe");
-	let engine = Engine::new(client, proj.clone()).with_run_overrides(podup::RunOverrides {
-		entrypoint: Some("sh".to_string()),
-		user: Some("0".to_string()),
-		workdir: Some("/tmp".to_string()),
-		..Default::default()
-	});
+	let engine = Engine::new(client, proj.clone()).with_run_overrides(podup::RunOverrides::new(
+		Some("0".to_string()),
+		Some("/tmp".to_string()),
+		Some("sh".to_string()),
+		Vec::new(),
+		Vec::new(),
+		false,
+		false,
+	));
 	let file = parse_str("services:\n  job:\n    image: alpine:latest\n").unwrap();
 
 	// --entrypoint sh, cmd is its args; -u root, -w /tmp, -e MARK=ok. The command
@@ -26,16 +29,18 @@ async fn engine_run_applies_user_workdir_env_and_entrypoint() {
 		.run(
 			&file,
 			"job",
-			podup::RunOptions {
-				cmd: vec![
+			podup::RunOptions::new(
+				vec![
 					"-c".to_string(),
 					"test \"$(pwd)\" = /tmp && test \"$(id -u)\" = 0 && test \"$MARK\" = ok"
 						.to_string(),
 				],
-				rm: true,
-				env_overrides: vec!["MARK=ok".to_string()],
-				..Default::default()
-			},
+				true,
+				false,
+				vec!["MARK=ok".to_string()],
+				None,
+				false,
+			),
 		)
 		.await;
 	assert!(
@@ -62,12 +67,15 @@ async fn engine_run_applies_volume_publish_and_interactive() {
 	let mount = format!("{}:/mnt/in:ro,z", dir.path().to_str().unwrap());
 
 	let proj = proj("rvp");
-	let engine = Engine::new(client, proj.clone()).with_run_overrides(podup::RunOverrides {
-		volumes: vec![mount],
-		publish: vec!["127.0.0.1:0:9".to_string()],
-		interactive: true,
-		..Default::default()
-	});
+	let engine = Engine::new(client, proj.clone()).with_run_overrides(podup::RunOverrides::new(
+		None,
+		None,
+		None,
+		vec![mount],
+		vec!["127.0.0.1:0:9".to_string()],
+		true,
+		false,
+	));
 	let file = parse_str("services:\n  job:\n    image: alpine:latest\n").unwrap();
 
 	// -v bind-mounts the host dir, -i keeps stdin open, -p publishes an ad-hoc
@@ -76,15 +84,18 @@ async fn engine_run_applies_volume_publish_and_interactive() {
 		.run(
 			&file,
 			"job",
-			podup::RunOptions {
-				cmd: vec![
+			podup::RunOptions::new(
+				vec![
 					"sh".to_string(),
 					"-c".to_string(),
 					"test \"$(cat /mnt/in/marker.txt)\" = present".to_string(),
 				],
-				rm: true,
-				..Default::default()
-			},
+				true,
+				false,
+				Vec::new(),
+				None,
+				false,
+			),
 		)
 		.await;
 	assert!(
@@ -101,10 +112,15 @@ async fn engine_run_no_deps_skips_dependency_startup() {
 		None => return,
 	};
 	let proj = proj("rnd");
-	let engine = Engine::new(client, proj.clone()).with_run_overrides(podup::RunOverrides {
-		no_deps: true,
-		..Default::default()
-	});
+	let engine = Engine::new(client, proj.clone()).with_run_overrides(podup::RunOverrides::new(
+		None,
+		None,
+		None,
+		Vec::new(),
+		Vec::new(),
+		false,
+		true,
+	));
 	let file = parse_str(
 		"services:\n  job:\n    image: alpine:latest\n    depends_on:\n      - dep\n  dep:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n",
 	)
@@ -115,11 +131,14 @@ async fn engine_run_no_deps_skips_dependency_startup() {
 		.run(
 			&file,
 			"job",
-			podup::RunOptions {
-				cmd: vec!["true".to_string()],
-				rm: true,
-				..Default::default()
-			},
+			podup::RunOptions::new(
+				vec!["true".to_string()],
+				true,
+				false,
+				Vec::new(),
+				None,
+				false,
+			),
 		)
 		.await;
 	let names = engine
@@ -153,11 +172,14 @@ async fn engine_run_starts_dependencies_by_default() {
 		.run(
 			&file,
 			"job",
-			podup::RunOptions {
-				cmd: vec!["true".to_string()],
-				rm: true,
-				..Default::default()
-			},
+			podup::RunOptions::new(
+				vec!["true".to_string()],
+				true,
+				false,
+				Vec::new(),
+				None,
+				false,
+			),
 		)
 		.await;
 	let names = engine

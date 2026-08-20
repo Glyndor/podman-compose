@@ -219,12 +219,7 @@ pub(crate) async fn dispatch(
 				.build_all_with_options(
 					file,
 					&services,
-					&podup::BuildOptions {
-						no_cache,
-						pull,
-						build_args: build_arg,
-						quiet,
-					},
+					&podup::BuildOptions::new(no_cache, pull, build_arg, quiet),
 				)
 				.await?;
 			// `--push` pushes each freshly built image to its registry.

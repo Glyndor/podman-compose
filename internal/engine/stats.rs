@@ -14,9 +14,15 @@ use crate::units::SizeFormat;
 use super::Engine;
 
 /// Options for [`Engine::stats_with_options`], mirroring `docker compose stats`
-/// and the table-shaping flags the other list commands expose. Kept off the
-/// frozen [`Engine::stats`] signature so the published library API stays stable across minors.
+/// and the table-shaping flags the other list commands expose.
+///
+/// `#[non_exhaustive]` since 3.7.2, so a new flag can be added in a minor
+/// release without breaking every external caller that built the struct with
+/// a literal. Construct it via [`StatsOptions::new`] or the `with_*` builders
+/// below; a struct literal is refused outside this crate, which is what buys
+/// the room to grow.
 #[derive(Default)]
+#[non_exhaustive]
 pub struct StatsOptions {
 	/// Disable streaming; print a single snapshot and exit, `--no-stream`.
 	pub no_stream: bool,
@@ -40,6 +46,36 @@ impl StatsOptions {
 			no_trunc,
 			json,
 		}
+	}
+
+	/// Disable streaming; print a single snapshot and exit, `--no-stream`.
+	/// Builder-style.
+	#[must_use]
+	pub fn with_no_stream(mut self, no_stream: bool) -> Self {
+		self.no_stream = no_stream;
+		self
+	}
+
+	/// Include non-running containers as zeroed rows, `-a/--all`. Builder-style.
+	#[must_use]
+	pub fn with_all(mut self, all: bool) -> Self {
+		self.all = all;
+		self
+	}
+
+	/// Emit JSON instead of the table, `--format json`. Builder-style.
+	#[must_use]
+	pub fn with_json(mut self, json: bool) -> Self {
+		self.json = json;
+		self
+	}
+
+	/// Disable container-name truncation in the table, `--no-trunc`.
+	/// Builder-style.
+	#[must_use]
+	pub fn with_no_trunc(mut self, no_trunc: bool) -> Self {
+		self.no_trunc = no_trunc;
+		self
 	}
 }
 

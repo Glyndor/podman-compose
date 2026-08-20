@@ -11,7 +11,14 @@ use super::Engine;
 
 /// Options for [`Engine::stream_events`], mirroring `docker compose events`
 /// (`--since`, `--until`, `--filter`).
+///
+/// `#[non_exhaustive]` since 3.7.2, so a new flag can be added in a minor
+/// release without breaking every external caller that built the struct with
+/// a literal. Construct it via [`EventsOptions::new`] or the `with_*` builders
+/// below; a struct literal is refused outside this crate, which is what buys
+/// the room to grow.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct EventsOptions {
 	/// Only events at or after this timestamp/relative time (`--since`).
 	pub since: Option<String>,
@@ -19,6 +26,43 @@ pub struct EventsOptions {
 	pub until: Option<String>,
 	/// Extra `KEY=VALUE` event filters (`--filter`, e.g. `event=start`).
 	pub filters: Vec<String>,
+}
+
+impl EventsOptions {
+	/// Every `docker compose events` flag, in CLI order. A constructor rather
+	/// than a struct literal because the type is `#[non_exhaustive]`, so the
+	/// next flag to land is not a breaking change for anyone building one.
+	pub fn new(since: Option<String>, until: Option<String>, filters: Vec<String>) -> Self {
+		Self {
+			since,
+			until,
+			filters,
+		}
+	}
+
+	/// Only events at or after this timestamp/relative time (`--since`).
+	/// Builder-style.
+	#[must_use]
+	pub fn with_since(mut self, since: Option<String>) -> Self {
+		self.since = since;
+		self
+	}
+
+	/// Only events up to this timestamp/relative time (`--until`).
+	/// Builder-style.
+	#[must_use]
+	pub fn with_until(mut self, until: Option<String>) -> Self {
+		self.until = until;
+		self
+	}
+
+	/// Extra `KEY=VALUE` event filters (`--filter`, e.g. `event=start`).
+	/// Builder-style.
+	#[must_use]
+	pub fn with_filters(mut self, filters: Vec<String>) -> Self {
+		self.filters = filters;
+		self
+	}
 }
 
 impl Engine {
