@@ -267,6 +267,7 @@ pub fn generate_at(file: &ComposeFile, project: &str, base_dir: &std::path::Path
 		declared_networks: &declared_networks,
 		secrets: &file.secrets,
 		base_dir,
+		services: &file.services,
 	};
 	for (name, service) in &file.services {
 		// Emit a `.build` unit first so the systemd generator builds the image
