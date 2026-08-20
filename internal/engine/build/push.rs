@@ -73,7 +73,7 @@ where
 /// Options for [`Engine::push`], mirroring `docker compose push` (plus a Podman
 /// `--tls-verify` escape hatch for insecure/local registries).
 ///
-/// `#[non_exhaustive]` since 3.7.2, so a new flag can be added in a minor
+/// `#[non_exhaustive]` since 4.0.0, so a new flag can be added in a minor
 /// release without breaking every external caller that built the struct with
 /// a literal. Construct it via [`PushOptions::new`] or the `with_*` builders
 /// below; a struct literal is refused outside this crate, which is what buys

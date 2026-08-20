@@ -11,7 +11,7 @@ use crate::units::{format_bytes, format_duration, DurationFormat, SizeFormat};
 
 /// Options for [`Engine::ps_with_options`], mirroring `docker compose ps`.
 ///
-/// `#[non_exhaustive]` since 3.7.2, so a new flag can be added in a minor
+/// `#[non_exhaustive]` since 4.0.0, so a new flag can be added in a minor
 /// release without breaking every external caller that built the struct with
 /// a literal. Construct it via [`PsOptions::new`] or the `with_*` builders
 /// below; a struct literal is refused outside this crate, which is what buys
@@ -101,7 +101,7 @@ impl PsDisplayOptions {
 /// Service/status/name filters for [`Engine::ps_filtered`] (`docker compose ps`
 /// `--services`, `[SERVICE...]`, `--status`, `--filter`).
 ///
-/// `#[non_exhaustive]` since 3.7.2, same rationale as [`PsOptions`]: a new
+/// `#[non_exhaustive]` since 4.0.0, same rationale as [`PsOptions`]: a new
 /// filter kind can be added in a minor release without breaking external
 /// callers. Construct it via [`PsFilterOptions::new`] or the `with_*` builders
 /// below; a struct literal is refused outside this crate.

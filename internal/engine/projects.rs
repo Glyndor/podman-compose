@@ -12,7 +12,7 @@ use crate::libpod::{urlencoded, Client, API_PREFIX};
 
 /// Options for [`list_projects`] (`docker compose ls`).
 ///
-/// `#[non_exhaustive]` since 3.7.2, so a new flag can be added in a minor
+/// `#[non_exhaustive]` since 4.0.0, so a new flag can be added in a minor
 /// release without breaking every external caller that built the struct with
 /// a literal. Construct it via [`LsOptions::new`] or the `with_*` builders
 /// below; a struct literal is refused outside this crate, which is what buys

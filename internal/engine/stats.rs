@@ -16,7 +16,7 @@ use super::Engine;
 /// Options for [`Engine::stats_with_options`], mirroring `docker compose stats`
 /// and the table-shaping flags the other list commands expose.
 ///
-/// `#[non_exhaustive]` since 3.7.2, so a new flag can be added in a minor
+/// `#[non_exhaustive]` since 4.0.0, so a new flag can be added in a minor
 /// release without breaking every external caller that built the struct with
 /// a literal. Construct it via [`StatsOptions::new`] or the `with_*` builders
 /// below; a struct literal is refused outside this crate, which is what buys
