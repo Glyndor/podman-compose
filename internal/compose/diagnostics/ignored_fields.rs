@@ -81,6 +81,63 @@ pub(super) fn ignored_port_fields(file: &ComposeFile, out: &mut Vec<String>) {
 	}
 }
 
+/// Warn when a service publishes a port on every host interface. The
+/// compose-spec short form (`"5432:5432"`) and the long form with no
+/// `host_ip` both bind on all interfaces, which exposes services the
+/// operator thought were local-only (databases, admin UIs) to anything
+/// reachable on the host's network. An explicit `host_ip` — including
+/// `0.0.0.0` — is a decision taken and is not flagged, so flagging it
+/// would only train the reader to ignore the warning.
+pub(super) fn port_published_on_all_interfaces(file: &ComposeFile, out: &mut Vec<String>) {
+	for (service, def) in &file.services {
+		for port in &def.ports {
+			match port {
+				PortMapping::Short(s) => {
+					let no_proto = s.split('/').next().unwrap_or(s);
+					// IPv6 form (`[::1]:host:container`) always carries an IP.
+					if no_proto.starts_with('[') {
+						continue;
+					}
+					let colon_count = no_proto.chars().filter(|&c| c == ':').count();
+					// 0 colons = container-only (expose, not publish).
+					// 2+ colons = ip:host:container (has IP).
+					// 1 colon = host:container without IP.
+					if colon_count == 1 {
+						let mut parts = no_proto.split(':');
+						let host = parts.next().unwrap_or("");
+						let cont = parts.next().unwrap_or("");
+						out.push(format!(
+							"service '{service}': port {host} is published on every \
+							 interface; use \"127.0.0.1:{host}:{cont}\" to keep it on \
+							 the host"
+						));
+					}
+				}
+				PortMapping::Long {
+					published: Some(p),
+					host_ip,
+					..
+				} => {
+					let explicit = host_ip.as_deref().is_some_and(|s| !s.trim().is_empty());
+					if !explicit {
+						let host = p.as_str_val();
+						out.push(format!(
+							"service '{service}': port {host} is published on every \
+							 interface; use host_ip: \"127.0.0.1\" to keep it on the \
+							 host"
+						));
+					}
+				}
+				PortMapping::Long {
+					published: None, ..
+				} => {
+					// No `published` = port is exposed, not published on host.
+				}
+			}
+		}
+	}
+}
+
 /// Per-mount long-form volume options podup parses but does not forward.
 pub(super) fn ignored_volume_mount_fields(file: &ComposeFile, out: &mut Vec<String>) {
 	for (service, def) in &file.services {
