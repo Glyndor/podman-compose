@@ -5,7 +5,7 @@
 //! behaviour: every field is something an external caller sets, and every
 //! `with_*` is part of the API the crate promises not to break.
 
-/// Options for [`Engine::images_with_options`].
+/// Options for [`crate::Engine::images_with_options`].
 ///
 /// `#[non_exhaustive]` since 4.0.0, so a new flag can be added in a minor
 /// release without breaking every external caller that built the struct with
@@ -52,7 +52,7 @@ impl ImagesOptions {
 /// back into the previous behaviour.
 pub const DEFAULT_LOG_TAIL: &str = "100";
 
-/// Options for [`Engine::logs_with_options`], mirroring `docker compose logs`.
+/// Options for [`crate::Engine::logs_with_options`], mirroring `docker compose logs`.
 ///
 /// `#[non_exhaustive]` since 4.0.0, so a new flag can be added in a minor
 /// release without breaking every external caller that built the struct with
@@ -133,7 +133,7 @@ impl LogsOptions {
 	}
 }
 
-/// Prefix-display options for [`Engine::logs_with_display`] (`docker compose
+/// Prefix-display options for [`crate::Engine::logs_with_display`] (`docker compose
 /// logs --no-color` / `--no-log-prefix`).
 ///
 /// `#[non_exhaustive]` since 4.0.0, same rationale as [`LogsOptions`].

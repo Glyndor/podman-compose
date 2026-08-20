@@ -6,7 +6,7 @@
 //! sets, and every `with_*` is part of the published API. Keeping them
 //! together makes the whole `run` contract readable in one file.
 
-/// Options for [`Engine::run`].
+/// Options for [`crate::Engine::run`].
 ///
 /// `#[non_exhaustive]` since 4.0.0, so a new field can be added in a minor
 /// release without breaking every external caller that built the struct with
@@ -103,7 +103,7 @@ impl RunOptions {
 }
 
 /// Extra `docker compose run` flag overrides threaded through the engine
-/// builder ([`Engine::with_run_overrides`]).
+/// builder ([`crate::Engine::with_run_overrides`]).
 ///
 /// `#[non_exhaustive]` since 4.0.0, same rationale as [`RunOptions`]: the
 /// next flag to land is not a breaking change for anyone building one with a
