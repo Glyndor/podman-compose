@@ -1,3 +1,31 @@
+podup (3.8.0) unstable; urgency=medium
+
+  Added
+
+  * `PodmanError` and the predicates the engine's own retry paths use
+    (`is_timeout`, `is_state_conflict`, `is_already_exists`, `is_image_in_use`,
+    `is_kill_of_stopped`, `is_incomplete_message`, `stream_end_kind`) are part
+    of the public API. `ComposeError::Podman` already carried the type, so a
+    caller could hold the error but not ask it anything: telling a timeout
+    apart from a state conflict meant matching on the `Display` string, which
+    is not a contract I want anyone depending on. A compile-time test now
+    pins the surface so it cannot narrow again by accident.
+
+  Fixed
+
+  * `push` uploaded only the tag named by `image:`, silently skipping every
+    alias declared under `build.tags`. The command still exited zero, so a
+    service that builds three tags and pushes them reported success while two
+    of them were never written to the registry. Every tag is pushed now, and
+    the integration test reads the images back out of a live `registry:2`
+    rather than trusting the exit code.
+  * The release workflow checked the signing helper out on top of the
+    workspace, which left the tree dirty and made `cargo publish` refuse to
+    run. The helper is cloned outside the workspace now, and a gate fails the
+    job before publishing if the tree is not clean.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Wed, 20 Aug 2026 06:55:00 -0500
+
 podup (3.7.1) unstable; urgency=medium
 
   3.7.0 was tagged but never released: its release workflow failed while
