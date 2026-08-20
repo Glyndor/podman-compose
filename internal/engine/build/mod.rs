@@ -25,6 +25,7 @@ use futures_util::StreamExt;
 use tracing::{info, warn};
 
 use crate::compose::types::{BuildConfig, Service};
+use crate::engine::container_config::resources::is_known_ulimit;
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::image::BuildOutput;
 use crate::libpod::urlencoded;
@@ -58,7 +59,14 @@ enum BodyPlan {
 /// `docker compose build`-style CLI overrides. Each augments (never weakens)
 /// the per-service `build:` config: a flag forces the behaviour on even when
 /// the compose file leaves it off.
+///
+/// `#[non_exhaustive]` since 4.0.0, so a new flag can be added in a minor
+/// release without breaking every external caller that built the struct with
+/// a literal. Construct it via [`BuildOptions::new`] or the `with_*` builders
+/// below; a struct literal is refused outside this crate, which is what buys
+/// the room to grow.
 #[derive(Default, Clone)]
+#[non_exhaustive]
 pub struct BuildOptions {
 	/// Force a cache-less build (`--no-cache`).
 	pub no_cache: bool,
@@ -68,6 +76,80 @@ pub struct BuildOptions {
 	pub build_args: Vec<String>,
 	/// Suppress build output (`-q/--quiet`).
 	pub quiet: bool,
+}
+
+impl BuildOptions {
+	/// Every `docker compose build` flag, in CLI order. A constructor rather
+	/// than a struct literal because the type is `#[non_exhaustive]`, so the
+	/// next flag to land is not a breaking change for anyone building one.
+	pub fn new(no_cache: bool, pull: bool, build_args: Vec<String>, quiet: bool) -> Self {
+		Self {
+			no_cache,
+			pull,
+			build_args,
+			quiet,
+		}
+	}
+
+	/// Force a cache-less build (`--no-cache`). Builder-style.
+	#[must_use]
+	pub fn with_no_cache(mut self, no_cache: bool) -> Self {
+		self.no_cache = no_cache;
+		self
+	}
+
+	/// Always attempt to pull a newer base image (`--pull`). Builder-style.
+	#[must_use]
+	pub fn with_pull(mut self, pull: bool) -> Self {
+		self.pull = pull;
+		self
+	}
+
+	/// Extra build args (`KEY=VAL`); override the compose `build.args` on
+	/// conflict. Builder-style.
+	#[must_use]
+	pub fn with_build_args(mut self, build_args: Vec<String>) -> Self {
+		self.build_args = build_args;
+		self
+	}
+
+	/// Suppress build output (`-q/--quiet`). Builder-style.
+	#[must_use]
+	pub fn with_quiet(mut self, quiet: bool) -> Self {
+		self.quiet = quiet;
+		self
+	}
+}
+
+/// Render `build.ulimits` into the `name=soft:hard` strings the libpod build
+/// endpoint takes.
+///
+/// podup used to report this field as having no libpod mapping. It does.
+/// Measured on podman 5.7.0 by building the same Containerfile twice through
+/// the API, with a `RUN` that prints `ulimit -n`: without the parameter the
+/// build saw 524288, with `ulimits=["nofile=1234:1234"]` it saw 1234.
+///
+/// An unrecognised name is dropped rather than forwarded. The value reaches a
+/// query string, so an unknown name is either a typo or an injection attempt —
+/// the same reasoning the container-side `build_ulimits` applies.
+fn render_build_ulimits(build: &BuildConfig) -> Vec<String> {
+	build
+		.ulimits()
+		.iter()
+		.filter_map(|(name, cfg)| {
+			if !is_known_ulimit(name) {
+				tracing::warn!(
+					"build.ulimits '{name}' is not a recognized resource name and is ignored"
+				);
+				return None;
+			}
+			let (soft, hard) = (cfg.soft(), cfg.hard());
+			// Podman rejects a soft limit above the hard one; the container
+			// path clamps rather than failing the build, so match it.
+			let soft = soft.min(hard);
+			Some(format!("{name}={soft}:{hard}"))
+		})
+		.collect()
 }
 
 impl Engine {
@@ -308,6 +390,12 @@ impl Engine {
 		} else {
 			Some(super::to_query_json("build.labels", &labels)?)
 		};
+		let build_ulimits = render_build_ulimits(build);
+		let ulimits_json = if build_ulimits.is_empty() {
+			None
+		} else {
+			Some(super::to_query_json("build.ulimits", &build_ulimits)?)
+		};
 
 		let mut qs = format!(
 			"t={}&rm=true&nocache={}",
@@ -338,6 +426,9 @@ impl Engine {
 		}
 		if let Some(l) = &labels_json {
 			qs.push_str(&format!("&labels={}", urlencoded(l)));
+		}
+		if let Some(u) = &ulimits_json {
+			qs.push_str(&format!("&ulimits={}", urlencoded(u)));
 		}
 		if let Some(target) = build.target() {
 			qs.push_str(&format!("&target={}", urlencoded(target)));
@@ -512,107 +603,5 @@ impl Engine {
 }
 
 #[cfg(test)]
-mod tests {
-	use super::Engine;
-	use crate::libpod::Client;
-
-	fn engine(base: std::path::PathBuf) -> Engine {
-		Engine::with_base_dir(Client::new("/nonexistent.sock"), "p".into(), base)
-	}
-
-	fn build_of(file: &crate::compose::types::ComposeFile) -> &crate::compose::types::BuildConfig {
-		file.services["app"].build.as_ref().unwrap()
-	}
-
-	#[test]
-	fn build_secret_from_file_shipped_in_tar() {
-		let dir = tempfile::tempdir().unwrap();
-		std::fs::write(dir.path().join("token.txt"), b"s3cr3t").unwrap();
-		let yaml = "services:\n  app:\n    build:\n      context: .\n      secrets:\n        - tok\nsecrets:\n  tok:\n    file: token.txt\n";
-		let file = crate::compose::parse_str(yaml).unwrap();
-		let e = engine(dir.path().to_path_buf());
-		let (files, specs) = e.resolve_build_secrets(build_of(&file), &file).unwrap();
-		assert_eq!(
-			specs,
-			vec!["id=tok,src=.podup-build-secret-tok".to_string()]
-		);
-		assert_eq!(files.len(), 1);
-		assert_eq!(files[0].0, ".podup-build-secret-tok");
-		assert_eq!(files[0].1, b"s3cr3t");
-	}
-
-	#[test]
-	fn build_secret_content_inlined() {
-		let yaml = "services:\n  app:\n    build:\n      context: .\n      secrets:\n        - c\nsecrets:\n  c:\n    content: inline-value\n";
-		let file = crate::compose::parse_str(yaml).unwrap();
-		let e = engine(std::env::temp_dir());
-		let (files, _) = e.resolve_build_secrets(build_of(&file), &file).unwrap();
-		assert_eq!(files[0].1, b"inline-value");
-	}
-
-	#[test]
-	fn build_secret_external_is_skipped() {
-		let yaml = "services:\n  app:\n    build:\n      context: .\n      secrets:\n        - ext\nsecrets:\n  ext:\n    external: true\n";
-		let file = crate::compose::parse_str(yaml).unwrap();
-		let e = engine(std::env::temp_dir());
-		let (files, specs) = e.resolve_build_secrets(build_of(&file), &file).unwrap();
-		assert!(files.is_empty());
-		assert!(specs.is_empty());
-	}
-
-	#[tokio::test]
-	async fn empty_build_arg_key_is_rejected() {
-		// `--build-arg =value` is a user typo Podman would silently ignore; we
-		// reject it before contacting the daemon.
-		let dir = tempfile::tempdir().unwrap();
-		std::fs::write(dir.path().join("Dockerfile"), b"FROM alpine\n").unwrap();
-		let yaml = "services:\n  app:\n    build:\n      context: .\n";
-		let file = crate::compose::parse_str(yaml).unwrap();
-		let e = engine(dir.path().to_path_buf());
-		let opts = super::BuildOptions {
-			build_args: vec!["=orphan".to_string()],
-			..Default::default()
-		};
-		let err = e
-			.build_service("app", &file.services["app"], &file, &opts)
-			.await
-			.expect_err("empty build-arg key must be rejected");
-		assert!(
-			err.to_string().contains("build-arg"),
-			"unexpected error: {err}"
-		);
-	}
-
-	#[tokio::test]
-	async fn invalid_shm_size_is_rejected() {
-		// A malformed `build.shm_size` must error rather than silently fall back to
-		// the default shm size.
-		let dir = tempfile::tempdir().unwrap();
-		std::fs::write(dir.path().join("Dockerfile"), b"FROM alpine\n").unwrap();
-		let yaml = "services:\n  app:\n    build:\n      context: .\n      shm_size: \"64mb!\"\n";
-		let file = crate::compose::parse_str(yaml).unwrap();
-		let e = engine(dir.path().to_path_buf());
-		let err = e
-			.build_service(
-				"app",
-				&file.services["app"],
-				&file,
-				&super::BuildOptions::default(),
-			)
-			.await
-			.expect_err("malformed shm_size must be rejected");
-		assert!(
-			err.to_string().contains("shm_size"),
-			"unexpected error: {err}"
-		);
-	}
-
-	#[test]
-	fn build_secret_undefined_errors() {
-		let yaml =
-			"services:\n  app:\n    build:\n      context: .\n      secrets:\n        - missing\n";
-		let file = crate::compose::parse_str(yaml).unwrap();
-		let e = engine(std::env::temp_dir());
-		assert!(e.resolve_build_secrets(build_of(&file), &file).is_err());
-	}
-}
+#[path = "build_tests.rs"]
+mod tests;

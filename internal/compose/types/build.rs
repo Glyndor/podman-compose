@@ -246,6 +246,16 @@ impl BuildConfig {
 		}
 	}
 
+	/// Returns the per-build ulimits.
+	pub fn ulimits(&self) -> &IndexMap<String, UlimitConfig> {
+		static EMPTY: std::sync::LazyLock<IndexMap<String, UlimitConfig>> =
+			std::sync::LazyLock::new(IndexMap::new);
+		match self {
+			BuildConfig::Context(_) => &EMPTY,
+			BuildConfig::Config { ulimits, .. } => ulimits,
+		}
+	}
+
 	/// Returns the inline Dockerfile contents, if set.
 	pub fn dockerfile_inline(&self) -> Option<&str> {
 		match self {

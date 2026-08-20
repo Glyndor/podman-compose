@@ -127,11 +127,7 @@ async fn build_with_cli_no_cache_and_build_arg() {
 		.build_all_with_options(
 			&file,
 			&[],
-			&podup::BuildOptions {
-				no_cache: true,
-				build_args: vec!["VERSION=2.0".to_string()],
-				..Default::default()
-			},
+			&podup::BuildOptions::new(true, false, vec!["VERSION=2.0".to_string()], false),
 		)
 		.await
 		.unwrap();
@@ -569,10 +565,7 @@ async fn up_keeps_the_image_a_no_cache_build_produced() {
 		.build_all_with_options(
 			&file,
 			&[],
-			&podup::BuildOptions {
-				no_cache: true,
-				..Default::default()
-			},
+			&podup::BuildOptions::new(true, false, Vec::new(), false),
 		)
 		.await
 		.unwrap();

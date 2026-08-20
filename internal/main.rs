@@ -281,11 +281,7 @@ async fn run() -> podup::Result<()> {
 		)?;
 		return podup::list_projects_filtered(
 			&client,
-			podup::LsOptions {
-				all: *all,
-				quiet: *quiet,
-				json: *format == OutputFormat::Json,
-			},
+			podup::LsOptions::new(*all, *quiet, *format == OutputFormat::Json),
 			filter,
 		)
 		.await;
@@ -348,17 +344,13 @@ async fn run() -> podup::Result<()> {
 		return engine
 			.ps_filtered_with_display(
 				&file,
-				podup::PsOptions {
-					all: *all,
-					quiet: *quiet,
-					json: *format == OutputFormat::Json,
-				},
-				podup::PsFilterOptions {
-					services_only: *services_only,
-					services: services.clone(),
-					status: status.clone(),
-					filters: filter.clone(),
-				},
+				podup::PsOptions::new(*all, *quiet, *format == OutputFormat::Json),
+				podup::PsFilterOptions::new(
+					*services_only,
+					services.clone(),
+					status.clone(),
+					filter.clone(),
+				),
 				podup::PsDisplayOptions::default().with_size(*size),
 			)
 			.await;

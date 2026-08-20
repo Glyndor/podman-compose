@@ -14,6 +14,7 @@ mod images;
 mod inspect;
 mod inspect_util;
 mod log_prefix;
+mod options;
 mod ps;
 pub(crate) mod terminal;
 
@@ -22,51 +23,9 @@ pub use ps::{PsDisplayOptions, PsFilterOptions, PsOptions};
 pub use exec::ExecOptions;
 #[allow(unused_imports)]
 use log_prefix::LinePrefixer;
+pub use options::{ImagesOptions, LogsDisplay, LogsOptions, DEFAULT_LOG_TAIL};
 
 pub use inspect::AttachOutcome;
-
-/// Options for [`Engine::images_with_options`].
-#[derive(Default)]
-pub struct ImagesOptions {
-	/// Print only image IDs, `-q/--quiet`.
-	pub quiet: bool,
-	/// Emit JSON instead of the table, `--format json`.
-	pub json: bool,
-}
-
-/// Default for `podup logs` when the user does not pass `--tail`: show the last
-/// 100 lines. `docker compose logs` defaults to "all"; podup's bounded default
-/// keeps the inspection case ("what just happened?") from flooding the
-/// terminal and stops CI scripts that capture `podup logs` from silently
-/// missing errors that landed before the window. Pass `--tail all` to opt
-/// back into the previous behaviour.
-pub const DEFAULT_LOG_TAIL: &str = "100";
-
-/// Options for [`Engine::logs_with_options`], mirroring `docker compose logs`.
-#[derive(Default)]
-pub struct LogsOptions {
-	/// Follow log output, `-f/--follow`.
-	pub follow: bool,
-	/// Number of lines to show from the end, `-n/--tail` (`None` = all).
-	pub tail: Option<String>,
-	/// Show logs since a timestamp/relative time, `--since`.
-	pub since: Option<String>,
-	/// Show logs until a timestamp/relative time, `--until`.
-	pub until: Option<String>,
-	/// Prefix each line with an RFC3339 timestamp, `-t/--timestamps`.
-	pub timestamps: bool,
-}
-
-/// Prefix-display options for [`Engine::logs_with_display`] (`docker compose
-/// logs --no-color` / `--no-log-prefix`). Kept off the frozen [`LogsOptions`]
-/// struct so the published library API stays stable across minors.
-#[derive(Default)]
-pub struct LogsDisplay {
-	/// Produce monochrome output (no colour in the prefix), `--no-color`.
-	pub no_color: bool,
-	/// Do not print the `{service} | ` prefix, `--no-log-prefix`.
-	pub no_log_prefix: bool,
-}
 
 /// Validate the `--tail`/`--since`/`--until` values client-side so a typo is
 /// rejected with a clear local message instead of a raw podman HTTP 400. `tail`

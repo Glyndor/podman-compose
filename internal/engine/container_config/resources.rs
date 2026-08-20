@@ -155,7 +155,7 @@ pub(crate) fn build_ulimits(service: &Service) -> Vec<Ulimit> {
 /// The Linux rlimit resource names Podman accepts (without the `RLIMIT_`
 /// prefix). A name outside this set is a typo or an injection attempt and is
 /// rejected rather than forwarded verbatim to the API.
-fn is_known_ulimit(name: &str) -> bool {
+pub(crate) fn is_known_ulimit(name: &str) -> bool {
 	const KNOWN: [&str; 16] = [
 		"core",
 		"cpu",

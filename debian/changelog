@@ -1,3 +1,84 @@
+podup (4.0.0) unstable; urgency=medium
+
+  Breaking
+
+  * Bridge networks are isolated from each other now. Docker does this and
+    podman does not, so a service could reach ports on a neighbouring network
+    that were never published. Measured with the same experiment on both
+    engines — a listener on an unpublished port in network B, a container in
+    network A dialling its address: docker 29.6.2 refused, podman 5.7.0
+    connected. Inside one network docker connects, which is what makes that a
+    measurement of isolation rather than of a broken dial.
+
+    podup passes netavark's `isolate` on every bridge network it creates.
+    Traffic within a network still flows and outbound internet still works,
+    both checked against a plain network. The option only bites when both
+    networks carry it, so this is a default rather than something to opt into:
+    one project opting in would protect nobody. Two podup projects no longer
+    reach each other's unpublished ports; a network created outside podup
+    without the option still can.
+
+    `driver_opts.isolate` wins if the compose file sets it, including to
+    `false`, for a project that deliberately spans networks.
+
+  Added
+
+  * Quadlet units carry `Notify=healthy` for a service with a healthcheck, so
+    `depends_on: condition: service_healthy` is honoured. Without it systemd
+    called a service started the moment its container was created, so
+    `After=`/`Requires=` ordered creation rather than readiness and a
+    dependant started against a service that was not serving yet. podup used
+    to warn that the condition "is not enforceable in Quadlet"; measured on
+    podman 5.7.0 with a probe that takes ten seconds to pass, a dependant now
+    starts ten seconds in rather than immediately. The warning is scoped to
+    what genuinely cannot work — a `service_healthy` naming a service with no
+    healthcheck, and `service_completed_successfully` — and names the service
+    at fault.
+
+  * `build.ulimits` reaches the build. It was reported as having no libpod
+    mapping; it has one. Measured on podman 5.7.0 by posting the same context
+    twice with a `RUN` that prints `ulimit -n`: 524288 without the parameter,
+    1234 with `ulimits=["nofile=1234:1234"]`. An unrecognised resource name is
+    dropped with a warning rather than forwarded into a query string.
+
+  Fixed
+
+  * Namespace validation is per-slot. One allow-list served `pid`, `ipc`,
+    `uts`, `cgroup` and `userns_mode`, which made it wrong for four of them.
+    It refused what podman accepts — `ipc: shareable`, and every
+    `userns_mode` value podman offers (`keep-id`, `auto`, `nomap`, and the
+    `keep-id:uid=…` and `auto:size=…` forms) — and accepted what podman
+    refuses, `none` on four slots, which then came back as a libpod error
+    naming no field. The error text now lists the modes the slot in hand
+    accepts. A short but legal `ns:/x` was also rejected for being shorter
+    than `"container:"`, which the check measured every prefix against.
+
+  Breaking (library only; the CLI is unchanged)
+
+  * Sixteen more public option structs are #[non_exhaustive] now:
+    BuildOptions, CommitOptions, CpOptions, EventsOptions, ImagesOptions,
+    LogsDisplay, LogsOptions, LsOptions, PsFilterOptions, PsOptions,
+    PullOptions, PushOptions, RunOptions, RunOverrides, StatsOptions and
+    VolumesOptions. That brings every published options struct under the same
+    rule, joining ExecOptions, PsDisplayOptions and VolumesDisplayOptions,
+    which already carried it.
+
+    A struct literal no longer compiles outside the crate. Each one gains a
+    `new(...)` taking every field plus a `with_<field>` builder per field, so
+    the replacement is `PsOptions::new(..)` or
+    `PsOptions::default().with_all(true)`.
+
+    This is the same trade 3.0.0 made for the compose option blocks. Adding a
+    field to a struct an external caller can build with a literal is a
+    breaking change, so every one of these structs was frozen: the surface
+    could not grow without a major. It can grow in a minor now.
+
+    A compile-time test (tests/semver_constructible_structs.rs) walks every
+    constructor and builder through the public API, so a new options struct
+    that skips the convention stops the build.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Thu, 20 Aug 2026 08:20:00 -0500
+
 podup (3.8.0) unstable; urgency=medium
 
   Added

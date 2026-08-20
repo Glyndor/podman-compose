@@ -30,14 +30,27 @@ const UTS_FIELD: &str = "uts";
 const USERNS_FIELD: &str = "userns_mode";
 const CGROUP_FIELD: &str = "cgroup";
 
-/// The namespace modes libpod's `ParseNamespace` accepts (in the form a
-/// compose-side string would be in).
+/// The namespace modes every slot accepts, in the form a compose-side string
+/// would be in.
 ///
-/// `host`, `private`, `pod`, and `none` are the simple modes. `container:<id>`
-/// joins another container's namespace (compose's `container:NAME` and
-/// `service:NAME` forms; podup rewrites service→container before this list
-/// sees it). The `ns:<path>` form joins a namespace by an absolute filesystem
-/// path — directly user-facing on the compose side, so it has to be allowed.
+/// This list used to be the whole allow-list, shared by all five slots, and
+/// that made it wrong for four of them. Measured against podman 5.7.0, only
+/// `host`, `private` and `pod` are universal: `none` and `shareable` parse for
+/// `ipc` alone, and `keep-id`/`auto`/`nomap` for `userns_mode` alone. The
+/// per-slot extras live in [`IPC_EXTRA_MODES`] and [`USERNS_EXTRA_MODES`].
+///
+/// The measurement distinguishes a mode podman refuses to *parse* — it says
+/// "unrecognized namespace mode" — from one that parses and then fails to
+/// apply. On a rootless host `--userns=auto` reports "not enough unused IDs in
+/// user namespace" and `--userns=private` wants a UID mapping; both are valid
+/// modes that this host cannot satisfy, and neither belongs in a syntax
+/// allow-list.
+///
+/// `container:<id>` joins another container's namespace (compose's
+/// `container:NAME` and `service:NAME` forms; podup rewrites service→container
+/// before this list sees it). The `ns:<path>` form joins a namespace by an
+/// absolute filesystem path — directly user-facing on the compose side, so it
+/// has to be allowed.
 ///
 /// `network_mode` is intentionally **not** validated here: the engine
 /// translates `service:NAME` to `container:<cname>` and accepts `bridge`,
@@ -47,12 +60,27 @@ const CGROUP_FIELD: &str = "cgroup";
 /// translation post-hoc; a rejected value still surfaces through the
 /// `netns` field of the rendered error, just via the libpod message rather
 /// than the pre-validator.
-const NS_MODES: &[&str] = &["host", "private", "pod", "none"];
+const NS_MODES: &[&str] = &["host", "private", "pod"];
+
+/// `ipc` takes two modes the other slots reject. `shareable` is the one
+/// compose files actually reach for — it is what lets a second container join
+/// this one's IPC namespace later, and podup used to refuse it outright.
+const IPC_EXTRA_MODES: &[&str] = &["none", "shareable"];
+
+/// `userns_mode` has its own vocabulary, and it is the reason this list had to
+/// stop being shared. `keep-id` maps the calling user into the container and
+/// is the standard rootless answer to a file-ownership mismatch; `nomap` maps
+/// nothing; `auto` lets podman pick a free range.
+const USERNS_EXTRA_MODES: &[&str] = &["keep-id", "auto", "nomap"];
 
 /// `container:` is not a value in the allow-list; it must carry an id.
 /// `ns:` is not a value either — it must carry a path. The presence of the
 /// prefix is the test; the suffix is whatever the user typed.
 const NS_PREFIX_MODES: &[&str] = &["container:", "ns:"];
+
+/// `keep-id` and `auto` also take options, as `keep-id:uid=1000,gid=1000` or
+/// `auto:size=65536`. Only `userns_mode` accepts these.
+const USERNS_PREFIX_MODES: &[&str] = &["keep-id:", "auto:"];
 
 /// Per-namespace validator entry: the compose-side field name and the mode
 /// value to validate. `None` means the namespace slot was unset (skip).
@@ -65,44 +93,66 @@ type NsSlot<'a> = (&'a str, Option<&'a str>);
 pub(crate) fn first_invalid_namespace(slots: &[NsSlot<'_>]) -> Option<(String, String, String)> {
 	for (field, value) in slots {
 		let Some(mode) = value else { continue };
-		if is_valid_namespace_mode(mode) {
+		if is_valid_namespace_mode(field, mode) {
 			continue;
 		}
 		return Some((
 			(*field).to_string(),
 			(*mode).to_string(),
-			allowed_namespace_modes(),
+			allowed_namespace_modes(field),
 		));
 	}
 	None
 }
 
-fn is_valid_namespace_mode(mode: &str) -> bool {
-	if NS_MODES.contains(&mode) {
+/// The plain modes this slot accepts on top of [`NS_MODES`].
+fn extra_modes(field: &str) -> &'static [&'static str] {
+	match field {
+		IPC_FIELD => IPC_EXTRA_MODES,
+		USERNS_FIELD => USERNS_EXTRA_MODES,
+		_ => &[],
+	}
+}
+
+/// The `prefix:suffix` forms this slot accepts on top of [`NS_PREFIX_MODES`].
+fn extra_prefixes(field: &str) -> &'static [&'static str] {
+	if field == USERNS_FIELD {
+		USERNS_PREFIX_MODES
+	} else {
+		&[]
+	}
+}
+
+fn is_valid_namespace_mode(field: &str, mode: &str) -> bool {
+	if NS_MODES.contains(&mode) || extra_modes(field).contains(&mode) {
 		return true;
 	}
-	if NS_PREFIX_MODES.iter().any(|p| mode.starts_with(p)) {
-		// `container:` and `ns:` both require a non-empty suffix.
-		return mode.len() > "container:".len();
+	// Measure the suffix against the prefix that actually matched. The old
+	// code compared every prefix against `"container:".len()`, which would
+	// have rejected a short but legal `ns:/x`.
+	for p in NS_PREFIX_MODES.iter().chain(extra_prefixes(field)) {
+		if mode.starts_with(p) {
+			return mode.len() > p.len();
+		}
 	}
 	false
 }
 
-fn allowed_namespace_modes() -> String {
+fn allowed_namespace_modes(field: &str) -> String {
 	let mut s = String::from("one of ");
 	let mut first = true;
-	for m in NS_MODES {
-		if !first {
+	let sep = |s: &mut String, first: &mut bool| {
+		if !*first {
 			s.push_str(", ");
 		}
-		first = false;
+		*first = false;
+	};
+	for m in NS_MODES.iter().chain(extra_modes(field)) {
+		sep(&mut s, &mut first);
 		write!(&mut s, "`{m}`").expect("writing to String never fails");
 	}
-	for p in NS_PREFIX_MODES {
-		if !first {
-			s.push_str(", ");
-		}
-		first = false;
+	for p in NS_PREFIX_MODES.iter().chain(extra_prefixes(field)) {
+		sep(&mut s, &mut first);
 		write!(&mut s, "`{p}<id-or-path>`").expect("writing to String never fails");
 	}
 	s
@@ -314,23 +364,92 @@ mod tests {
 	use super::*;
 	use std::collections::HashMap;
 
+	/// The modes every slot shares.
 	#[test]
 	fn namespace_modes_accept_allow_list() {
-		assert!(is_valid_namespace_mode("host"));
-		assert!(is_valid_namespace_mode("private"));
-		assert!(is_valid_namespace_mode("pod"));
-		assert!(is_valid_namespace_mode("none"));
-		assert!(is_valid_namespace_mode("container:abc"));
-		assert!(is_valid_namespace_mode("ns:/run/netns/foo"));
+		for field in [PID_FIELD, IPC_FIELD, UTS_FIELD, USERNS_FIELD, CGROUP_FIELD] {
+			assert!(is_valid_namespace_mode(field, "host"), "{field}");
+			assert!(is_valid_namespace_mode(field, "private"), "{field}");
+			assert!(is_valid_namespace_mode(field, "pod"), "{field}");
+			assert!(is_valid_namespace_mode(field, "container:abc"), "{field}");
+			assert!(
+				is_valid_namespace_mode(field, "ns:/run/netns/foo"),
+				"{field}"
+			);
+		}
 	}
 
 	#[test]
 	fn namespace_modes_reject_unknown() {
-		assert!(!is_valid_namespace_mode("evil"));
-		assert!(!is_valid_namespace_mode(""));
-		assert!(!is_valid_namespace_mode("HOST"));
-		assert!(!is_valid_namespace_mode("container:"));
-		assert!(!is_valid_namespace_mode("ns:"));
+		assert!(!is_valid_namespace_mode(PID_FIELD, "evil"));
+		assert!(!is_valid_namespace_mode(PID_FIELD, ""));
+		assert!(!is_valid_namespace_mode(PID_FIELD, "HOST"));
+		assert!(!is_valid_namespace_mode(PID_FIELD, "container:"));
+		assert!(!is_valid_namespace_mode(PID_FIELD, "ns:"));
+	}
+
+	/// A one-character path is still a path. The old check measured every
+	/// prefix against `"container:".len()`, so `ns:/x` failed for being short
+	/// rather than for being wrong.
+	#[test]
+	fn a_short_ns_path_is_accepted() {
+		assert!(is_valid_namespace_mode(PID_FIELD, "ns:/x"));
+	}
+
+	/// Measured against podman 5.7.0: `shareable` and `none` parse for `ipc`
+	/// and are rejected by every other slot with "unrecognized namespace
+	/// mode". `shareable` is the one compose files reach for, and podup used
+	/// to refuse it.
+	#[test]
+	fn ipc_takes_shareable_and_none_but_no_other_slot_does() {
+		assert!(is_valid_namespace_mode(IPC_FIELD, "shareable"));
+		assert!(is_valid_namespace_mode(IPC_FIELD, "none"));
+		for field in [PID_FIELD, UTS_FIELD, USERNS_FIELD, CGROUP_FIELD] {
+			assert!(!is_valid_namespace_mode(field, "shareable"), "{field}");
+			assert!(!is_valid_namespace_mode(field, "none"), "{field}");
+		}
+	}
+
+	/// Measured against podman 5.7.0. `keep-id` is the standard rootless
+	/// answer to a file-ownership mismatch, and podup rejected it outright
+	/// (#1463). The option-carrying forms parse too.
+	#[test]
+	fn userns_takes_its_own_vocabulary() {
+		for mode in [
+			"keep-id",
+			"auto",
+			"nomap",
+			"keep-id:uid=1000,gid=1000",
+			"auto:size=65536",
+		] {
+			assert!(is_valid_namespace_mode(USERNS_FIELD, mode), "{mode}");
+		}
+		// And nowhere else.
+		for field in [PID_FIELD, IPC_FIELD, UTS_FIELD, CGROUP_FIELD] {
+			assert!(!is_valid_namespace_mode(field, "keep-id"), "{field}");
+			assert!(!is_valid_namespace_mode(field, "auto"), "{field}");
+			assert!(!is_valid_namespace_mode(field, "nomap"), "{field}");
+		}
+		// The option form still needs an option after the colon.
+		assert!(!is_valid_namespace_mode(USERNS_FIELD, "keep-id:"));
+		assert!(!is_valid_namespace_mode(USERNS_FIELD, "auto:"));
+	}
+
+	/// The error text has to name the modes the slot in hand accepts, not a
+	/// union that would send the reader after a value their slot rejects.
+	#[test]
+	fn the_error_lists_the_modes_for_that_slot() {
+		let userns = allowed_namespace_modes(USERNS_FIELD);
+		assert!(userns.contains("keep-id"), "{userns}");
+		assert!(!userns.contains("shareable"), "{userns}");
+
+		let ipc = allowed_namespace_modes(IPC_FIELD);
+		assert!(ipc.contains("shareable"), "{ipc}");
+		assert!(!ipc.contains("keep-id"), "{ipc}");
+
+		let pid = allowed_namespace_modes(PID_FIELD);
+		assert!(!pid.contains("keep-id"), "{pid}");
+		assert!(!pid.contains("shareable"), "{pid}");
 	}
 
 	#[test]

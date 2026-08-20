@@ -63,11 +63,14 @@ async fn engine_run_command_succeeds() {
 		.run(
 			&file,
 			"job",
-			podup::RunOptions {
-				cmd: vec!["echo".to_string(), "hello".to_string()],
-				rm: true,
-				..Default::default()
-			},
+			podup::RunOptions::new(
+				vec!["echo".to_string(), "hello".to_string()],
+				true,
+				false,
+				Vec::new(),
+				None,
+				false,
+			),
 		)
 		.await;
 	assert!(result.is_ok(), "run failed: {result:?}");
@@ -87,11 +90,14 @@ async fn engine_run_nonzero_exit_returns_run_exited() {
 		.run(
 			&file,
 			"job",
-			podup::RunOptions {
-				cmd: vec!["false".to_string()],
-				rm: true,
-				..Default::default()
-			},
+			podup::RunOptions::new(
+				vec!["false".to_string()],
+				true,
+				false,
+				Vec::new(),
+				None,
+				false,
+			),
 		)
 		.await;
 	assert!(
