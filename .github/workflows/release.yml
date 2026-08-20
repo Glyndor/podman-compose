@@ -449,17 +449,29 @@ jobs:
             "$venv_py" .github/scripts/verify-signing-key.py "$base" "$sig"
           done
 
-      # Checked out under RUNNER_TEMP, not into the workspace: `cargo publish`
-      # refuses a dirty tree, and this helper's 83 files are untracked as far
-      # as podup's git is concerned. v3.7.1 published its release and then
-      # failed at the publish step for exactly that reason (#1462).
+      # Cloned by hand under RUNNER_TEMP rather than with actions/checkout:
+      # `cargo publish` refuses a dirty tree, and this helper's 83 files are
+      # untracked as far as podup's git is concerned. v3.7.1 published its
+      # release and then failed at the publish step for exactly that reason
+      # (#1462). actions/checkout cannot be the tool here — it rejects any
+      # `path:` outside the workspace ("is not under /home/runner/work/..."),
+      # which is what broke v3.8.0.
+      #
+      # The pin is still the commit SHA, not the tag: the tag is a moving
+      # label and the SHA is the boundary. `git fetch` of one SHA at depth 1
+      # is what keeps that guarantee without a full clone.
       - name: Check out Glyndor/.github for the asset-existence script
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Glyndor/.github
-          ref: 118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
-          persist-credentials: false
-          path: ${{ runner.temp }}/upstream
+        env:
+          UPSTREAM_SHA: 118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+        run: |
+          set -euo pipefail
+          git init -q "$RUNNER_TEMP/upstream"
+          git -C "$RUNNER_TEMP/upstream" remote add origin \
+            https://github.com/Glyndor/.github.git
+          git -C "$RUNNER_TEMP/upstream" fetch -q --depth 1 origin "$UPSTREAM_SHA"
+          git -C "$RUNNER_TEMP/upstream" checkout -q FETCH_HEAD
+          # Fail loudly rather than run a script that silently is not there.
+          test -f "$RUNNER_TEMP/upstream/scripts/verify-release-assets.py"
 
       - name: Verify every file the installers fetch is staged
         run: |
