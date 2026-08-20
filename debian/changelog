@@ -1,3 +1,31 @@
+podup (4.0.0) unstable; urgency=medium
+
+  Breaking (library only; the CLI is unchanged)
+
+  * Sixteen more public option structs are #[non_exhaustive] now:
+    BuildOptions, CommitOptions, CpOptions, EventsOptions, ImagesOptions,
+    LogsDisplay, LogsOptions, LsOptions, PsFilterOptions, PsOptions,
+    PullOptions, PushOptions, RunOptions, RunOverrides, StatsOptions and
+    VolumesOptions. That brings every published options struct under the same
+    rule, joining ExecOptions, PsDisplayOptions and VolumesDisplayOptions,
+    which already carried it.
+
+    A struct literal no longer compiles outside the crate. Each one gains a
+    `new(...)` taking every field plus a `with_<field>` builder per field, so
+    the replacement is `PsOptions::new(..)` or
+    `PsOptions::default().with_all(true)`.
+
+    This is the same trade 3.0.0 made for the compose option blocks. Adding a
+    field to a struct an external caller can build with a literal is a
+    breaking change, so every one of these structs was frozen: the surface
+    could not grow without a major. It can grow in a minor now.
+
+    A compile-time test (tests/semver_constructible_structs.rs) walks every
+    constructor and builder through the public API, so a new options struct
+    that skips the convention stops the build.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Thu, 20 Aug 2026 08:20:00 -0500
+
 podup (3.8.0) unstable; urgency=medium
 
   Added

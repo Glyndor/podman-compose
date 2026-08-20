@@ -61,16 +61,16 @@ pub(super) async fn dispatch_rest(
 				.run(
 					file,
 					&service,
-					podup::RunOptions {
+					podup::RunOptions::new(
 						cmd,
 						// Remove the one-off container after exit unless the user
 						// asked to keep it with `--no-rm`.
-						rm: !no_rm,
+						!no_rm,
 						detach,
 						env_overrides,
-						name_override: name,
+						name,
 						service_ports,
-					},
+					),
 				)
 				.await?
 		}
@@ -86,11 +86,7 @@ pub(super) async fn dispatch_rest(
 					file,
 					&src,
 					&dst,
-					podup::CpOptions {
-						index,
-						follow_link,
-						archive,
-					},
+					podup::CpOptions::new(index, follow_link, archive),
 				)
 				.await?
 		}
@@ -111,14 +107,7 @@ pub(super) async fn dispatch_rest(
 			// with an explicit `--format`); either selects JSON-line output.
 			let json = json || format == EventsFormat::Json;
 			engine
-				.stream_events_with_options(
-					json,
-					&podup::EventsOptions {
-						since,
-						until,
-						filters: filter,
-					},
-				)
+				.stream_events_with_options(json, &podup::EventsOptions::new(since, until, filter))
 				.await?
 		}
 		Commands::Attach {
@@ -149,12 +138,7 @@ pub(super) async fn dispatch_rest(
 					&service,
 					&image,
 					index,
-					podup::CommitOptions {
-						message,
-						author,
-						pause: Some(pause),
-						changes: change,
-					},
+					podup::CommitOptions::new(message, author, Some(pause), change),
 				)
 				.await?
 		}
@@ -184,10 +168,7 @@ pub(super) async fn dispatch_rest(
 				.push_with_quiet(
 					file,
 					&services,
-					podup::PushOptions {
-						ignore_failures: ignore_push_failures,
-						tls_verify,
-					},
+					podup::PushOptions::new(ignore_push_failures, tls_verify),
 					quiet,
 				)
 				.await?
@@ -212,10 +193,7 @@ pub(super) async fn dispatch_rest(
 				.list_volumes_with_display(
 					file,
 					&services,
-					podup::VolumesOptions {
-						quiet,
-						json: format == OutputFormat::Json,
-					},
+					podup::VolumesOptions::new(quiet, format == OutputFormat::Json),
 					podup::VolumesDisplayOptions::default().with_size(size),
 				)
 				.await?
@@ -230,10 +208,7 @@ pub(super) async fn dispatch_rest(
 				.images_with_services(
 					file,
 					&services,
-					podup::ImagesOptions {
-						quiet,
-						json: format == OutputFormat::Json,
-					},
+					podup::ImagesOptions::new(quiet, format == OutputFormat::Json),
 				)
 				.await?
 		}
@@ -251,17 +226,14 @@ pub(super) async fn dispatch_rest(
 				.logs_with_display(
 					file,
 					&services,
-					podup::LogsOptions {
+					podup::LogsOptions::new(
 						follow,
-						tail: cli_logs_tail_default(tail),
+						cli_logs_tail_default(tail),
 						since,
 						until,
 						timestamps,
-					},
-					podup::LogsDisplay {
-						no_color,
-						no_log_prefix,
-					},
+					),
+					podup::LogsDisplay::new(no_color, no_log_prefix),
 				)
 				.await?
 		}
@@ -297,10 +269,7 @@ pub(super) async fn dispatch_rest(
 				.pull_services_with_options(
 					file,
 					&services,
-					podup::PullOptions {
-						ignore_failures: ignore_pull_failures,
-						include_deps,
-					},
+					podup::PullOptions::new(ignore_pull_failures, include_deps),
 				)
 				.await?
 		}

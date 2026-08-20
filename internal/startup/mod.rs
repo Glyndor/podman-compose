@@ -179,15 +179,15 @@ pub(crate) fn run_overrides_for(command: &Commands) -> podup::RunOverrides {
 			interactive,
 			no_deps,
 			..
-		} => podup::RunOverrides {
-			user: user.clone(),
-			workdir: workdir.clone(),
-			entrypoint: entrypoint.clone(),
-			volumes: volume.clone(),
-			publish: publish.clone(),
-			interactive: *interactive,
-			no_deps: *no_deps,
-		},
+		} => podup::RunOverrides::new(
+			user.clone(),
+			workdir.clone(),
+			entrypoint.clone(),
+			volume.clone(),
+			publish.clone(),
+			*interactive,
+			*no_deps,
+		),
 		_ => podup::RunOverrides::default(),
 	}
 }

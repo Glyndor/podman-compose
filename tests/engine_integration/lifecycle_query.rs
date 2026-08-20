@@ -311,14 +311,7 @@ async fn pull_ignore_failures_continues_past_bad_image() {
 
 	// With --ignore-pull-failures the failure is logged and pull returns Ok.
 	let lenient = engine
-		.pull_services_with_options(
-			&file,
-			&[],
-			podup::PullOptions {
-				ignore_failures: true,
-				include_deps: false,
-			},
-		)
+		.pull_services_with_options(&file, &[], podup::PullOptions::new(true, false))
 		.await;
 	assert!(
 		lenient.is_ok(),
