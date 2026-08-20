@@ -119,15 +119,37 @@ impl Engine {
 				tracing::debug!("{name}: no image to push, skipping");
 				continue;
 			};
-			if let Err(e) = self.push_image(image, &opts, quiet).await {
-				if opts.ignore_failures {
-					warn!("push {image} failed (ignored): {e}");
-				} else {
-					return Err(e);
+			self.try_push(image, &opts, quiet).await?;
+			// `build.tags` is locally retagged by `apply_extra_tags` after the
+			// build. Push each one too — the registry would otherwise end up
+			// with only the primary `image`, and the other refs a user expects
+			// to deploy would never be published (#1476).
+			if let Some(build) = &service.build {
+				for extra in build.tags() {
+					if extra == image {
+						continue;
+					}
+					self.try_push(extra, &opts, quiet).await?;
 				}
 			}
 		}
 		Ok(())
+	}
+
+	/// Push a single image ref, applying `--ignore-push-failures` semantics:
+	/// warn-and-continue when the flag is set, otherwise surface the error so
+	/// the caller aborts the whole push. Shared by the primary and the extra
+	/// `build.tags` loop in [`Engine::push_with_quiet`] so the two cannot drift
+	/// on how a per-image failure is treated.
+	async fn try_push(&self, image: &str, opts: &PushOptions, quiet: bool) -> Result<()> {
+		match self.push_image(image, opts, quiet).await {
+			Ok(()) => Ok(()),
+			Err(e) if opts.ignore_failures => {
+				warn!("push {image} failed (ignored): {e}");
+				Ok(())
+			}
+			Err(e) => Err(e),
+		}
 	}
 
 	/// Push a single image ref and drain its progress stream, surfacing a
