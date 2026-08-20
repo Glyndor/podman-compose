@@ -51,3 +51,66 @@ jobs:
       package-check: true
       semver-check: true
       doc-warnings: true
+
+  # A cron that stops firing emits nothing, and "no alert" is indistinguishable
+  # from "all clear". Every scheduled workflow in this org went dark on
+  # 2026-06-29; four repos stayed dark for another four weeks while reporting
+  # `active` the whole time, and it cost a real finding. These turn the absence
+  # of a scheduled run into a red check on ordinary work.
+  #
+  # max-age-days allows about two periods, so one miss is tolerated:
+  # 15 for weekly, 3 for daily, 65 for the monthly benchmark.
+  freshness-audit:
+    permissions:
+      contents: read
+      actions: read
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    with:
+      workflow: audit.yml
+      max-age-days: 15
+
+  freshness-fuzz:
+    permissions:
+      contents: read
+      actions: read
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    with:
+      workflow: fuzz.yml
+      max-age-days: 15
+
+  freshness-podman-lane:
+    permissions:
+      contents: read
+      actions: read
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    with:
+      workflow: podman-lane.yml
+      max-age-days: 3
+
+  freshness-podman-watch:
+    permissions:
+      contents: read
+      actions: read
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    with:
+      workflow: podman-watch.yml
+      max-age-days: 3
+
+  # Monthly (`0 4 1 * *`), so seventeen days without a run is normal and a
+  # weekly threshold here would fail on ordinary work for most of the month.
+  freshness-benchmark:
+    permissions:
+      contents: read
+      actions: read
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    with:
+      workflow: benchmark.yml
+      max-age-days: 65
+
+  # Dependabot silently stops proposing updates when its config is not
+  # re-registered, and like a dead cron it reports nothing at all. This fails
+  # when no pull request has been opened recently enough.
+  dependabot-freshness:
+    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    with:
+      max-age-days: 15
