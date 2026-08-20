@@ -25,6 +25,7 @@ use futures_util::StreamExt;
 use tracing::{info, warn};
 
 use crate::compose::types::{BuildConfig, Service};
+use crate::engine::container_config::resources::is_known_ulimit;
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::image::BuildOutput;
 use crate::libpod::urlencoded;
@@ -118,6 +119,37 @@ impl BuildOptions {
 		self.quiet = quiet;
 		self
 	}
+}
+
+/// Render `build.ulimits` into the `name=soft:hard` strings the libpod build
+/// endpoint takes.
+///
+/// podup used to report this field as having no libpod mapping. It does.
+/// Measured on podman 5.7.0 by building the same Containerfile twice through
+/// the API, with a `RUN` that prints `ulimit -n`: without the parameter the
+/// build saw 524288, with `ulimits=["nofile=1234:1234"]` it saw 1234.
+///
+/// An unrecognised name is dropped rather than forwarded. The value reaches a
+/// query string, so an unknown name is either a typo or an injection attempt —
+/// the same reasoning the container-side `build_ulimits` applies.
+fn render_build_ulimits(build: &BuildConfig) -> Vec<String> {
+	build
+		.ulimits()
+		.iter()
+		.filter_map(|(name, cfg)| {
+			if !is_known_ulimit(name) {
+				tracing::warn!(
+					"build.ulimits '{name}' is not a recognized resource name and is ignored"
+				);
+				return None;
+			}
+			let (soft, hard) = (cfg.soft(), cfg.hard());
+			// Podman rejects a soft limit above the hard one; the container
+			// path clamps rather than failing the build, so match it.
+			let soft = soft.min(hard);
+			Some(format!("{name}={soft}:{hard}"))
+		})
+		.collect()
 }
 
 impl Engine {
@@ -358,6 +390,12 @@ impl Engine {
 		} else {
 			Some(super::to_query_json("build.labels", &labels)?)
 		};
+		let build_ulimits = render_build_ulimits(build);
+		let ulimits_json = if build_ulimits.is_empty() {
+			None
+		} else {
+			Some(super::to_query_json("build.ulimits", &build_ulimits)?)
+		};
 
 		let mut qs = format!(
 			"t={}&rm=true&nocache={}",
@@ -388,6 +426,9 @@ impl Engine {
 		}
 		if let Some(l) = &labels_json {
 			qs.push_str(&format!("&labels={}", urlencoded(l)));
+		}
+		if let Some(u) = &ulimits_json {
+			qs.push_str(&format!("&ulimits={}", urlencoded(u)));
 		}
 		if let Some(target) = build.target() {
 			qs.push_str(&format!("&target={}", urlencoded(target)));

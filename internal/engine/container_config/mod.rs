@@ -12,7 +12,7 @@ use crate::error::ComposeError;
 use crate::libpod::types::container::{HealthConfig, LogConfig};
 use crate::size;
 
-mod resources;
+pub(crate) mod resources;
 pub(super) use resources::{build_resource_limits, build_ulimits, cdi_devices};
 
 // ---------------------------------------------------------------------------
