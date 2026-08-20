@@ -63,6 +63,18 @@ pub use engine::{
 pub use error::{ComposeError, Result};
 /// The libpod `Client`, surfaced for callers that talk to Podman directly.
 pub use libpod::Client;
+/// The libpod error type carried inside [`ComposeError::Podman`], with the
+/// predicates the engine's own retry paths use.
+///
+/// An embedding daemon has to tell a transport fault it should retry from a
+/// rejection it should not, and the only alternative to these predicates is
+/// matching on the message text — which breaks silently the day libpod rewords
+/// one.
+pub use libpod::PodmanError;
+/// Log frames as libpod delivers them, and the stream parsers that produce
+/// them, for callers routing container output somewhere other than this
+/// process's stdout.
+pub use libpod::{parse_json_lines, parse_multiplexed, parse_raw, LogOutput};
 
 /// Internal parsers exposed only under `test-helpers` for fuzzing and tests.
 ///
