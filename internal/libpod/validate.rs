@@ -30,14 +30,27 @@ const UTS_FIELD: &str = "uts";
 const USERNS_FIELD: &str = "userns_mode";
 const CGROUP_FIELD: &str = "cgroup";
 
-/// The namespace modes libpod's `ParseNamespace` accepts (in the form a
-/// compose-side string would be in).
+/// The namespace modes every slot accepts, in the form a compose-side string
+/// would be in.
 ///
-/// `host`, `private`, `pod`, and `none` are the simple modes. `container:<id>`
-/// joins another container's namespace (compose's `container:NAME` and
-/// `service:NAME` forms; podup rewrites service→container before this list
-/// sees it). The `ns:<path>` form joins a namespace by an absolute filesystem
-/// path — directly user-facing on the compose side, so it has to be allowed.
+/// This list used to be the whole allow-list, shared by all five slots, and
+/// that made it wrong for four of them. Measured against podman 5.7.0, only
+/// `host`, `private` and `pod` are universal: `none` and `shareable` parse for
+/// `ipc` alone, and `keep-id`/`auto`/`nomap` for `userns_mode` alone. The
+/// per-slot extras live in [`IPC_EXTRA_MODES`] and [`USERNS_EXTRA_MODES`].
+///
+/// The measurement distinguishes a mode podman refuses to *parse* — it says
+/// "unrecognized namespace mode" — from one that parses and then fails to
+/// apply. On a rootless host `--userns=auto` reports "not enough unused IDs in
+/// user namespace" and `--userns=private` wants a UID mapping; both are valid
+/// modes that this host cannot satisfy, and neither belongs in a syntax
+/// allow-list.
+///
+/// `container:<id>` joins another container's namespace (compose's
+/// `container:NAME` and `service:NAME` forms; podup rewrites service→container
+/// before this list sees it). The `ns:<path>` form joins a namespace by an
+/// absolute filesystem path — directly user-facing on the compose side, so it
+/// has to be allowed.
 ///
 /// `network_mode` is intentionally **not** validated here: the engine
 /// translates `service:NAME` to `container:<cname>` and accepts `bridge`,
@@ -47,7 +60,6 @@ const CGROUP_FIELD: &str = "cgroup";
 /// translation post-hoc; a rejected value still surfaces through the
 /// `netns` field of the rendered error, just via the libpod message rather
 /// than the pre-validator.
-/// The modes every namespace slot accepts.
 const NS_MODES: &[&str] = &["host", "private", "pod"];
 
 /// `ipc` takes two modes the other slots reject. `shareable` is the one
@@ -129,7 +141,7 @@ fn is_valid_namespace_mode(field: &str, mode: &str) -> bool {
 fn allowed_namespace_modes(field: &str) -> String {
 	let mut s = String::from("one of ");
 	let mut first = true;
-	let mut sep = |s: &mut String, first: &mut bool| {
+	let sep = |s: &mut String, first: &mut bool| {
 		if !*first {
 			s.push_str(", ");
 		}
