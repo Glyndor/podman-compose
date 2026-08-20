@@ -411,3 +411,7 @@ fn warns_on_typo_inside_provider_and_models() {
 		"got: {msgs:?}"
 	);
 }
+
+#[cfg(test)]
+#[path = "port_exposure_tests.rs"]
+mod port_exposure;
