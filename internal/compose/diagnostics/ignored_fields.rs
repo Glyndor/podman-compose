@@ -107,7 +107,6 @@ pub(super) fn ignored_build_fields(file: &ComposeFile, out: &mut Vec<String>) {
 	for (service, def) in &file.services {
 		let Some(BuildConfig::Config {
 			privileged,
-			ulimits,
 			isolation,
 			entitlements,
 			provenance,
@@ -124,9 +123,6 @@ pub(super) fn ignored_build_fields(file: &ComposeFile, out: &mut Vec<String>) {
 		}
 		if !ssh.is_empty() {
 			unmapped.push("ssh");
-		}
-		if !ulimits.is_empty() {
-			unmapped.push("ulimits");
 		}
 		if isolation.is_some() {
 			unmapped.push("isolation");
