@@ -157,3 +157,117 @@ async fn cli_push_reaches_a_real_registry() {
 		"the registry has the repository but not the tag that was pushed.\ntags: {tags}"
 	);
 }
+
+/// `podup push` uploads every `build.tags` alias, not just the primary `image:`.
+///
+/// `build` retags the freshly built image under every `build.tags` entry, but
+/// the old `push` loop only iterated `service.image` and left the aliases as
+/// local-only tags. The build would exit 0, `podman images` would show them
+/// all, and the registry would receive one. Nobody noticed until a deploy by a
+/// non-primary ref pulled nothing (#1476).
+///
+/// The assertion reads the registry back out: every tag declared in
+/// `build.tags` must appear under `/v2/{repo}/tags/list`. A green exit code
+/// alone is not evidence — the bug it guards against was exactly that.
+#[tokio::test]
+async fn cli_push_uploads_every_build_tags_alias() {
+	if super::podman().await.is_none() {
+		return;
+	}
+	let port = free_port();
+	let container = format!("t{}-podup-registry-btags", std::process::id());
+	let repository = "podup-push-btags";
+	let primary_tag = "1";
+	// Two aliases in addition to the primary; both must be uploaded by `push`.
+	let extra_tags = ["latest", "v1"];
+	let repo_ref = format!("127.0.0.1:{port}/{repository}");
+	let image = format!("{repo_ref}:{primary_tag}");
+
+	let start = Command::new("podman")
+		.args([
+			"run",
+			"-d",
+			"--name",
+			&container,
+			"-p",
+			&format!("127.0.0.1:{port}:5000"),
+			"docker.io/library/registry:2",
+		])
+		.output()
+		.unwrap();
+	if !start.status.success() {
+		cleanup(&container, &image);
+		panic!(
+			"could not start the registry: {}",
+			String::from_utf8_lossy(&start.stderr)
+		);
+	}
+	if !wait_until_ready(port) {
+		cleanup(&container, &image);
+		panic!("the registry never answered /v2/ on port {port}");
+	}
+
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("docker-compose.yml");
+	// List every tag we want the registry to end up with. The primary tag is
+	// included deliberately: `apply_extra_tags` skips it on the build side, and
+	// `push` must skip it for the same reason — re-listing it here exercises
+	// the dedup branch.
+	let tags_yaml = std::iter::once(format!("        - {image}\n"))
+		.chain(
+			extra_tags
+				.iter()
+				.map(|t| format!("        - {repo_ref}:{t}\n")),
+		)
+		.collect::<String>();
+	fs::write(
+		&compose,
+		format!(
+			"services:\n  app:\n    image: {image}\n    build:\n      context: .\n      \
+			 dockerfile_inline: |\n        FROM docker.io/library/busybox:1.36\n        \
+			 RUN echo pushed > /pushed\n      tags:\n{tags_yaml}"
+		),
+	)
+	.unwrap();
+	let proj = format!("t{}-pushbtags", std::process::id());
+
+	let build = Command::new(bin())
+		.args(["-f", compose.to_str().unwrap(), "-p", &proj, "build"])
+		.output()
+		.unwrap();
+	if !build.status.success() {
+		cleanup(&container, &image);
+		panic!("build failed: {}", String::from_utf8_lossy(&build.stderr));
+	}
+
+	let push = Command::new(bin())
+		.args([
+			"-f",
+			compose.to_str().unwrap(),
+			"-p",
+			&proj,
+			"push",
+			"--tls-verify",
+			"false",
+		])
+		.output()
+		.unwrap();
+	let push_ok = push.status.success();
+	let push_err = String::from_utf8_lossy(&push.stderr).to_string();
+
+	// Read the registry back out: every alias declared in `build.tags` must be
+	// listed, not just the primary one. This is the bug's exact signature.
+	let tags_response = http_get(port, &format!("/v2/{repository}/tags/list")).unwrap_or_default();
+	cleanup(&container, &image);
+
+	assert!(push_ok, "push exited non-zero: {push_err}");
+	for needle in std::iter::once(primary_tag).chain(extra_tags.iter().copied()) {
+		let json_quoted = format!("\"{needle}\"");
+		assert!(
+			tags_response.contains(&json_quoted),
+			"tag {json_quoted} missing from registry after push.\n\
+			 registry tags response: {tags_response}\n\
+			 push stderr: {push_err}"
+		);
+	}
+}

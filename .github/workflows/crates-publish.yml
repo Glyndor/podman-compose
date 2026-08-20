@@ -1,0 +1,100 @@
+name: Publish to crates.io
+
+# The recovery path for a crates.io publish that failed after the GitHub
+# release already exists.
+#
+# `release.yml` creates the release and then publishes to the registry in one
+# job. When the publish step fails, that job cannot be re-run into a useful
+# state: `gh release create` refuses a tag that already has a release, so the
+# only remedy was to burn the version and cut another. v3.7.1 hit exactly that
+# — 40 signed assets published, crates.io left behind at 3.6.1.
+#
+# This workflow does one thing and nothing else: publish an existing tag to
+# crates.io. It never touches the release, the assets, the tag, or the signing
+# key. crates.io rejects a duplicate version, so a second run is a no-op rather
+# than a hazard.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v3.7.1). Defaults to the newest v* tag."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish an existing tag to crates.io
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Full history so the fallback can find the newest tag; the checkout is
+      # re-pointed at the resolved tag below rather than guessing here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve the tag to publish
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-$(git tag --list 'v*' --sort=-v:refname | head -1)}"
+          [ -n "$TAG" ] || { echo "::error::no v* tag found and none was given"; exit 1; }
+          git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null \
+            || { echo "::error::tag ${TAG} does not exist in this repository"; exit 1; }
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${TAG}."
+
+      - name: Check out that tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.resolve.outputs.tag }}
+          persist-credentials: false
+
+      # Same two gates release.yml runs before it builds anything. A version
+      # published to crates.io can never be replaced, so a tag that disagrees
+      # with the manifest must stop here rather than become permanent.
+      - name: Validate tag format
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Tag '${TAG}' does not match required format v<major>.<minor>.<patch>."
+            exit 1
+          fi
+
+      - name: Tag must equal Cargo.toml version
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          CRATE_VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          if [ "$VERSION" != "$CRATE_VERSION" ]; then
+            echo "::error::Tag ${TAG} does not match Cargo.toml version ${CRATE_VERSION}."
+            exit 1
+          fi
+
+      - name: Install Rust toolchain
+        env:
+          RUST_TOOLCHAIN: "1.97"
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+
+      # `--locked` so the published crate resolves the same dependency versions
+      # the tag was tested with. A duplicate version exits non-zero here, which
+      # is the intended outcome of a second run.
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "${CARGO_REGISTRY_TOKEN:-}" ] \
+            || { echo "::error::CARGO_REGISTRY_TOKEN is not available to this workflow"; exit 1; }
+          cargo publish --locked

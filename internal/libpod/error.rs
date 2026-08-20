@@ -177,7 +177,7 @@ impl PodmanError {
 	/// Podman 6 applies the archive and then closes without a response, so `cp`
 	/// uses this to tell that specific case apart and re-verify the copy landed
 	/// rather than failing an upload that actually succeeded (#1097).
-	pub(crate) fn is_incomplete_message(&self) -> bool {
+	pub fn is_incomplete_message(&self) -> bool {
 		matches!(self, Self::Hyper(e) if e.is_incomplete_message())
 	}
 
@@ -197,7 +197,7 @@ impl PodmanError {
 	///
 	/// This names the hyper classification so a log can say *which* ending
 	/// occurred. It stays diagnostic: nothing branches on it.
-	pub(crate) fn stream_end_kind(&self) -> &'static str {
+	pub fn stream_end_kind(&self) -> &'static str {
 		match self {
 			Self::Hyper(e) if e.is_incomplete_message() => "incomplete-message",
 			Self::Hyper(e) if e.is_body_write_aborted() => "body-write-aborted",
@@ -238,7 +238,7 @@ impl PodmanError {
 	/// socket never responded within the deadline). These carry a synthetic
 	/// status `0` and a `timed out` message; lifecycle callers use this to
 	/// escalate a wedged `stop` to an explicit `SIGKILL`.
-	pub(crate) fn is_timeout(&self) -> bool {
+	pub fn is_timeout(&self) -> bool {
 		matches!(self, Self::Api { status: 0, message } if message.contains("timed out"))
 	}
 
@@ -248,7 +248,7 @@ impl PodmanError {
 	/// idempotent no-op rather than a fatal error that aborts the loop. The
 	/// message is unique to the kill endpoint, so matching it cannot mask another
 	/// op's 409.
-	pub(crate) fn is_kill_of_stopped(&self) -> bool {
+	pub fn is_kill_of_stopped(&self) -> bool {
 		matches!(
 			self,
 			Self::Api { status: 409, message }
@@ -260,7 +260,7 @@ impl PodmanError {
 	/// 409 conflict, or an HTTP 500 whose message says so. Podman's libpod
 	/// volume-create endpoint returns 500 (not 409) for a duplicate name, so an
 	/// idempotent create must accept both to let a re-`up` succeed.
-	pub(crate) fn is_already_exists(&self) -> bool {
+	pub fn is_already_exists(&self) -> bool {
 		match self {
 			Self::Api { status: 409, .. } => true,
 			Self::Api {
@@ -277,7 +277,7 @@ impl PodmanError {
 	/// every dependent container — including ones owned by other projects. Podman
 	/// returns this as a 409 conflict, or on some versions a 500 whose message
 	/// names the in-use cause.
-	pub(crate) fn is_image_in_use(&self) -> bool {
+	pub fn is_image_in_use(&self) -> bool {
 		match self {
 			Self::Api { status: 409, .. } => true,
 			Self::Api {
@@ -295,7 +295,7 @@ impl PodmanError {
 	/// attempted lifecycle op (already paused, not paused, not running). Podman
 	/// returns these as a 409/500 with a "container state improper" cause. Lets
 	/// `pause`/`unpause` stay idempotent no-ops, matching docker compose.
-	pub(crate) fn is_state_conflict(&self) -> bool {
+	pub fn is_state_conflict(&self) -> bool {
 		match self {
 			Self::Api { status, message } if *status == 409 || *status == 500 => {
 				let m = message.to_ascii_lowercase();
