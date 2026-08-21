@@ -16,6 +16,7 @@ use super::Engine;
 /// Crate-private so the fuzz harness behind the `test-helpers` feature can
 /// reach `extract_tar_guarded` without widening the published API surface.
 pub(crate) mod archive;
+mod stream;
 
 use archive::{extract_archive, pack_path};
 
@@ -156,17 +157,31 @@ impl Engine {
 			.get_stream(&path)
 			.await
 			.map_err(ComposeError::Podman)?;
-		// Cap the buffered archive so a huge/hostile container path cannot OOM the
-		// CLI (the streaming `get_stream` path bypasses the client's own cap).
+		let dst = dst.to_path_buf();
+
+		// Two destination shapes, and only one of them can be streamed.
 		//
-		// Kept as `Bytes` rather than `.to_vec()`. The extractor takes `&[u8]`,
-		// which `Bytes` derefs to, and `Bytes` is `Send + 'static` so it moves
-		// into `spawn_blocking` unchanged. The `.to_vec()` that used to be here
-		// allocated a second buffer and copied every byte into it while the
-		// first was still alive, which put the peak at twice the archive size.
+		// An existing directory goes straight to `extract_tar_guarded`, which
+		// walks the archive once — so the body can be piped into it and nothing
+		// accumulates. That is also the shape that moves bulk data (`cp
+		// svc:/var/lib/data ./backup/`), which is why it is the one worth
+		// streaming.
 		//
-		// This still buffers the whole archive; #1515 carries the streaming
-		// rewrite that stops it doing so at all.
+		// Any other destination goes through `extract_archive`, which reads the
+		// archive twice: `archive_contains_dir` decides whether the destination
+		// names a file or a directory to create, and only then does it extract.
+		// A stream cannot be rewound, so that path still buffers. Making it
+		// single-pass means changing what `cp` does with an ambiguous
+		// destination, which is a behaviour decision rather than a memory one.
+		if dst.is_dir() {
+			return stream::extract_streamed(resp, dst, MAX_CP_ARCHIVE_BYTES as u64).await;
+		}
+
+		// Cap the buffered archive so a huge/hostile container path cannot OOM
+		// the CLI (the streaming `get_stream` path bypasses the client's own
+		// cap). Kept as `Bytes` rather than `.to_vec()`: the extractor takes
+		// `&[u8]`, which `Bytes` derefs to, and a `.to_vec()` here would hold a
+		// second copy alive beside the first.
 		let tar_bytes: Bytes = Limited::new(resp.into_body(), MAX_CP_ARCHIVE_BYTES)
 			.collect()
 			.await
@@ -178,7 +193,6 @@ impl Engine {
 			})?
 			.to_bytes();
 
-		let dst = dst.to_path_buf();
 		tokio::task::spawn_blocking(move || extract_archive(&tar_bytes, &dst))
 			.await
 			.map_err(|e| ComposeError::Build(e.to_string()))??;
