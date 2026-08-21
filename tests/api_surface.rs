@@ -26,7 +26,7 @@ fn public_types_are_nameable() {
 /// because the retry simply stops happening.
 #[test]
 fn retry_predicates_are_callable_from_outside() {
-	fn _probe(e: &PodmanError) -> (bool, bool, bool, bool, bool, bool, &'static str) {
+	fn _probe(e: &PodmanError) -> (bool, bool, bool, bool, bool, bool, bool, &'static str) {
 		(
 			e.is_timeout(),
 			e.is_incomplete_message(),
@@ -34,6 +34,12 @@ fn retry_predicates_are_callable_from_outside() {
 			e.is_already_exists(),
 			e.is_image_in_use(),
 			e.is_state_conflict(),
+			// The only predicate that takes an argument, and the only one this
+			// file did not name until #1502. A daemon deciding whether to retry
+			// asks about a specific status - 409 is worth another try after a
+			// backoff, 404 never is - so it belongs in the contract as much as
+			// the nullary ones.
+			e.is_status(409),
 			e.stream_end_kind(),
 		)
 	}
