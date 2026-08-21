@@ -13,7 +13,9 @@ use crate::libpod::API_PREFIX;
 
 use super::Engine;
 
-mod archive;
+/// Crate-private so the fuzz harness behind the `test-helpers` feature can
+/// reach `extract_tar_guarded` without widening the published API surface.
+pub(crate) mod archive;
 
 use archive::{extract_archive, pack_path};
 
