@@ -10,6 +10,7 @@ on:
       - ".github/workflows/release.yml"
       - ".github/workflows/asset-contract.yml"
       - ".github/scripts/verify-signing-key.py"
+      - ".github/scripts/sign.py"
       - "internal/update/install.rs"
       - "tests/fixtures/releases/**"
   pull_request:
@@ -22,6 +23,7 @@ on:
       - ".github/workflows/release.yml"
       - ".github/workflows/asset-contract.yml"
       - ".github/scripts/verify-signing-key.py"
+      - ".github/scripts/sign.py"
       - "internal/update/install.rs"
       - "tests/fixtures/releases/**"
 
