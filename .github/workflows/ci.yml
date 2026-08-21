@@ -107,6 +107,22 @@ jobs:
       workflow: benchmark.yml
       max-age-days: 65
 
+  # This repository pins thirteen reusables, more than twice any other in the
+  # org, and was the only one of the five without this guard. On 2026-08-21 ten
+  # Dependabot pull requests proposed 1.15.0 to 1.16.0 across ten caller files;
+  # comparing the surfaces by hand showed all thirteen byte-identical to
+  # v1.16.1, so every one was a no-op and all ten were closed. Nothing here was
+  # going to say that, and the alternative to the hand comparison is merging
+  # no-ops until open-pull-requests-limit fills and Dependabot stops proposing
+  # anything at all, security bumps included.
+  #
+  # Advisory. Promotion to required needs the check seen failing for its own
+  # reason, its emitted name read off a real run, and confirmation that it runs
+  # on a Dependabot-authored pull request - the condition that forced
+  # `Analyze (actions)` out of apt.
+  pin-policy:
+    uses: Glyndor/.github/.github/workflows/pin-policy-reusable.yml@8517d94fde00466f59b95c5d1bd838e2ad24a8bf # v1.15.2
+
   # Dependabot silently stops proposing updates when its config is not
   # re-registered, and like a dead cron it reports nothing at all. This fails
   # when no pull request has been opened recently enough.
