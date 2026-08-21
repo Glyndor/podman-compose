@@ -158,7 +158,16 @@ impl Engine {
 			.map_err(ComposeError::Podman)?;
 		// Cap the buffered archive so a huge/hostile container path cannot OOM the
 		// CLI (the streaming `get_stream` path bypasses the client's own cap).
-		let tar_bytes = Limited::new(resp.into_body(), MAX_CP_ARCHIVE_BYTES)
+		//
+		// Kept as `Bytes` rather than `.to_vec()`. The extractor takes `&[u8]`,
+		// which `Bytes` derefs to, and `Bytes` is `Send + 'static` so it moves
+		// into `spawn_blocking` unchanged. The `.to_vec()` that used to be here
+		// allocated a second buffer and copied every byte into it while the
+		// first was still alive, which put the peak at twice the archive size.
+		//
+		// This still buffers the whole archive; #1515 carries the streaming
+		// rewrite that stops it doing so at all.
+		let tar_bytes: Bytes = Limited::new(resp.into_body(), MAX_CP_ARCHIVE_BYTES)
 			.collect()
 			.await
 			.map_err(|_| {
@@ -167,8 +176,7 @@ impl Engine {
 					 copy fewer files or use `podman cp` for very large transfers"
 				))
 			})?
-			.to_bytes()
-			.to_vec();
+			.to_bytes();
 
 		let dst = dst.to_path_buf();
 		tokio::task::spawn_blocking(move || extract_archive(&tar_bytes, &dst))
