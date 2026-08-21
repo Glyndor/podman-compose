@@ -3,6 +3,7 @@
 //! libpod client and `stats` already use.
 
 use super::*;
+use std::collections::HashMap;
 
 /// The bug this exists to stop: `ls` reports `running(1), exited(1)`, and
 /// styling it as one string let the first matching substring win — `exit`
@@ -169,12 +170,30 @@ fn an_unprefixed_label_is_keyed_on_itself() {
 	);
 }
 
+/// Serialises the tests that write the process-wide colour registry.
+///
+/// `SERVICES` is one static for the whole process, so two tests calling
+/// `set_services` on different threads race and each can read the other's
+/// registration. That would make both flaky, and a flaky test is a defect
+/// rather than noise — so every test that writes the registry takes this
+/// first. Tests that only build a local `HashMap` do not need it.
+///
+/// The lock is poison-tolerant on purpose: a panic in one of these tests must
+/// fail that test, not cascade into every other one as a poisoned-lock panic
+/// that hides which assertion actually broke.
+static COLOUR_REGISTRY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+	COLOUR_REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// `set_services` is what makes `service_style` disagree with the plain hash:
 /// once a project's names are registered, sequential assignment guarantees
 /// they spread across the palette, rather than each colliding independently
 /// under the hash the way `palette_index` used to.
 #[test]
 fn set_services_makes_registered_names_distinct() {
+	let _guard = registry_guard();
 	set_services(&[
 		"colourreg-alpha".to_string(),
 		"colourreg-beta".to_string(),
@@ -207,4 +226,54 @@ fn every_wide_palette_slot_indexes_the_narrow_palette_safely() {
 		let _ = slot_to_style(slot, false);
 		let _ = slot_to_style(slot, true);
 	}
+}
+
+/// Registering a second project evicts the first project's colours.
+///
+/// **This pins a defect, not a guarantee — see #1517.** `SERVICES` is a single
+/// process-wide static and `set_services` replaces it rather than merging, so
+/// with two `Engine` values alive in one process (helmly-agent's shape, a fleet
+/// of projects) the second registration drops the first project's names. They
+/// fall through to `colour_for`'s hash fallback and their colours change
+/// underneath a run that is still going, silently.
+///
+/// The assertion is written the way the code behaves today so the eviction
+/// cannot change without something going red. **When #1517 lands, this test
+/// must be inverted, not deleted** — the fix is exactly the case where the
+/// first project's slot survives the second registration.
+///
+/// The two name sets are chosen so the registered slot and the hash fallback
+/// disagree; `colour_for_prefers_the_registered_slot_over_the_hash` is what
+/// establishes that they can. Without that the test would pass whether or not
+/// the eviction happened, which is the vacuous shape this file already carries
+/// a warning about elsewhere.
+#[test]
+fn a_second_project_evicts_the_first_projects_colours() {
+	let _guard = registry_guard();
+
+	let first = ["evict-one".to_string(), "evict-two".to_string()];
+	set_services(&first);
+	let registered = service_slot("evict-one");
+
+	// A second Engine registers its own project. Nothing merges.
+	set_services(&[
+		"evict-other-alpha".to_string(),
+		"evict-other-beta".to_string(),
+	]);
+	let after = service_slot("evict-one");
+
+	// What the first project would get with no registry at all: the hash.
+	let unregistered = crate::ui::palette::colour_for("evict-one", &HashMap::new());
+
+	assert_eq!(
+		after, unregistered,
+		"today the first project falls back to the hash after a second registration \
+		 (#1517). If this now differs, the registry stopped being shared - invert \
+		 this test rather than deleting it."
+	);
+	assert_ne!(
+		registered, unregistered,
+		"the fixture cannot discriminate: pick names whose registered slot and hash \
+		 slot differ, or the assertion above holds whether or not eviction happened"
+	);
 }
