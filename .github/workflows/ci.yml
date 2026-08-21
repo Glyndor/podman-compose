@@ -111,15 +111,11 @@ jobs:
   # re-registered, and like a dead cron it reports nothing at all. This fails
   # when no pull request has been opened recently enough.
   #
-  # Pinned at an untagged commit on purpose, for as long as this pull request is
-  # open. v1.16.0 read a single page of twenty pull requests and filtered it for
-  # the bot, which measures total activity rather than Dependabot's: run
-  # 32435521566 reported "no Dependabot pull request on record" while ten sat
-  # open. The CI standard asks for a reusable to be proven on a real consumer
-  # before its tag is cut, and this repository is the one that can do it — it
-  # runs no pin-policy caller, so an untagged SHA costs nothing here. The
-  # comment becomes # v1.16.1 before this merges.
+  # v1.16.0 read one page of twenty pull requests and filtered it for the bot,
+  # which measures how busy the repository is rather than whether Dependabot is
+  # running: run 32435521566 reported "no Dependabot pull request on record"
+  # while ten sat open. v1.16.1 pages the window.
   dependabot-freshness:
-    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@e9cbd47344fcb03b1bb2400f8b15ab5289ff497f
+    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@e9cbd47344fcb03b1bb2400f8b15ab5289ff497f # v1.16.1
     with:
       max-age-days: 15
