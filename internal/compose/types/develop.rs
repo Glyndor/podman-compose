@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 /// `develop:` service key — holds file-watch rules for the `watch` command.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct DevelopConfig {
+	/// The rules in declaration order. `watch` evaluates them in order and the
+	/// first matching path wins, so order is meaningful rather than cosmetic.
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub watch: Vec<WatchRule>,
 }
@@ -36,6 +38,9 @@ pub struct WatchRule {
 	/// Command run inside the container for the `sync+exec` action.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub exec: Option<WatchExec>,
+	/// Keys under this rule that podup does not recognise, kept so `config`
+	/// round-trips a compose file without silently dropping them. Insertion
+	/// order is preserved.
 	#[serde(flatten, default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
 	pub unknown: indexmap::IndexMap<String, serde_yaml::Value>,
 }

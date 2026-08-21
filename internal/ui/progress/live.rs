@@ -36,7 +36,11 @@ fn cursor_up(n: usize) -> String {
 /// one stream and the content in the other.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Target {
+	/// For a region whose content *is* the command's output, so a redirect
+	/// captures it. `stats` is the case this exists for.
 	Stdout,
+	/// For a region that decorates another stream's output. The lifecycle board
+	/// goes here so stdout stays a clean pipe.
 	Stderr,
 }
 
