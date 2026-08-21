@@ -8,6 +8,11 @@
 // locally with `#![allow(unsafe_code)]` and a soundness comment per block, so a
 // new `unsafe` block elsewhere fails the build.
 #![deny(unsafe_code)]
+// Documentation is part of the public surface for a crate two other products
+// consume as a library, so a missing doc comment fails the build rather than
+// being noticed a year later. Turned on at 35 outstanding items; it is cheap to
+// adopt at that size and expensive at three hundred.
+#![deny(missing_docs)]
 
 /// `podup autostart`: render and manage a rootless `systemctl --user` unit that
 /// brings a compose stack up at boot (service mode).

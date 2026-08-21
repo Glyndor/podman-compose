@@ -13,10 +13,16 @@ use std::time::{Duration, Instant};
 /// the same vocabulary `progress_line` has always used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
+	/// A compose network, project-scoped unless declared `external`.
 	Network,
+	/// A compose volume, project-scoped unless declared `external`.
 	Volume,
+	/// A Podman-native secret, which is what every compose `secrets:` and
+	/// `configs:` entry becomes.
 	Secret,
+	/// A container image, whether pulled or built.
 	Image,
+	/// A container, one per replica rather than one per service.
 	Container,
 }
 
@@ -60,8 +66,13 @@ pub enum State {
 /// One resource's row.
 #[derive(Debug, Clone)]
 pub struct Row {
+	/// Which noun this row is about; also the first column.
 	pub kind: Kind,
+	/// The resource's name as Podman knows it, project prefix included, so it
+	/// matches what `podman ps` or `podman network ls` would show.
 	pub name: String,
+	/// Where the row is in its lifecycle. Ordering is `Pending`, `Working`,
+	/// `Done`, and a row never goes backwards.
 	pub state: State,
 	/// When this row last entered `Working`, for the elapsed column. `None`
 	/// while `Pending`, since nothing has taken any time yet.
