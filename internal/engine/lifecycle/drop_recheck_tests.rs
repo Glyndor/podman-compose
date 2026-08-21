@@ -87,7 +87,7 @@ mod over_the_wire {
 	async fn a_lost_response_fails_when_the_container_did_not_reach_the_goal() {
 		let fake = fake_dropping_the_op(Some("exited"));
 		let engine = engine_with(fake.client(), "proj");
-		engine
+		let err = engine
 			.run_lifecycle_op(
 				&start_path(),
 				"proj-web-1",
@@ -96,6 +96,15 @@ mod over_the_wire {
 			)
 			.await
 			.expect_err("the container is not running, so nothing confirms the start");
+		// Pin the variant: a dropped response that re-checks to a non-running
+		// state must surface as the underlying libpod error, not as some
+		// other variant a future refactor might swap in. `confirm_lost_response`
+		// is the one place that does this — a regression here would otherwise
+		// be invisible because the test would still see *some* Err.
+		assert!(
+			matches!(err, crate::error::ComposeError::Podman(_)),
+			"expected ComposeError::Podman, got: {err:?}"
+		);
 	}
 
 	/// Fail closed. An unreadable re-check is not confirmation, and reporting
@@ -110,7 +119,7 @@ mod over_the_wire {
 			FakeReply::Body(500, r#"{"message":"boom"}"#.to_string())
 		});
 		let engine = engine_with(fake.client(), "proj");
-		engine
+		let err = engine
 			.run_lifecycle_op(
 				&start_path(),
 				"proj-web-1",
@@ -119,6 +128,12 @@ mod over_the_wire {
 			)
 			.await
 			.expect_err("an unreadable re-check must not be read as success");
+		// Same shape as the test above: fail-closed is the contract, and the
+		// specific variant is what the CLI's exit-code map keys on.
+		assert!(
+			matches!(err, crate::error::ComposeError::Podman(_)),
+			"expected ComposeError::Podman, got: {err:?}"
+		);
 	}
 
 	/// A gone container satisfies `NotRunning`, which is what a lost `kill`
@@ -171,10 +186,20 @@ mod stop_and_remove {
 	async fn a_lost_stop_response_fails_while_the_container_still_runs() {
 		let fake = fake_dropping_the_op(Some("running"));
 		let engine = engine_with(fake.client(), "proj");
-		engine
+		let err = engine
 			.stop_container("proj-web-1", 10)
 			.await
 			.expect_err("still running is not a stop");
+		// The dropped-stop branch in `stop_container` falls through to
+		// `confirm_lost_response` with `LifecycleGoal::NotRunning`, which
+		// builds `ComposeError::Podman` on a state mismatch — pin the
+		// variant so a regression that swaps in `StreamTruncated` (the
+		// other "ended unexpectedly" variant) cannot silently satisfy this
+		// test.
+		assert!(
+			matches!(err, crate::error::ComposeError::Podman(_)),
+			"expected ComposeError::Podman, got: {err:?}"
+		);
 	}
 
 	/// And removal, which needs the container **absent** — a stopped-but-present
@@ -183,10 +208,19 @@ mod stop_and_remove {
 	async fn a_lost_removal_response_fails_when_the_container_is_merely_stopped() {
 		let fake = fake_dropping_the_op(Some("exited"));
 		let engine = engine_with(fake.client(), "proj");
-		engine
+		let err = engine
 			.teardown_one_container("proj-web-1", 10, &[], false)
 			.await
 			.expect_err("a container that is still there was not removed");
+		// Same pattern as the stop test: `teardown_one_container`'s dropped
+		// arm goes through `confirm_lost_response` with `LifecycleGoal::Gone`,
+		// and a stopped-but-present container fails `Gone`. The variant is
+		// the contract — anything else would be a regression in the
+		// fail-closed shape this whole file pins.
+		assert!(
+			matches!(err, crate::error::ComposeError::Podman(_)),
+			"expected ComposeError::Podman, got: {err:?}"
+		);
 	}
 
 	#[tokio::test]
