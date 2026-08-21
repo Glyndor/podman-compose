@@ -11,7 +11,24 @@ documentation = "https://docs.rs/podup"
 readme = "README.md"
 keywords = ["podman", "compose", "quadlet", "docker-compose", "rootless"]
 categories = ["command-line-utilities", "virtualization", "development-tools"]
-exclude = ["/.github", "/debian", "/deny.toml", "/docs", "/install.ps1", "/install.sh", "/tests"]
+# What `cargo package` ships. Not to be confused with `[workspace] exclude`
+# further down, which only decides workspace membership: that one names
+# `bench/timeit` and `fuzz`, which reads as though packaging is handled and
+# is a different question entirely. Measured before this line changed,
+# `cargo package --list` carried 30 files from `bench/` and both licence
+# report templates.
+exclude = [
+	"/.github",
+	"/about.hbs",
+	"/about.toml",
+	"/bench",
+	"/debian",
+	"/deny.toml",
+	"/docs",
+	"/install.ps1",
+	"/install.sh",
+	"/tests",
+]
 
 [[bin]]
 name = "podup"
