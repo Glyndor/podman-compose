@@ -238,22 +238,78 @@ mod tests {
 
 	#[test]
 	fn latest_version_maps_transport_error() {
-		// Port 1 is closed → connection refused, offline and deterministic. The
-		// transport failure must map to the friendly "cannot reach" error.
+		// https so the request reaches a socket. Port 1 is closed, so the failure
+		// is a connection refusal: offline, deterministic, and genuinely the
+		// transport path this test is named for. An http base would never get
+		// that far — the agent rejects the scheme first, which is what this test
+		// used to measure while claiming to measure the socket.
 		use crate::update::ReleaseSource;
-		let src = GitHubSource::with_bases(REPO, "http://127.0.0.1:1", "http://127.0.0.1:1");
+		let src = GitHubSource::with_bases(REPO, "https://127.0.0.1:1", "https://127.0.0.1:1");
 		let err = src.latest_version().unwrap_err();
 		assert!(
 			err.to_string().contains("cannot reach GitHub releases API"),
 			"got: {err}"
+		);
+		assert!(
+			err.to_string().contains("Connection refused"),
+			"the transport path must be the one that failed, got: {err}"
 		);
 	}
 
 	#[test]
 	fn fetch_maps_transport_error() {
 		use crate::update::ReleaseSource;
-		let src = GitHubSource::with_bases(REPO, "http://127.0.0.1:1", "http://127.0.0.1:1");
+		let src = GitHubSource::with_bases(REPO, "https://127.0.0.1:1", "https://127.0.0.1:1");
 		let err = src.fetch("podup-linux-x86_64").unwrap_err();
 		assert!(err.to_string().contains("download failed"), "got: {err}");
+		assert!(
+			err.to_string().contains("Connection refused"),
+			"the transport path must be the one that failed, got: {err}"
+		);
+	}
+
+	/// A plaintext base must be refused for being plaintext, not for anything
+	/// else. `https_only(true)` is the only thing standing between a hostile
+	/// redirect and a downgraded download, and until this test existed the line
+	/// could be deleted with the whole suite staying green.
+	///
+	/// The assertion names the agent's own wording rather than the friendly
+	/// prefix: every failure on this path carries the prefix, so asserting it
+	/// proves only that something went wrong.
+	#[test]
+	fn plaintext_base_is_refused_for_being_plaintext() {
+		use crate::update::ReleaseSource;
+		let src = GitHubSource::with_bases(REPO, "http://127.0.0.1:1", "http://127.0.0.1:1");
+
+		let err = src.latest_version().unwrap_err();
+		assert!(
+			err.to_string().contains("configured for https only"),
+			"the metadata read must be refused on the scheme, got: {err}"
+		);
+
+		let err = src.fetch("podup-linux-x86_64").unwrap_err();
+		assert!(
+			err.to_string().contains("configured for https only"),
+			"the download must be refused on the scheme, got: {err}"
+		);
+	}
+
+	/// The acceptance half of the pair above, one step inside the limit: the
+	/// same closed port over https gets past the scheme check and fails on the
+	/// socket instead. Without it, a plaintext URL rejected for some unrelated
+	/// reason would satisfy the rejection test and prove nothing.
+	#[test]
+	fn https_base_passes_the_scheme_check() {
+		use crate::update::ReleaseSource;
+		let src = GitHubSource::with_bases(REPO, "https://127.0.0.1:1", "https://127.0.0.1:1");
+		let err = src.latest_version().unwrap_err();
+		assert!(
+			!err.to_string().contains("configured for https only"),
+			"https must not be refused on the scheme, got: {err}"
+		);
+		assert!(
+			err.to_string().contains("Connection refused"),
+			"it must fail on the socket instead, got: {err}"
+		);
 	}
 }
