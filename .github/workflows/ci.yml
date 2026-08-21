@@ -110,7 +110,12 @@ jobs:
   # Dependabot silently stops proposing updates when its config is not
   # re-registered, and like a dead cron it reports nothing at all. This fails
   # when no pull request has been opened recently enough.
+  #
+  # v1.16.0 read one page of twenty pull requests and filtered it for the bot,
+  # which measures how busy the repository is rather than whether Dependabot is
+  # running: run 32435521566 reported "no Dependabot pull request on record"
+  # while ten sat open. v1.16.1 pages the window.
   dependabot-freshness:
-    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@e9cbd47344fcb03b1bb2400f8b15ab5289ff497f # v1.16.1
     with:
       max-age-days: 15
