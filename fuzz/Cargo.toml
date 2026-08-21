@@ -56,3 +56,10 @@ path = "fuzz_targets/stream_ndjson.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "extract_tar"
+path = "fuzz_targets/extract_tar.rs"
+test = false
+doc = false
+bench = false

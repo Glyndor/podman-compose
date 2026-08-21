@@ -80,10 +80,12 @@ pub use libpod::{parse_json_lines, parse_multiplexed, parse_raw, LogOutput};
 ///
 /// These are not part of the public API (the feature is off by default, so the
 /// published crate does not expose them); they let the fuzz harness reach the
-/// crate-private dotenv parser and the libpod stream framer.
+/// crate-private dotenv parser, the libpod stream framer, and the
+/// container→host tar extractor.
 #[cfg(feature = "test-helpers")]
 pub mod fuzz_api {
 	pub use crate::dotenv::parse as dotenv_parse;
+	pub use crate::engine::copy::archive::extract_tar_guarded;
 	pub use crate::libpod::types::stream::{
 		parse_frame, record_stream_bytes, take_json_line, MAX_STREAM_BUF,
 	};

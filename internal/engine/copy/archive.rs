@@ -196,7 +196,12 @@ fn unpacked_path(dst_dir: &Path, rel: &Path) -> Option<std::path::PathBuf> {
 /// such entries, returning `Ok(false)`; we turn that into a hard error so the
 /// copy fails loudly instead of silently skipping data. Pure and synchronous so
 /// the guard can be unit-tested without a container.
-fn extract_tar_guarded(tar_bytes: &[u8], dst_dir: &Path) -> Result<()> {
+///
+/// `pub fn` inside the crate-private `archive` module: the path through
+/// `engine` (which is `pub(crate)`) keeps the function off the public API, and
+/// the fuzz harness behind the `test-helpers` feature reaches it through
+/// `crate::fuzz_api`.
+pub fn extract_tar_guarded(tar_bytes: &[u8], dst_dir: &Path) -> Result<()> {
 	let cursor = std::io::Cursor::new(tar_bytes);
 	let mut archive = tar::Archive::new(cursor);
 	for entry in archive.entries().map_err(ComposeError::Io)? {
