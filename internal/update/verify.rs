@@ -476,3 +476,64 @@ f4aa771d1bf238fea5b764d90258ec43e6b034de74ce1cd41ef41af1500d7cf9  install.ps1
 		assert!(expected_digest(&[0xff, 0xfe], "x").is_err());
 	}
 }
+
+/// The release key is embedded in four places in this repository, and it has
+/// to be: a consumer that downloaded the key it verifies with would be
+/// handing the decision to whoever controls the download. Duplication is the
+/// correct design here, so the risk is not that copies exist — it is that a
+/// rotation updates some and misses others.
+///
+/// A miss is silent. `install.sh` would hand out a binary the self-updater
+/// then refuses, or the docs would tell someone to check a signature against
+/// a key nothing signs with any more. Nothing errors at the point of the
+/// mistake; it surfaces later, on a user's machine.
+///
+/// So this compares the text copies against the bytes the binary actually
+/// verifies with, rather than against each other. A comment that drifts from
+/// the constant beside it is caught too.
+#[cfg(test)]
+mod key_copies_agree {
+	use super::RELEASE_PUBKEYS;
+	use base64::Engine as _;
+	use std::path::Path;
+
+	/// Every file in the repository that embeds the key, and the shape it
+	/// takes there. A new one is a line here.
+	const COPIES: [&str; 3] = ["install.sh", "install.ps1", "docs/self-update.md"];
+
+	/// The unpadded base64 of the key the binary trusts first.
+	fn binary_key() -> String {
+		base64::engine::general_purpose::STANDARD_NO_PAD.encode(RELEASE_PUBKEYS[0])
+	}
+
+	#[test]
+	fn every_embedded_copy_matches_the_key_the_binary_uses() {
+		let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+		let want = binary_key();
+
+		for name in COPIES {
+			let body = std::fs::read_to_string(root.join(name))
+				.unwrap_or_else(|e| panic!("{name} is readable: {e}"));
+			assert!(
+				body.contains(&want),
+				"{name} does not carry the key this binary verifies with ({want}). \
+				 A rotation that updates the constant and misses a file fails on a \
+				 user's machine, not here."
+			);
+		}
+	}
+
+	/// The check above only means something if the key is a specific string.
+	/// Were `binary_key` to return something every file trivially contains,
+	/// it would pass while proving nothing.
+	#[test]
+	fn the_key_is_a_full_length_ed25519_public_key() {
+		let key = binary_key();
+		assert_eq!(
+			key.len(),
+			43,
+			"unpadded base64 of 32 bytes is 43 chars: {key}"
+		);
+		assert!(!key.contains('='), "the copies are stored unpadded: {key}");
+	}
+}
