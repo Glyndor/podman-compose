@@ -1,6 +1,35 @@
 #!/usr/bin/make -f
 
 export CARGO_HOME = $(CURDIR)/debian/cargo-home
+
+# Build for musl, so the packaged binary is statically linked and the package
+# carries no libc floor.
+#
+# Until this, the .deb was the one Linux artifact built against glibc: the
+# release binaries have always been musl, while dpkg-buildpackage rebuilt from
+# source with whatever glibc the build container happened to carry. That put
+# `Depends: libc6 (>= 2.39)` on every published package, which Debian 12 (2.36)
+# and Ubuntu 22.04 (2.35) do not satisfy - so `apt install` failed on an
+# oldstable supported into 2028 and an LTS into 2027.
+#
+# `Depends` is generated from `${shlibs:Depends}`, so nothing in debian/control
+# needs to change: dpkg-shlibdeps finds no shared libraries in a static binary
+# and the substitution comes out empty.
+DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+RUST_TARGET_amd64 = x86_64-unknown-linux-musl
+RUST_TARGET_arm64 = aarch64-unknown-linux-musl
+RUST_TARGET = $(RUST_TARGET_$(DEB_HOST_ARCH))
+
+# Fail here rather than silently building for the host. A package that quietly
+# went back to glibc would reintroduce the floor with nothing to notice it, and
+# the release that shipped it is immutable.
+ifeq ($(RUST_TARGET),)
+$(error no musl Rust target is mapped for DEB_HOST_ARCH=$(DEB_HOST_ARCH); add one above)
+endif
+
+# Where cargo puts a cross-target build. Every path below reads this rather
+# than target/release, which is the host build that no longer happens.
+BUILT = target/$(RUST_TARGET)/release/podup
 # Pin the target dir so a CARGO_TARGET_DIR from the environment cannot move
 # the binary away from the path the install step expects.
 export CARGO_TARGET_DIR = $(CURDIR)/target
@@ -26,21 +55,21 @@ override_dh_auto_build:
 ifneq ($(wildcard vendor/),)
 	$(if $(wildcard .cargo/config.toml),,$(MAKE) -f debian/rules debian/cargo-config)
 endif
-	cargo build --release --locked $(CARGO_FLAGS) $(CARGO_FEATURES)
+	cargo build --release --locked --target $(RUST_TARGET) $(CARGO_FLAGS) $(CARGO_FEATURES)
 
 override_dh_auto_test:
-	cargo test --release --locked $(CARGO_FLAGS) $(CARGO_FEATURES)
+	cargo test --release --locked --target $(RUST_TARGET) $(CARGO_FLAGS) $(CARGO_FEATURES)
 
 override_dh_auto_install:
-	install -D -m 0755 target/release/podup debian/podup/usr/bin/podup
+	install -D -m 0755 $(BUILT) debian/podup/usr/bin/podup
 	# Shell completions, generated from the freshly built binary so they can
 	# never drift from the CLI definition.
 	install -d debian/podup/usr/share/bash-completion/completions
 	install -d debian/podup/usr/share/zsh/vendor-completions
 	install -d debian/podup/usr/share/fish/vendor_completions.d
-	target/release/podup completions bash > debian/podup/usr/share/bash-completion/completions/podup
-	target/release/podup completions zsh  > debian/podup/usr/share/zsh/vendor-completions/_podup
-	target/release/podup completions fish > debian/podup/usr/share/fish/vendor_completions.d/podup.fish
+	$(BUILT) completions bash > debian/podup/usr/share/bash-completion/completions/podup
+	$(BUILT) completions zsh  > debian/podup/usr/share/zsh/vendor-completions/_podup
+	$(BUILT) completions fish > debian/podup/usr/share/fish/vendor_completions.d/podup.fish
 
 # Stamp the man page's .TH version and date from debian/changelog so they never
 # drift from the release. The date comes from the changelog entry, not the build
