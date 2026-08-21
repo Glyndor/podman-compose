@@ -4,7 +4,46 @@
 //! secrets, configs, and models from the included file are added only if the
 //! key does not already exist in the parent (parent wins on conflict).
 
+use std::path::Path;
+
 use super::types::ComposeFile;
+use crate::error::{ComposeError, Result};
+
+/// Read and parse a file referenced by `include:`, wrapping every failure in
+/// [`ComposeError::Include`] so a consumer matching on the variant can tell the
+/// failure originated from an included file rather than the top-level compose
+/// file. A missing included file is not the same as a missing main file, and
+/// an invalid-YAML included file is not the same as a malformed main file —
+/// the variant lets a handler branch on the difference, and the message names
+/// the included path so the operator can find it.
+pub(super) fn parse_included_file(
+	path: &Path,
+	dir: &Path,
+	env_files: &[String],
+	interpolate: bool,
+) -> Result<ComposeFile> {
+	let display = path.display().to_string();
+	super::parse_file_inner_with_env(path, dir, env_files, interpolate).map_err(|e| match e {
+		ComposeError::FileNotFound(p) => {
+			ComposeError::Include(format!("included compose file not found: {p}"))
+		}
+		ComposeError::Parse(yaml_err) => {
+			let msg = match yaml_err.location() {
+				Some(loc) => format!(
+					"failed to parse included compose file '{display}' at line {}, column {}",
+					loc.line(),
+					loc.column()
+				),
+				None => format!("failed to parse included compose file '{display}'"),
+			};
+			ComposeError::Include(msg)
+		}
+		ComposeError::Io(io_err) => ComposeError::Include(format!(
+			"io error reading included compose file '{display}': {io_err}"
+		)),
+		other => ComposeError::Include(format!("included compose file '{display}': {other}")),
+	})
+}
 
 /// Merge `other` into `target`.
 ///
@@ -40,6 +79,7 @@ pub(super) fn merge_compose_file(target: &mut ComposeFile, other: ComposeFile) {
 mod tests {
 	use super::super::types::Service;
 	use super::*;
+	use std::path::Path;
 
 	fn svc(image: &str) -> Service {
 		Service {
@@ -161,5 +201,132 @@ mod tests {
 		let other = ComposeFile::default();
 		merge_compose_file(&mut target, other);
 		assert_eq!(target.services.len(), 1);
+	}
+
+	// parse_included_file — wraps every failure in ComposeError::Include (#1500).
+	//
+	// Each rejection test asserts the variant with `matches!` so the assertion
+	// cannot be satisfied by a different failure mode. Every rejection is paired
+	// with an acceptance test of the same shape, because a fixture that fails for
+	// the wrong reason still satisfies `expect_err` and proves nothing.
+
+	fn write_file(path: &Path, body: &str) {
+		std::fs::write(path, body).expect("write fixture");
+	}
+
+	fn parse_main(main: &Path) -> crate::error::Result<ComposeFile> {
+		crate::compose::parse_file(main)
+	}
+
+	#[test]
+	fn included_file_missing_becomes_include_variant() {
+		// The `include:` points at a path that does not exist. Before the fix
+		// this surfaced as `ComposeError::FileNotFound`; it must now surface as
+		// `ComposeError::Include` so the consumer can tell a missing include from
+		// a missing main file.
+		let dir = tempfile::tempdir().expect("tempdir");
+		let main = dir.path().join("docker-compose.yml");
+		write_file(
+			&main,
+			"include:\n  - ./missing.yml\nservices:\n  app:\n    image: nginx\n",
+		);
+		let err = parse_main(&main).expect_err("missing include must error");
+		assert!(
+			matches!(err, ComposeError::Include(_)),
+			"expected Include, got {err:?}"
+		);
+		// The path of the missing include is named in the message.
+		assert!(
+			err.to_string().contains("missing.yml"),
+			"message should name the include path, got: {err}"
+		);
+		// Acceptance shape: the same compose succeeds when the include is present,
+		// so a rejection above is the include path firing and not something else.
+		let present = dir.path().join("present.yml");
+		write_file(&present, "services:\n  helper:\n    image: alpine\n");
+		let main_ok = dir.path().join("ok.yml");
+		write_file(
+			&main_ok,
+			"include:\n  - ./present.yml\nservices:\n  app:\n    image: nginx\n",
+		);
+		let ok = parse_main(&main_ok).expect("present include must succeed");
+		assert!(ok.services.contains_key("helper"));
+	}
+
+	#[test]
+	fn included_file_invalid_yaml_becomes_include_variant() {
+		// The included file has valid YAML semantics *except* it contains a
+		// type error. Before the fix this surfaced as `ComposeError::Parse`
+		// with no hint that the failure was in the included file; it must now
+		// surface as `ComposeError::Include`.
+		let dir = tempfile::tempdir().expect("tempdir");
+		let bad = dir.path().join("bad.yml");
+		// `services` must be a mapping; a sequence is a type error.
+		write_file(&bad, "services:\n  - not\n  - a\n  - mapping\n");
+		let main = dir.path().join("docker-compose.yml");
+		write_file(
+			&main,
+			"include:\n  - ./bad.yml\nservices:\n  app:\n    image: nginx\n",
+		);
+		let err = parse_main(&main).expect_err("malformed include must error");
+		assert!(
+			matches!(err, ComposeError::Include(_)),
+			"expected Include, got {err:?}"
+		);
+		// The message names the included file so the operator can find it.
+		assert!(
+			err.to_string().contains("bad.yml"),
+			"message should name the include path, got: {err}"
+		);
+		// Acceptance shape: the same main file with a well-formed include
+		// succeeds, so the rejection above is the malformed-include path
+		// firing — not a YAML error in the main file itself.
+		let good = dir.path().join("good.yml");
+		write_file(&good, "services:\n  helper:\n    image: alpine\n");
+		let main_ok = dir.path().join("ok.yml");
+		write_file(
+			&main_ok,
+			"include:\n  - ./good.yml\nservices:\n  app:\n    image: nginx\n",
+		);
+		assert!(parse_main(&main_ok).is_ok());
+	}
+
+	#[test]
+	fn valid_include_does_not_surface_include_variant() {
+		// The acceptance shape for the rejection tests above. A well-formed
+		// include must succeed and must NOT emit Include; if it did, the
+		// rejection tests would pass for the wrong reason.
+		let dir = tempfile::tempdir().expect("tempdir");
+		let included = dir.path().join("included.yml");
+		write_file(&included, "services:\n  helper:\n    image: alpine\n");
+		let main = dir.path().join("docker-compose.yml");
+		write_file(
+			&main,
+			"include:\n  - ./included.yml\nservices:\n  app:\n    image: nginx\n",
+		);
+		let file = parse_main(&main).expect("valid include must succeed");
+		assert!(file.services.contains_key("app"));
+		assert!(file.services.contains_key("helper"));
+	}
+
+	#[test]
+	fn included_path_is_directory_becomes_include_variant() {
+		// Pointing `include:` at a directory provokes a non-NotFound io error
+		// from the file reader (open-fails with IsADirectory on Unix, an
+		// access error on Windows). The wrapping must convert it to
+		// `Include`, not let `Io` leak out — that's the catch-all arm.
+		let dir = tempfile::tempdir().expect("tempdir");
+		let not_a_file = dir.path().join("a-directory");
+		std::fs::create_dir(&not_a_file).expect("mkdir");
+		let main = dir.path().join("docker-compose.yml");
+		write_file(
+			&main,
+			"include:\n  - ./a-directory\nservices:\n  app:\n    image: nginx\n",
+		);
+		let err = parse_main(&main).expect_err("directory include must error");
+		assert!(
+			matches!(err, ComposeError::Include(_)),
+			"expected Include, got {err:?}"
+		);
 	}
 }

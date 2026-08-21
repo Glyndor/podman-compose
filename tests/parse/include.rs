@@ -1,4 +1,4 @@
-use podup::parse_file;
+use podup::{parse_file, ComposeError};
 use std::io::Write;
 
 #[test]
@@ -227,4 +227,83 @@ fn multiple_files_merge_with_override() {
 	let env = file.services["web"].environment.to_map();
 	assert!(env.contains_key("A"));
 	assert!(env.contains_key("B"));
+}
+
+// `include:` failure surfaces as `ComposeError::Include` (#1500).
+//
+// Before the fix the same failure surfaced as `ComposeError::FileNotFound`,
+// `ComposeError::Parse`, or nothing distinguishable at all. Each rejection
+// test asserts the variant with `matches!`, so the assertion cannot be
+// satisfied by a different failure mode. Every rejection is paired with an
+// acceptance test of the same shape, because a fixture that fails for the
+// wrong reason still satisfies `expect_err` and proves nothing.
+
+#[test]
+fn include_missing_path_surfaces_as_include_variant() {
+	let dir = tempfile::tempdir().unwrap();
+	let main = dir.path().join("docker-compose.yml");
+	writeln!(
+		std::fs::File::create(&main).unwrap(),
+		"include:\n  - ./not-here.yml\nservices:\n  app:\n    image: alpine\n"
+	)
+	.unwrap();
+	let err = parse_file(&main).expect_err("missing include must error");
+	assert!(
+		matches!(err, ComposeError::Include(_)),
+		"expected Include, got {err:?}"
+	);
+	// Acceptance shape: a present include succeeds, so the rejection above is
+	// the missing-include path firing and not the parse path.
+	let present = dir.path().join("present.yml");
+	writeln!(
+		std::fs::File::create(&present).unwrap(),
+		"services:\n  helper:\n    image: alpine\n"
+	)
+	.unwrap();
+	let main_ok = dir.path().join("docker-compose.yml");
+	writeln!(
+		std::fs::File::create(&main_ok).unwrap(),
+		"include:\n  - ./present.yml\nservices:\n  app:\n    image: alpine\n"
+	)
+	.unwrap();
+	let ok = parse_file(&main_ok).expect("present include must succeed");
+	assert!(ok.services.contains_key("helper"));
+}
+
+#[test]
+fn include_invalid_yaml_surfaces_as_include_variant() {
+	let dir = tempfile::tempdir().unwrap();
+	// `services` must be a mapping; a sequence is a YAML type error.
+	let bad = dir.path().join("bad.yml");
+	writeln!(
+		std::fs::File::create(&bad).unwrap(),
+		"services:\n  - not\n  - a\n  - mapping\n"
+	)
+	.unwrap();
+	let main = dir.path().join("docker-compose.yml");
+	writeln!(
+		std::fs::File::create(&main).unwrap(),
+		"include:\n  - ./bad.yml\nservices:\n  app:\n    image: alpine\n"
+	)
+	.unwrap();
+	let err = parse_file(&main).expect_err("malformed include must error");
+	assert!(
+		matches!(err, ComposeError::Include(_)),
+		"expected Include, got {err:?}"
+	);
+	// Acceptance shape: a well-formed include succeeds, so the rejection above
+	// is the malformed-include path firing and not a YAML error in the main file.
+	let good = dir.path().join("good.yml");
+	writeln!(
+		std::fs::File::create(&good).unwrap(),
+		"services:\n  helper:\n    image: alpine\n"
+	)
+	.unwrap();
+	let main_ok = dir.path().join("docker-compose.yml");
+	writeln!(
+		std::fs::File::create(&main_ok).unwrap(),
+		"include:\n  - ./good.yml\nservices:\n  app:\n    image: alpine\n"
+	)
+	.unwrap();
+	assert!(parse_file(&main_ok).is_ok());
 }
