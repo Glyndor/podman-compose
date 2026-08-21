@@ -40,11 +40,12 @@ permissions:
 
 jobs:
   debian:
-    # Pinned at an untagged commit while the reusable is proven on a real
-    # consumer, which is what the CI standard asks for before a tag is cut -
-    # .github's own CI never exercises a caller. The comment becomes
-    # # v1.17.0 before this merges.
-    uses: Glyndor/.github/.github/workflows/rust-debian.yml@e70ff47fd8aefa0f054846815f19b98768d61122
+    # v1.17.0 added rust-toolchain and rust-target. It was pinned here at the
+    # untagged commit first, because the CI standard asks for a reusable to be
+    # proven on a real consumer before its tag is cut - .github's own CI never
+    # exercises a caller. This repository's dpkg-buildpackage job was that
+    # proof, going from red to green in 6m36s on #1525.
+    uses: Glyndor/.github/.github/workflows/rust-debian.yml@e70ff47fd8aefa0f054846815f19b98768d61122 # v1.17.0
     with:
       package-name: podup
       check-vendored: true
