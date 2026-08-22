@@ -85,11 +85,18 @@ static PROJECT: std::sync::RwLock<String> = std::sync::RwLock::new(String::new()
 
 /// The pre-formatted `"{project}-"` prefix, cached so [`identity_slot`] does
 /// not reallocate it on every call. Set in tandem with [`PROJECT`] by
-/// [`set_project`]; read by [`identity_slot`] on every progress event, table
-/// row, and log-prefix row (~300 of those per 100-service `up`, #1364).
+/// [`set_project`]; read by [`identity_slot`]'s no-registration fallback path
+/// so `proj-web-1` and `web-1` still collapse to one hash slot when no
+/// project has called `set_services` yet. The main registered lookup iterates
+/// the per-project prefix entries in [`SERVICES`] directly, so this cache
+/// only matters when nothing has been registered.
 static PROJECT_PREFIX: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
 
-/// Record the project name for identity colouring. Set once per invocation.
+/// Record the project name for identity colouring. Set once per invocation
+/// per project: two `Engine` values alive in one process must each register
+/// their own project name, and the last `set_project` wins for the global
+/// `PROJECT` — but every project's services live under its own key in
+/// [`SERVICES`], so neither evicts the other.
 pub fn set_project(name: &str) {
 	if let Ok(mut slot) = PROJECT.write() {
 		name.clone_into(&mut slot);
@@ -106,20 +113,36 @@ pub fn set_project(name: &str) {
 	}
 }
 
-/// The service-to-colour map for this invocation, filled once the compose file
-/// has been resolved. Empty until then, which is why `colour_for` falls back to
-/// a hash rather than requiring registration.
-static SERVICES: std::sync::RwLock<Option<std::collections::HashMap<String, usize>>> =
-	std::sync::RwLock::new(None);
+/// The service-to-colour map, keyed by project name so two `Engine` values
+/// alive in one process (helmly-agent's fleet shape) coexist: a second
+/// `set_services` inserts under a different project key and the first
+/// project's slots survive (#1517).
+///
+/// Empty until [`set_services`] is called, which is why [`identity_slot`] and
+/// [`service_slot`] fall back to a hash rather than requiring registration.
+static SERVICES: std::sync::RwLock<
+	Option<std::collections::HashMap<String, std::collections::HashMap<String, usize>>>,
+> = std::sync::RwLock::new(None);
 
 /// Record this project's service names so each gets its own identity colour.
 ///
-/// Call once per invocation, after the compose file is parsed. Without it every
-/// label falls back to the hash, which still works — it just cannot promise two
+/// Call once per project per invocation, after the compose file is parsed
+/// (or, for the label-only teardown in
+/// `engine::lifecycle::down_label::Engine::down_by_label`, after the live
+/// container listing is fetched). Without a prior [`set_project`] for the
+/// same project this is a no-op: registration has no project key to live
+/// under. Every CLI command and the engine call site already calls
+/// [`set_project`] first. Without any registration every label falls back
+/// to the per-label hash, which still works — it just cannot promise two
 /// services differ.
 pub fn set_services(names: &[String]) {
+	let project = match PROJECT.read() {
+		Ok(p) if !p.is_empty() => p.clone(),
+		_ => return,
+	};
 	if let Ok(mut slot) = SERVICES.write() {
-		*slot = Some(palette::assign(names));
+		let map = slot.get_or_insert_with(std::collections::HashMap::new);
+		map.insert(project, palette::assign(names));
 	}
 }
 
@@ -135,21 +158,49 @@ pub fn identity_style(label: &str) -> Style {
 
 /// The palette slot backing [`identity_style`]. See [`service_slot`] for why
 /// this exists as its own, unrendered step.
+///
+/// First tries every project registered in [`SERVICES`], stripping each
+/// project's `"{name}-"` prefix in turn — a label from a project whose
+/// [`set_project`] was overwritten by another engine in the same process
+/// still resolves correctly (#1517). If no project matched, falls back to
+/// the legacy [`PROJECT_PREFIX`]-stripped lookup so `proj-web-1` and
+/// `web-1` collapse to one hash slot in the no-registration case
+/// (`every_spelling_of_one_container_gets_one_colour` pins that contract).
 pub(crate) fn identity_slot(label: &str) -> usize {
-	// Use the cached `"{project}-"` prefix instead of formatting one per call.
-	// `progress_line` and the table renderers fire this on every container
-	// name in every command, so the per-call `format!` was ~300 wasted
-	// allocations per 100-service `up` (#1364).
-	let key = PROJECT_PREFIX
+	if let Ok(slot) = SERVICES.read() {
+		if let Some(map) = slot.as_ref() {
+			for (project, services) in map.iter() {
+				if project.is_empty() {
+					continue;
+				}
+				let prefix = format!("{project}-");
+				if let Some(stripped) = label.strip_prefix(prefix.as_str()) {
+					let key = strip_replica_suffix(stripped);
+					if let Some(&slot) = services.get(key) {
+						return slot;
+					}
+				}
+			}
+		}
+	}
+	// No project's services matched. Strip the currently-set project prefix
+	// (cached in PROJECT_PREFIX so the per-call `format!` is not re-paid)
+	// and look up the bare key — the legacy single-engine behaviour that
+	// `every_spelling_of_one_container_gets_one_colour` pins (#1364).
+	let prefix = PROJECT_PREFIX
 		.read()
 		.ok()
-		.and_then(|p| {
-			(!p.is_empty())
-				.then(|| label.strip_prefix(p.as_str()).map(str::to_string))
-				.flatten()
-		})
-		.unwrap_or_else(|| label.to_string());
-	service_slot(strip_replica_suffix(&key))
+		.map(|p| p.clone())
+		.unwrap_or_default();
+	let stripped = if prefix.is_empty() {
+		label.to_string()
+	} else {
+		label
+			.strip_prefix(prefix.as_str())
+			.unwrap_or(label)
+			.to_string()
+	};
+	service_slot(strip_replica_suffix(&stripped))
 }
 
 /// Drop a trailing `-N` replica index, so every surface hashes the same key.
@@ -417,6 +468,12 @@ const SERVICE_PALETTE: [AnsiColor; 6] = [
 /// The palette slot backing [`service_style`], before it is rendered into a
 /// [`Style`] for whichever palette the terminal supports.
 ///
+/// Looks up `name` in every project's services registered in [`SERVICES`],
+/// first match wins. Two `Engine` values alive in one process own separate
+/// maps under separate project keys, so neither evicts the other (#1517).
+/// Falls back to the per-label hash when nothing is registered — the same
+/// fallback [`palette::colour_for`] has always used for an undeclared label.
+///
 /// Split out so a routing regression can be asserted on the slot itself: the
 /// narrow (6-colour) fallback wraps a slot index mod 6, so two different
 /// wide-palette slots can render as the same `Style` there. A test comparing
@@ -424,11 +481,16 @@ const SERVICE_PALETTE: [AnsiColor; 6] = [
 /// terminal that never announces the wide palette; the slot never wraps, so
 /// it stays a real comparison on both.
 pub(crate) fn service_slot(name: &str) -> usize {
-	SERVICES
-		.read()
-		.ok()
-		.and_then(|slot| slot.as_ref().map(|map| palette::colour_for(name, map)))
-		.unwrap_or_else(|| palette::colour_for(name, &std::collections::HashMap::new()))
+	if let Ok(slot) = SERVICES.read() {
+		if let Some(map) = slot.as_ref() {
+			for services in map.values() {
+				if let Some(&slot) = services.get(name) {
+					return slot;
+				}
+			}
+		}
+	}
+	palette::colour_for(name, &std::collections::HashMap::new())
 }
 
 /// The stable colour for a service's aggregated-log prefix.
