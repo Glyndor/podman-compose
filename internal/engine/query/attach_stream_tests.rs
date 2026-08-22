@@ -16,7 +16,7 @@
 
 #![cfg(unix)]
 
-use super::inspect::{AttachOptions, AttachOutcome, AttachSummary};
+use super::attach::{AttachOptions, AttachOutcome, AttachSummary};
 use super::Engine;
 use crate::compose::types::ComposeFile;
 use crate::engine::fake_podman::{self, FakeReply};
