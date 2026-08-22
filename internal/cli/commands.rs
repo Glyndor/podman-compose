@@ -68,6 +68,21 @@ pub(crate) enum Commands {
 		/// Recreate anonymous volumes instead of keeping the previous ones.
 		#[arg(short = 'V', long)]
 		renew_anon_volumes: bool,
+		/// Stop every container as soon as any container exits. Cannot be combined
+		/// with `-d/--detach`, `--wait` or `--watch`: they all change what
+		/// "attaching" means, and a foreground abort is the only one the flag
+		/// applies to.
+		#[arg(long, conflicts_with_all = ["detach", "wait", "watch"])]
+		abort_on_container_exit: bool,
+		/// Return the exit code of the named service's container as podup's own
+		/// exit status. Implies `--abort-on-container-exit` (docker compose
+		/// v5.1.3); rejected with the same combination rule as that flag.
+		#[arg(
+			long,
+			value_name = "SERVICE",
+			conflicts_with_all = ["detach", "wait", "watch"]
+		)]
+		exit_code_from: Option<String>,
 		/// Bring up only these services (and their depends_on); default: all.
 		#[arg(trailing_var_arg = true)]
 		services: Vec<String>,

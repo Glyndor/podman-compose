@@ -1,5 +1,6 @@
 //! Container inspection commands: top, port, and log attachment.
 
+use futures_util::stream::FuturesUnordered;
 use futures_util::StreamExt;
 
 use crate::compose::types::ComposeFile;
@@ -13,18 +14,21 @@ use super::Engine;
 
 /// How an attached `up` stopped streaming.
 ///
-/// The distinction has to survive back to the caller because the three endings
+/// The distinction has to survive back to the caller because the four endings
 /// mean different things to a script: the containers finishing on their own is
-/// success, the operator pressing Ctrl-C is not, and a stream that died under a
-/// container still running is a failed read. The caller still tears the project
-/// down in every case. Reporting an ending as an error from `attach` itself
-/// would short-circuit that and leave the containers running, which is a worse
-/// bug than the exit code this exists to fix.
+/// success, the operator pressing Ctrl-C is not, a stream that died under a
+/// container still running is a failed read, and an abort triggered by a
+/// container exit carries the exit code the caller wants to propagate. The
+/// caller still tears the project down in every case. Reporting an ending as
+/// an error from `attach` itself would short-circuit that and leave the
+/// containers running, which is a worse bug than the exit code this exists to
+/// fix.
 ///
 /// `#[non_exhaustive]` since 3.0.0, so a further ending can be added without a
-/// major bump. `StreamBroke` (3.3.0) is one that already was.
+/// major bump. `StreamBroke` (3.3.0) and `Aborted` (#1492) are two that already
+/// were.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachOutcome {
 	/// Every stream ended on its own.
 	StreamsEnded,
@@ -33,6 +37,22 @@ pub enum AttachOutcome {
 	/// At least one stream ended while its container was still running, so live
 	/// output was truncated rather than finished (#1104).
 	StreamBroke,
+	/// `up --abort-on-container-exit` (or `--exit-code-from`, which implies it)
+	/// fired: the first container to exit triggered the abort, the rest were
+	/// stopped, and the field's exit code is what the CLI propagates as its
+	/// process exit status. `service` is the compose service whose code was
+	/// used — the first to exit, or the named `--exit-code-from` target (which
+	/// may differ when the trigger was a different service, measured against
+	/// docker compose v5.1.3).
+	Aborted {
+		/// The compose service whose exit code is being propagated.
+		service: String,
+		/// The exit code reported by `service`'s container, after the abort
+		/// stopped everything. May be `0` (a clean exit), non-zero (a crash),
+		/// or `137` (SIGKILL during the abort teardown when the named service
+		/// was still running).
+		exit_code: i64,
+	},
 }
 
 impl Engine {
@@ -326,21 +346,47 @@ impl Engine {
 
 	/// Attach to log streams for all services with `attach: true` (the default). Streams are multiplexed to stdout with a service-name prefix.
 	pub async fn attach_logs(&self, file: &ComposeFile) -> Result<AttachOutcome> {
-		self.attach_logs_with_options(file, false).await
+		self.attach_logs_with_options(file, false, false, None)
+			.await
 	}
 
-	/// Like [`Engine::attach_logs`] but with `up --timestamps` support: when
-	/// `timestamps` is set, each streamed line carries the libpod RFC3339
-	/// timestamp prefix.
+	/// Like [`Engine::attach_logs`] but with `up --timestamps` and
+	/// `--abort-on-container-exit` / `--exit-code-from` support.
+	///
+	/// `timestamps` prefixes each streamed line with the libpod RFC3339 timestamp.
+	///
+	/// `abort_on_container_exit` (and `exit_code_from`, which implies it) makes
+	/// the call return [`AttachOutcome::Aborted`] as soon as any container
+	/// exits, carrying the exit code the CLI propagates. On that path the
+	/// remaining containers are stopped before the function returns, so the
+	/// caller does not need to call [`Engine::stop`] — and `dispatch.rs` skips
+	/// its own stop call on that outcome for the same reason.
+	///
+	/// A service name passed as `exit_code_from` must exist in the compose
+	/// file; a missing service is rejected with [`ComposeError::ServiceNotFound`]
+	/// before any work happens (matching docker compose v5.1.3).
 	pub async fn attach_logs_with_options(
 		&self,
 		file: &ComposeFile,
 		timestamps: bool,
+		abort_on_container_exit: bool,
+		exit_code_from: Option<&str>,
 	) -> Result<AttachOutcome> {
-		// Carry (display_name, container_name, is_tty) so the log parser matches
-		// the container's framing mode: TTY containers emit raw bytes; non-TTY
-		// containers emit multiplexed 8-byte-header frames.
-		let attached: Vec<(String, String, bool)> = file
+		// Reject `--exit-code-from` naming an unknown service up front. Doing this
+		// before any container is created means a typo surfaces as a clear
+		// "service X not found" error, matching docker compose v5.1.3.
+		if let Some(target) = exit_code_from {
+			if !file.services.contains_key(target) {
+				return Err(ComposeError::ServiceNotFound(target.to_string()));
+			}
+		}
+
+		// Carry (service, display_name, container_name, is_tty) so the log parser
+		// matches the container's framing mode (TTY containers emit raw bytes;
+		// non-TTY containers emit multiplexed 8-byte-header frames) and so the
+		// abort path can map a stream end back to the compose service that owns
+		// it without re-deriving the project prefix.
+		let attached: Vec<(String, String, String, bool)> = file
 			.services
 			.iter()
 			.filter(|(_, s)| s.attach.unwrap_or(true))
@@ -352,7 +398,7 @@ impl Engine {
 						.strip_prefix(proj_prefix.as_str())
 						.map(|s| s.to_string())
 						.unwrap_or_else(|| cname.clone());
-					(display, cname, is_tty)
+					(name.clone(), display, cname, is_tty)
 				})
 			})
 			.collect();
@@ -362,9 +408,9 @@ impl Engine {
 			return Ok(AttachOutcome::StreamsEnded);
 		}
 
-		let streams: Vec<_> = attached
+		let streams: FuturesUnordered<_> = attached
 			.iter()
-			.map(|(display, cname, is_tty)| {
+			.map(|(svc, display, cname, is_tty)| {
 				let prefix = display.clone();
 				let path = format!(
 					"{API_PREFIX}/containers/{}/logs?stdout=true&stderr=true&follow=true&timestamps={timestamps}",
@@ -373,12 +419,13 @@ impl Engine {
 				let client = &self.client;
 				let is_tty = *is_tty;
 				let cname = cname.clone();
+				let svc = svc.clone();
 				async move {
 					let resp = match client.get_stream(&path).await {
 						Ok(r) => r,
 						Err(e) => {
 							tracing::warn!("attach_logs {prefix}: {e}");
-							return false;
+							return (svc, cname, StreamEnd::Broke);
 						}
 					};
 					// TTY containers produce raw bytes (stdout/stderr merged).
@@ -408,25 +455,24 @@ impl Engine {
 							// connection to the engine and still exit 0.
 							Err(e) => {
 								let kind = e.stream_end_kind();
-								let broke = super::stream_broke_mid_output(
-									self.container_still_running(&cname).await,
-								);
-								if broke {
+								let still_running = self.container_still_running(&cname).await;
+								if super::stream_broke_mid_output(still_running) {
 									tracing::warn!(
 										"attach {prefix}: stream ended while the container was \
 										 still running [{kind}]: {e}"
 									);
-								} else {
-									tracing::warn!(
-										"attach {prefix}: stream ended as the container stopped \
-										 [{kind}]"
-									);
+									return (svc, cname, StreamEnd::Broke);
 								}
-								return broke;
+								tracing::warn!(
+									"attach {prefix}: stream ended as the container stopped [{kind}]"
+								);
+								return (svc, cname, StreamEnd::ContainerStopped);
 							}
 						}
 					}
-					false
+					// Clean end of the stream — the container stopped and the
+					// transport delivered its terminator.
+					(svc, cname, StreamEnd::ContainerStopped)
 				}
 			})
 			.collect();
@@ -436,31 +482,166 @@ impl Engine {
 		// SIGTERM too, not the 143 the signal number would suggest), and podup
 		// exited 0 for both. A CI job that runs `up` in the foreground and is
 		// cancelled therefore reported success.
-		#[cfg(unix)]
-		let outcome = {
-			use tokio::signal::unix::{signal, SignalKind};
-			let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
-			tokio::select! {
-				broke = futures_util::future::join_all(streams) => {
-					// One truncated stream is enough: the output the user was
-					// watching is incomplete whatever the others did.
-					if broke.into_iter().any(|b| b) {
-						AttachOutcome::StreamBroke
-					} else {
-						AttachOutcome::StreamsEnded
-					}
-				}
-				_ = tokio::signal::ctrl_c() => AttachOutcome::Interrupted,
-				_ = sigterm.recv() => AttachOutcome::Interrupted,
-			}
-		};
-		#[cfg(not(unix))]
-		let outcome = tokio::select! {
-			_ = futures_util::future::join_all(streams) => AttachOutcome::StreamsEnded,
-			_ = tokio::signal::ctrl_c() => AttachOutcome::Interrupted,
-		};
+		//
+		// `FuturesUnordered` (instead of `join_all`) is what makes
+		// `--abort-on-container-exit` work: we yield on the FIRST stream to
+		// finish, then decide whether to keep waiting or stop the rest. With
+		// `join_all` we would have to wait for every container, and a service
+		// that exits cleanly could not trigger an abort while others were still
+		// running.
+		let phase = wait_for_phase(streams, abort_on_container_exit).await;
 
-		Ok(outcome)
+		match phase {
+			Phase::Interrupted => Ok(AttachOutcome::Interrupted),
+			Phase::AllEnded { saw_break } => {
+				if saw_break {
+					Ok(AttachOutcome::StreamBroke)
+				} else {
+					Ok(AttachOutcome::StreamsEnded)
+				}
+			}
+			Phase::FirstExited {
+				trigger_service,
+				trigger_container,
+			} => {
+				// Stop the rest of the project. `engine.stop` is idempotent for
+				// the already-stopped trigger container, so we don't need to
+				// exclude it. Best effort: the priority on this path is to
+				// report the exit code, not to surface a stop failure (which
+				// a downstream `down` will catch anyway).
+				if let Err(e) = self.stop(file, &[]).await {
+					tracing::warn!(
+						"abort-on-container-exit: stop after {trigger_container} exited: {e}"
+					);
+				}
+
+				// Pick the exit code to propagate. With `--exit-code-from`,
+				// the named service's code wins even if some other container
+				// exited first — and that container may have been SIGKILLed
+				// during the `stop` above (docker compose v5.1.3 prints 137
+				// for that case, measured). Otherwise the trigger's code is the
+				// one podup returns.
+				let (service, exit_code) = match exit_code_from {
+					Some(target) => {
+						let target_container =
+							self.first_replica_name(target, &file.services[target]);
+						let code = self
+							.container_exit_code(&target_container)
+							.await
+							.unwrap_or(0);
+						(target.to_string(), code)
+					}
+					None => {
+						let code = self
+							.container_exit_code(&trigger_container)
+							.await
+							.unwrap_or(0);
+						(trigger_service, code)
+					}
+				};
+
+				Ok(AttachOutcome::Aborted { service, exit_code })
+			}
+		}
+	}
+
+	/// Wait for a container's exit code, returning `None` if the container is
+	/// still running or the libpod call fails. Uses `/wait?condition=stopped`,
+	/// which returns immediately for an already-stopped container and blocks
+	/// until one is. The abort path relies on it returning the kill code (137)
+	/// for a container SIGKILLed during the abort's own `stop`.
+	async fn container_exit_code(&self, container_name: &str) -> Option<i64> {
+		let path = format!(
+			"{API_PREFIX}/containers/{}/wait?condition=stopped",
+			urlencoded(container_name),
+		);
+		self.client
+			.post_empty_json_unbounded::<i64>(&path)
+			.await
+			.ok()
+	}
+}
+
+/// How one stream of `attach_logs_with_options` ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamEnd {
+	/// The stream's transport died while its container was still running — a
+	/// truncated live read, not a finished one (#1104).
+	Broke,
+	/// The container is stopped (clean end or transport died *because* the
+	/// container stopped). The abort path treats this as the trigger.
+	ContainerStopped,
+}
+
+/// What the multi-stream wait returned before the outer code acts on it.
+enum Phase {
+	/// SIGINT/SIGTERM arrived.
+	Interrupted,
+	/// Every stream finished. `saw_break` is true if any one of them ended
+	/// with a truncated read, which makes the outcome `StreamBroke` rather
+	/// than `StreamsEnded`.
+	AllEnded { saw_break: bool },
+	/// `abort_on_container_exit` is set and the named stream finished while
+	/// its container was stopped — the first container to exit. The outer
+	/// code stops the rest and reports the exit code.
+	FirstExited {
+		trigger_service: String,
+		trigger_container: String,
+	},
+}
+
+async fn wait_for_phase(
+	mut streams: FuturesUnordered<impl futures_util::Future<Output = (String, String, StreamEnd)>>,
+	abort_on_container_exit: bool,
+) -> Phase {
+	let mut saw_break = false;
+	#[cfg(unix)]
+	let mut sigterm = {
+		use tokio::signal::unix::{signal, SignalKind};
+		signal(SignalKind::terminate()).expect("SIGTERM handler")
+	};
+	loop {
+		#[cfg(unix)]
+		{
+			tokio::select! {
+				biased;
+				_ = tokio::signal::ctrl_c() => return Phase::Interrupted,
+				_ = sigterm.recv() => return Phase::Interrupted,
+				next = streams.next() => match next {
+					None => return Phase::AllEnded { saw_break },
+					Some((svc, cname, end)) => match end {
+						StreamEnd::Broke => saw_break = true,
+						StreamEnd::ContainerStopped if abort_on_container_exit => {
+							return Phase::FirstExited {
+								trigger_service: svc,
+								trigger_container: cname,
+							};
+						}
+						// Without `--abort-on-container-exit` a container stopping
+						// mid-stream is not an event: we keep waiting for the
+						// others, and the loop terminates with `AllEnded` when
+						// they all finish on their own.
+						StreamEnd::ContainerStopped => {}
+					},
+				},
+			}
+		}
+		#[cfg(not(unix))]
+		{
+			match streams.next().await {
+				None => return Phase::AllEnded { saw_break },
+				Some((svc, cname, end)) => match end {
+					StreamEnd::Broke => saw_break = true,
+					StreamEnd::ContainerStopped if abort_on_container_exit => {
+						return Phase::FirstExited {
+							trigger_service: svc,
+							trigger_container: cname,
+						};
+					}
+					StreamEnd::ContainerStopped => {}
+				},
+			}
+		}
 	}
 }
 

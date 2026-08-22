@@ -551,7 +551,7 @@ async fn engine_attach_logs_timestamps_returns_when_container_exits() {
 	engine.up(&file).await.unwrap();
 	let res = tokio::time::timeout(
 		std::time::Duration::from_secs(20),
-		engine.attach_logs_with_options(&file, true),
+		engine.attach_logs_with_options(&file, true, false, None),
 	)
 	.await;
 	engine.down(&file).await.unwrap();
