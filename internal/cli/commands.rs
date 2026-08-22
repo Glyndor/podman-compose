@@ -75,8 +75,8 @@ pub(crate) enum Commands {
 		#[arg(long, conflicts_with_all = ["detach", "wait", "watch"])]
 		abort_on_container_exit: bool,
 		/// Return the exit code of the named service's container as podup's own
-		/// exit status. Implies `--abort-on-container-exit` (docker compose
-		/// v5.1.3); rejected with the same combination rule as that flag.
+		/// exit status. Implies `--abort-on-container-exit`, and is rejected
+		/// with the same combination rule as that flag.
 		#[arg(
 			long,
 			value_name = "SERVICE",
