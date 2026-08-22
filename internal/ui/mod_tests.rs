@@ -251,7 +251,7 @@ fn every_wide_palette_slot_indexes_the_narrow_palette_safely() {
 /// the fix were in place, the vacuous shape this file already carries a
 /// warning about elsewhere.
 #[test]
-fn a_second_project_evicts_the_first_projects_colours() {
+fn a_second_project_leaves_the_first_projects_colours_alone() {
 	let _guard = registry_guard();
 
 	// `set_services` is project-keyed; each project's services live under its

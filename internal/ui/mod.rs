@@ -138,7 +138,18 @@ static SERVICES: std::sync::RwLock<
 pub fn set_services(names: &[String]) {
 	let project = match PROJECT.read() {
 		Ok(p) if !p.is_empty() => p.clone(),
-		_ => return,
+		_ => {
+			// Returning quietly would leave every label on the hash fallback
+			// with nothing to say why: colours would still appear, just not
+			// the assigned ones, which is the shape of failure nobody
+			// notices. The CLI always calls set_project first; a library
+			// consumer has no such habit, and this is the line that tells
+			// them.
+			tracing::warn!(
+				"identity colours not registered: set_project must be called before set_services"
+			);
+			return;
+		}
 	};
 	if let Ok(mut slot) = SERVICES.write() {
 		let map = slot.get_or_insert_with(std::collections::HashMap::new);
