@@ -51,6 +51,8 @@ pub(crate) async fn dispatch(
 			no_start,
 			timestamps,
 			renew_anon_volumes: _,
+			abort_on_container_exit,
+			exit_code_from,
 			services,
 		} => {
 			if remove_orphans {
@@ -106,27 +108,59 @@ pub(crate) async fn dispatch(
 			if watch {
 				engine.watch(file).await?;
 			} else if !detach && !wait {
-				let outcome = engine.attach_logs_with_options(file, timestamps).await?;
-				// A failed teardown must surface as a non-zero exit, not be
-				// swallowed after the log streams end.
-				engine.stop(file, &[]).await?;
+				let summary = engine
+					.attach_logs_with(
+						file,
+						&podup::AttachOptions::new()
+							.with_timestamps(timestamps)
+							.with_abort_on_container_exit(abort_on_container_exit)
+							// `--exit-code-from` implies `--abort-on-container-exit`
+							// in docker compose (measured against v5.1.3); the
+							// underlying call applies that implication itself, so
+							// all dispatch has to do is forward both flags verbatim.
+							.with_exit_code_from(exit_code_from.clone()),
+					)
+					.await?;
+				let outcome = summary.outcome;
 				// Reported after the teardown, never instead of it: returning the
-				// interrupt straight from `attach` would short-circuit the `?`
-				// above and leave the project running, which is a worse bug than
-				// the exit code.
-				if outcome == podup::AttachOutcome::Interrupted {
-					return Err(podup::ComposeError::Interrupted);
+				// abort straight from `attach` would short-circuit the `?` above
+				// and leave the project running, which is a worse bug than the
+				// exit code. `attach` already stopped every container when it
+				// returned `Aborted`, so the redundant `stop` here is skipped on
+				// that path; the other three endings still need it.
+				match outcome {
+					podup::AttachOutcome::Aborted => {
+						if let Some(code) = summary.exit_code {
+							if code != 0 {
+								return Err(podup::ComposeError::RunExited(code));
+							}
+						}
+					}
+					_ => {
+						// A failed teardown must surface as a non-zero exit, not
+						// be swallowed after the log streams end.
+						engine.stop(file, &[]).await?;
+					}
 				}
-				// Same ordering rule as the interrupt above: reported after the
+				// Same ordering rule as the abort above: reported after the
 				// teardown, never instead of it. docker compose exits 1 when an
 				// attached stream dies with the container still running, and we
 				// exited 0 — measured on 5.4.2 by restarting the libpod socket
 				// underneath an attached `up`.
-				if outcome == podup::AttachOutcome::StreamBroke {
-					return Err(podup::ComposeError::StreamTruncated(
-					"log stream ended while the container was still running: output is incomplete"
-						.to_string(),
-				));
+				match outcome {
+					podup::AttachOutcome::Aborted => {}
+					podup::AttachOutcome::Interrupted => {
+						return Err(podup::ComposeError::Interrupted);
+					}
+					podup::AttachOutcome::StreamBroke => {
+						return Err(podup::ComposeError::StreamTruncated(
+							"log stream ended while the container was still \
+							 running: output is incomplete"
+								.to_string(),
+						));
+					}
+					podup::AttachOutcome::StreamsEnded => {}
+					_ => unreachable!("AttachOutcome is matched exhaustively above"),
 				}
 			}
 		}

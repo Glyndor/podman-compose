@@ -111,6 +111,8 @@ reference and that carries no architecture.
 | `--no-start` | Create the containers but do not start them. | off |
 | `--timestamps` | Prefix attached log lines with a timestamp (ignored with `-d`). | off |
 | `-V, --renew-anon-volumes` | Recreate anonymous volumes instead of keeping the previous ones. | off |
+| `--abort-on-container-exit` | Stop every container as soon as any of them exits; the process exit status is that container's exit code. Cannot be combined with `-d`, `--wait`, or `--watch`. | off |
+| `--exit-code-from SERVICE` | Return the named service's exit code as podup's own. Implies `--abort-on-container-exit` (with the same combination rules); a service that does not exist in the compose file is rejected before any container is created. | off |
 
 ```bash
 podup up -d --build
@@ -832,7 +834,7 @@ returns the whole set, which a script reads as a match.
 | `126` | `run`/`exec`: the command exists but is not executable. |
 | `127` | `run`/`exec`: the command was not found. |
 | `130` | An attached `up` was ended by SIGINT or SIGTERM. |
-| other | `run` propagates the container's own exit code verbatim. |
+| other | `run` propagates the container's own exit code verbatim. `up --abort-on-container-exit` does the same with the first container to exit; `up --exit-code-from SERVICE` does the same with the named service (which may have been SIGKILLed during the abort, yielding 137). |
 
 An attached `up` also exits `1` when a log stream dies while its container is
 still running, and `events` exits `1` when an unbounded feed ends at all. Both
@@ -840,6 +842,14 @@ are new in 3.3.0 and both used to exit `0`; see the streaming rule below.
 
 `exec` propagates the command's exit code the same way `run` does, and `wait`
 returns the last non-zero code it saw.
+
+**`up --abort-on-container-exit` and `up --exit-code-from`** make a foreground
+`up` a usable CI test harness: the project is brought up, the named service
+(or the first to exit) runs to completion, the rest are stopped, and the
+container's exit code is the process exit code — matching `docker compose v5.1.3`
+on the same Podman socket. The teardown is `stop`, not `down`: containers
+remain in `Exited` state, ready for the next `up`/`down`. A zero exit
+propagates as `0`, not `1`, so a clean run still reports success.
 
 **`130` for SIGTERM as well as SIGINT.** The signal number would suggest 143 for
 SIGTERM, but `docker compose up` returns 130 for both and podup matches it
