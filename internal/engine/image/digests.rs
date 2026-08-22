@@ -72,26 +72,36 @@ pub async fn resolve_image_digests(client: &Client, file: &ComposeFile) -> Resul
 		.filter_map(|(name, svc)| svc.image.clone().map(|image| (name.clone(), image)))
 		.collect();
 
-	let outcomes: Vec<(String, ResolveOutcome)> =
-		futures_util::stream::iter(inputs.into_iter().map(|(name, image)| async move {
-			let path = format!("{API_PREFIX}/images/{}/json", urlencoded(&image));
-			match client.get_json::<ImageInspect>(&path).await {
-				Ok(info) => match info.repo_digests.into_iter().next() {
-					Some(digest) => (name, ResolveOutcome::Pinned(digest)),
-					None => {
-						tracing::warn!(
-							"config --resolve-image-digests: no registry digest for {image} \
+	// The index travels with each task. `buffer_unordered` yields in COMPLETION
+	// order, so without carrying the input position there is nothing to sort
+	// back to - and "the first failing service in input order" below would
+	// really mean "whichever inspect happened to fail first", which is a
+	// different message on every run against the same file.
+	let mut outcomes: Vec<(usize, String, ResolveOutcome)> =
+		futures_util::stream::iter(inputs.into_iter().enumerate().map(
+			|(i, (name, image))| async move {
+				let path = format!("{API_PREFIX}/images/{}/json", urlencoded(&image));
+				match client.get_json::<ImageInspect>(&path).await {
+					Ok(info) => match info.repo_digests.into_iter().next() {
+						Some(digest) => (i, name, ResolveOutcome::Pinned(digest)),
+						None => {
+							tracing::warn!(
+								"config --resolve-image-digests: no registry digest for {image} \
 								 (service {name}); left unchanged"
-						);
-						(name, ResolveOutcome::NoDigest)
-					}
-				},
-				Err(e) => (name, ResolveOutcome::Failed(image, e)),
-			}
-		}))
+							);
+							(i, name, ResolveOutcome::NoDigest)
+						}
+					},
+					Err(e) => (i, name, ResolveOutcome::Failed(image, e)),
+				}
+			},
+		))
 		.buffer_unordered(MAX_RESOLVE_CONCURRENCY)
 		.collect()
 		.await;
+
+	// Back into input order. This is what makes the error below deterministic.
+	outcomes.sort_by_key(|(i, _, _)| *i);
 
 	// Surface the first failing service in **input order** and abort before any
 	// mutation, mirroring the pre-concurrency serial behaviour. A backend
@@ -99,7 +109,7 @@ pub async fn resolve_image_digests(client: &Client, file: &ComposeFile) -> Resul
 	// original UNPINNED config with exit 0 would let a script that relies on
 	// digest pinning silently get unpinned images. A genuinely-absent image
 	// (404) is reported the same way: the user asked to pin and we could not.
-	for (name, outcome) in &outcomes {
+	for (_, name, outcome) in &outcomes {
 		if let ResolveOutcome::Failed(image, e) = outcome {
 			return Err(ComposeError::Build(format!(
 				"config --resolve-image-digests: cannot inspect {image} (service {name}): {e}"
@@ -110,7 +120,7 @@ pub async fn resolve_image_digests(client: &Client, file: &ComposeFile) -> Resul
 	// All good (or all warn-only); apply the pinned digests in input order so
 	// the resulting file is stable across re-runs regardless of which inspect
 	// call happened to resolve first.
-	for (name, outcome) in outcomes {
+	for (_, name, outcome) in outcomes {
 		if let ResolveOutcome::Pinned(digest) = outcome {
 			if let Some(svc) = out.services.get_mut(&name) {
 				svc.image = Some(digest);
@@ -310,6 +320,39 @@ mod tests {
 		assert!(
 			msg.contains("no such image"),
 			"underlying 404 reason must be surfaced: {msg}"
+		);
+	}
+
+	/// The sort is what makes the reported error deterministic, and it has to be
+	/// tested on the mechanism rather than through the fan-out.
+	///
+	/// A two-failure fixture driven through `buffer_unordered` does **not**
+	/// discriminate: the in-process fake answers fast enough that completion
+	/// order coincides with submission order, so the assertion passes with the
+	/// sort removed. Measured — three runs, three passes, with the sort
+	/// commented out. That is the vacuous shape this file must not carry, so
+	/// the property is pinned directly instead.
+	#[test]
+	fn outcomes_are_processed_in_input_order_not_completion_order() {
+		// What `buffer_unordered` can hand back: completion order, with the
+		// file-order-first failure arriving last.
+		let mut outcomes: Vec<(usize, String, ResolveOutcome)> = vec![
+			(2, "zzz".into(), ResolveOutcome::NoDigest),
+			(
+				1,
+				"mmm".into(),
+				ResolveOutcome::Pinned("mmm@sha256:1".into()),
+			),
+			(0, "aaa".into(), ResolveOutcome::NoDigest),
+		];
+		outcomes.sort_by_key(|(i, _, _)| *i);
+
+		let order: Vec<&str> = outcomes.iter().map(|(_, n, _)| n.as_str()).collect();
+		assert_eq!(
+			order,
+			["aaa", "mmm", "zzz"],
+			"the error pass and the mutation pass both walk this vector, so it \
+			 must be input order before either runs"
 		);
 	}
 
