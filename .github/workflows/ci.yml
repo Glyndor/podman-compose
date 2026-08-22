@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   rust:
-    uses: Glyndor/.github/.github/workflows/rust-ci.yml@11d87e7e4d6320d1cf89eb403a50d03613a18e30 # v1.18.0
+    uses: Glyndor/.github/.github/workflows/rust-ci.yml@bc27850b34b0cc8de17bd7a98d492b95dae0e6b5 # TEMP: branch of Glyndor/.github#142
     with:
       extra-test-os: "[\"macos-latest\", \"windows-latest\"]"
       # Measured against the WHOLE crate, deliberately. The gate used to read 90%
