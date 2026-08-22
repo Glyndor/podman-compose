@@ -162,7 +162,7 @@ jobs:
           # this version and defeat the MSRV gate. A release still must not float
           # on whatever Rust the runner ships, so pin it here, in the release path
           # only.
-          RUST_TOOLCHAIN: "1.97"
+          RUST_TOOLCHAIN: "1.98"
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update -qq
@@ -265,7 +265,7 @@ jobs:
           # defaults to. Before this the package was compiled by Debian's rustc
           # while CI validated with 1.97, so the binary users installed came
           # from a compiler the suite had never run against.
-          RUST_TOOLCHAIN: "1.97"
+          RUST_TOOLCHAIN: "1.98"
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
@@ -336,7 +336,7 @@ jobs:
         # that day. Keep in step with rust-ci.yml's toolchain default (see the
         # build job for why this is not a repo-root rust-toolchain.toml).
         env:
-          RUST_TOOLCHAIN: "1.97"
+          RUST_TOOLCHAIN: "1.98"
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
