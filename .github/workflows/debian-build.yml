@@ -17,6 +17,13 @@ on:
       # all-features and compiles the same code fine.
       - "tests/**"
       - ".github/workflows/debian-build.yml"
+      # The release job builds the .deb too, in its own container, and until
+      # this line a change to it triggered nothing. That is the shape of #1295:
+      # the filter left tests/** out, and a broken develop rode twenty pull
+      # requests because the one lane that compiles with debian/rules' feature
+      # set never ran. A gate that does not run is indistinguishable from one
+      # that passes.
+      - ".github/workflows/release.yml"
   pull_request:
     branches:
       - main
@@ -34,6 +41,13 @@ on:
       # all-features and compiles the same code fine.
       - "tests/**"
       - ".github/workflows/debian-build.yml"
+      # The release job builds the .deb too, in its own container, and until
+      # this line a change to it triggered nothing. That is the shape of #1295:
+      # the filter left tests/** out, and a broken develop rode twenty pull
+      # requests because the one lane that compiles with debian/rules' feature
+      # set never ran. A gate that does not run is indistinguishable from one
+      # that passes.
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: read
