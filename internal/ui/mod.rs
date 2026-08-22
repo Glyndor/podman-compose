@@ -95,8 +95,8 @@ static PROJECT_PREFIX: std::sync::RwLock<String> = std::sync::RwLock::new(String
 /// Record the project name for identity colouring. Set once per invocation
 /// per project: two `Engine` values alive in one process must each register
 /// their own project name, and the last `set_project` wins for the global
-/// `PROJECT` — but every project's services live under its own key in
-/// [`SERVICES`], so neither evicts the other.
+/// `PROJECT` — but every project's services live under its own key in the
+/// service registry, so neither evicts the other.
 pub fn set_project(name: &str) {
 	if let Ok(mut slot) = PROJECT.write() {
 		name.clone_into(&mut slot);
