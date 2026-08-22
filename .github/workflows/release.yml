@@ -223,7 +223,16 @@ jobs:
     name: Build Debian package (${{ matrix.arch }})
     needs: verify
     runs-on: ${{ matrix.runner }}
-    container: debian:sid
+    # debian:trixie, digest-pinned at the same snapshot Glyndor/.github's
+    # rust-debian.yml uses (default for the CI image). Sid was a moving tag:
+    # two releases built from identical source could land in different
+    # environments with nothing in history recording which, and Dependabot's
+    # github-actions ecosystem does not bump a workflow's `container:` image,
+    # so a digest of sid would have no bump path and freeze. Trixie is stable
+    # and matches the suite CI validates against, so the release that ships
+    # to users was produced by the same image the suite exercises. Bump the
+    # digest here when rust-debian.yml's default moves; the two should agree.
+    container: debian:trixie@sha256:fac46bff2e02f51425b6e33b0e1169f55dfb053d83511ca28aa50c09fd5ed7a4
     permissions:
       contents: read
       id-token: write
