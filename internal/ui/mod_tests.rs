@@ -194,6 +194,10 @@ fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
 #[test]
 fn set_services_makes_registered_names_distinct() {
 	let _guard = registry_guard();
+	// `set_services` is project-keyed; without a project name to register
+	// under, every name falls back to the hash and the test's `assert_ne!`
+	// chain no longer holds (#1517).
+	set_project("colourreg-distinct");
 	set_services(&[
 		"colourreg-alpha".to_string(),
 		"colourreg-beta".to_string(),
@@ -228,34 +232,38 @@ fn every_wide_palette_slot_indexes_the_narrow_palette_safely() {
 	}
 }
 
-/// Registering a second project evicts the first project's colours.
+/// Two projects in one process coexist: the first project's colours survive
+/// the second project's registration.
 ///
-/// **This pins a defect, not a guarantee — see #1517.** `SERVICES` is a single
-/// process-wide static and `set_services` replaces it rather than merging, so
-/// with two `Engine` values alive in one process (helmly-agent's shape, a fleet
-/// of projects) the second registration drops the first project's names. They
-/// fall through to `colour_for`'s hash fallback and their colours change
-/// underneath a run that is still going, silently.
+/// Inversion of the defect pinned in #1518 — `SERVICES` was a single
+/// process-wide static and `set_services` replaced it rather than merging,
+/// so with two `Engine` values alive in one process (helmly-agent's shape,
+/// a fleet of projects) the second registration dropped the first project's
+/// names. They fell through to `colour_for`'s hash fallback and their colours
+/// changed underneath a run that was still going, silently.
 ///
-/// The assertion is written the way the code behaves today so the eviction
-/// cannot change without something going red. **When #1517 lands, this test
-/// must be inverted, not deleted** — the fix is exactly the case where the
-/// first project's slot survives the second registration.
+/// The registry is now keyed by project name: a second registration inserts
+/// under a different project key, so the first project's slot stays put.
 ///
 /// The two name sets are chosen so the registered slot and the hash fallback
-/// disagree; `colour_for_prefers_the_registered_slot_over_the_hash` is what
-/// establishes that they can. Without that the test would pass whether or not
-/// the eviction happened, which is the vacuous shape this file already carries
-/// a warning about elsewhere.
+/// disagree; the second assertion guards that the fixture can actually
+/// discriminate — without it the first assertion would hold whether or not
+/// the fix were in place, the vacuous shape this file already carries a
+/// warning about elsewhere.
 #[test]
-fn a_second_project_evicts_the_first_projects_colours() {
+fn a_second_project_leaves_the_first_projects_colours_alone() {
 	let _guard = registry_guard();
 
+	// `set_services` is project-keyed; each project's services live under its
+	// own key (#1517). Register the first project's names under `evict-proj-a`.
+	set_project("evict-proj-a");
 	let first = ["evict-one".to_string(), "evict-two".to_string()];
 	set_services(&first);
 	let registered = service_slot("evict-one");
 
-	// A second Engine registers its own project. Nothing merges.
+	// A second Engine registers its own project under a different key. With
+	// project-keying, the first project's slot survives.
+	set_project("evict-proj-b");
 	set_services(&[
 		"evict-other-alpha".to_string(),
 		"evict-other-beta".to_string(),
@@ -266,10 +274,10 @@ fn a_second_project_evicts_the_first_projects_colours() {
 	let unregistered = crate::ui::palette::colour_for("evict-one", &HashMap::new());
 
 	assert_eq!(
-		after, unregistered,
-		"today the first project falls back to the hash after a second registration \
-		 (#1517). If this now differs, the registry stopped being shared - invert \
-		 this test rather than deleting it."
+		after, registered,
+		"the first project's slot must survive the second project's registration \
+		 (#1517). If this now differs, the registry stopped being project-keyed \
+		 - the first project's entries are being evicted again."
 	);
 	assert_ne!(
 		registered, unregistered,
