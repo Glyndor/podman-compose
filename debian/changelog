@@ -1,3 +1,52 @@
+podup (5.0.0) unstable; urgency=medium
+
+  Breaking
+
+  * A failure while resolving an `include:` now surfaces as
+    `ComposeError::Include` instead of letting `ComposeError::Io` leak out.
+    A consumer matching on `Io` to detect a missing included file no longer
+    enters that arm. The variant already existed and nothing ever produced
+    it, so the error a caller saw did not say which file the parser had been
+    reading. Every include failure is wrapped now, including the catch-all.
+
+  New
+
+  * `up --abort-on-container-exit` stops the remaining containers as soon as
+    any one exits, and `--exit-code-from SERVICE` propagates that service's
+    exit code as podup's own. The propagation rule was measured against the
+    reference tool rather than assumed: the named service's code may be 137
+    when it was still running and got SIGKILLed during the teardown.
+  * `config` warns when a port is published on every interface, which is the
+    difference between a service reachable from the host and one reachable
+    from the network the host sits on.
+
+  Packaging
+
+  * The package is built against musl and linked statically, so it declares
+    no libc floor and installs on Debian 12 and Ubuntu 22.04 again. Every
+    4.x package declared `libc6 (>= 2.39)`, which excluded both. The reusable
+    workflow now fails a musl build whose package declares any shared-library
+    dependency, so the property is enforced rather than observed.
+  * The package is compiled by the toolchain CI runs, pinned with rustup
+    against a digest-pinned container, instead of whatever the build image
+    happened to ship.
+  * `debian/rules` is executable, as policy requires.
+
+  Performance
+
+  * Image digests resolve with up to eight requests in flight. A project of
+    S services pays ceiling(S/8)+1 round-trips before `up` can start,
+    instead of S+1.
+  * `cp` streams the container archive into the extractor instead of copying
+    it a second time.
+
+  Fixes
+
+  * The identity-colour registry is keyed by project, so a second project in
+    one process no longer evicts the first project's service colours.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sat, 22 Aug 2026 01:34:53 -0500
+
 podup (4.0.0) unstable; urgency=medium
 
   Breaking
