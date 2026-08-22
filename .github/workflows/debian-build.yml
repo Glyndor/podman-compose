@@ -59,7 +59,7 @@ jobs:
     # proven on a real consumer before its tag is cut - .github's own CI never
     # exercises a caller. This repository's dpkg-buildpackage job was that
     # proof, going from red to green in 6m36s on #1525.
-    uses: Glyndor/.github/.github/workflows/rust-debian.yml@e70ff47fd8aefa0f054846815f19b98768d61122 # v1.17.0
+    uses: Glyndor/.github/.github/workflows/rust-debian.yml@4b8df6cc119877ba55452b6fd7d9b5ef8eab09ef # TEMP: branch of Glyndor/.github#141
     with:
       package-name: podup
       check-vendored: true
