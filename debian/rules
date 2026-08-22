@@ -18,9 +18,7 @@ export CARGO_HOME = $(CURDIR)/debian/cargo-home
 DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
 RUST_TARGET_amd64 = x86_64-unknown-linux-musl
 RUST_TARGET_arm64 = aarch64-unknown-linux-musl
-# TEMP MUTATION: must trip the new gate. No inline comment - make would
-# keep the space before the # inside the value.
-RUST_TARGET = x86_64-unknown-linux-gnu
+RUST_TARGET = $(RUST_TARGET_$(DEB_HOST_ARCH))
 
 # Fail here rather than silently building for the host. A package that quietly
 # went back to glibc would reintroduce the floor with nothing to notice it, and
