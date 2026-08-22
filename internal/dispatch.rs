@@ -108,18 +108,20 @@ pub(crate) async fn dispatch(
 			if watch {
 				engine.watch(file).await?;
 			} else if !detach && !wait {
-				// `--exit-code-from` implies `--abort-on-container-exit` in
-				// docker compose (measured against v5.1.3); honor that here so
-				// the user only has to pass the named service.
-				let effective_abort = abort_on_container_exit || exit_code_from.is_some();
-				let outcome = engine
-					.attach_logs_with_options(
+				let summary = engine
+					.attach_logs_with(
 						file,
-						timestamps,
-						effective_abort,
-						exit_code_from.as_deref(),
+						&podup::AttachOptions::new()
+							.with_timestamps(timestamps)
+							.with_abort_on_container_exit(abort_on_container_exit)
+							// `--exit-code-from` implies `--abort-on-container-exit`
+							// in docker compose (measured against v5.1.3); the
+							// underlying call applies that implication itself, so
+							// all dispatch has to do is forward both flags verbatim.
+							.with_exit_code_from(exit_code_from.clone()),
 					)
 					.await?;
+				let outcome = summary.outcome;
 				// Reported after the teardown, never instead of it: returning the
 				// abort straight from `attach` would short-circuit the `?` above
 				// and leave the project running, which is a worse bug than the
@@ -127,9 +129,11 @@ pub(crate) async fn dispatch(
 				// returned `Aborted`, so the redundant `stop` here is skipped on
 				// that path; the other three endings still need it.
 				match outcome {
-					podup::AttachOutcome::Aborted { exit_code, .. } => {
-						if exit_code != 0 {
-							return Err(podup::ComposeError::RunExited(exit_code));
+					podup::AttachOutcome::Aborted => {
+						if let Some(code) = summary.exit_code {
+							if code != 0 {
+								return Err(podup::ComposeError::RunExited(code));
+							}
 						}
 					}
 					_ => {
@@ -144,7 +148,7 @@ pub(crate) async fn dispatch(
 				// exited 0 — measured on 5.4.2 by restarting the libpod socket
 				// underneath an attached `up`.
 				match outcome {
-					podup::AttachOutcome::Aborted { .. } => {}
+					podup::AttachOutcome::Aborted => {}
 					podup::AttachOutcome::Interrupted => {
 						return Err(podup::ComposeError::Interrupted);
 					}

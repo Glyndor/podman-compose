@@ -40,8 +40,8 @@ mod projects;
 pub use projects::{list_projects, list_projects_filtered, LsOptions};
 pub(crate) mod query;
 pub use query::{
-	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsDisplayOptions,
-	PsFilterOptions, PsOptions, DEFAULT_LOG_TAIL,
+	AttachOptions, AttachOutcome, AttachSummary, ExecOptions, ImagesOptions, LogsDisplay,
+	LogsOptions, PsDisplayOptions, PsFilterOptions, PsOptions, DEFAULT_LOG_TAIL,
 };
 mod secrets;
 mod staging;

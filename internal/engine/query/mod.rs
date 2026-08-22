@@ -25,7 +25,7 @@ pub use exec::ExecOptions;
 use log_prefix::LinePrefixer;
 pub use options::{ImagesOptions, LogsDisplay, LogsOptions, DEFAULT_LOG_TAIL};
 
-pub use inspect::AttachOutcome;
+pub use inspect::{AttachOptions, AttachOutcome, AttachSummary};
 
 /// Validate the `--tail`/`--since`/`--until` values client-side so a typo is
 /// rejected with a clear local message instead of a raw podman HTTP 400. `tail`

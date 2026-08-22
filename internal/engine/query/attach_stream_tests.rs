@@ -9,11 +9,14 @@
 //! `--abort-on-container-exit` and `--exit-code-from` (#1492) use the same
 //! observation to fire on the first container to stop. Their tests live here
 //! too, so the abort path is exercised against the same fake the truncation
-//! paths use.
+//! paths use. The non-abort tests still call [`Engine::attach_logs_with_options`]
+//! with the legacy two-parameter signature, so the delegation from that method
+//! to [`Engine::attach_logs_with`] is covered on the path existing-attached-
+//! `up` callers actually take.
 
 #![cfg(unix)]
 
-use super::inspect::AttachOutcome;
+use super::inspect::{AttachOptions, AttachOutcome, AttachSummary};
 use super::Engine;
 use crate::compose::types::ComposeFile;
 use crate::engine::fake_podman::{self, FakeReply};
@@ -93,11 +96,14 @@ fn fake_two_services_exited(first_code: i64, second_code: i64) -> fake_podman::F
 	})
 }
 
+/// Non-abort path: kept on the 4.0.0 two-parameter form so the legacy
+/// delegation through [`Engine::attach_logs_with_options`] is exercised here,
+/// not just inside the wrapper itself.
 #[tokio::test]
 async fn a_stream_cut_while_the_container_runs_is_a_broken_stream() {
 	let fake = fake_with_state("running");
 	let outcome = engine(&fake)
-		.attach_logs_with_options(&compose(), false, false, None)
+		.attach_logs_with_options(&compose(), false)
 		.await
 		.expect("attach itself must not error; the outcome carries the verdict");
 
@@ -108,11 +114,13 @@ async fn a_stream_cut_while_the_container_runs_is_a_broken_stream() {
 	);
 }
 
+/// Non-abort path: kept on the 4.0.0 two-parameter form for the same reason as
+/// `a_stream_cut_while_the_container_runs_is_a_broken_stream`.
 #[tokio::test]
 async fn a_stream_cut_as_the_container_stopped_is_a_clean_end() {
 	let fake = fake_with_state("exited");
 	let outcome = engine(&fake)
-		.attach_logs_with_options(&compose(), false, false, None)
+		.attach_logs_with_options(&compose(), false)
 		.await
 		.expect("attach itself must not error");
 
@@ -124,27 +132,36 @@ async fn a_stream_cut_as_the_container_stopped_is_a_clean_end() {
 	);
 }
 
+/// Abort path: uses the 4.1.0 [`Engine::attach_logs_with`] entry point and
+/// reads the exit-code metadata off [`AttachSummary`], the new home for the
+/// fields the 4.0.0 `Aborted` struct variant carried.
 #[tokio::test]
 async fn abort_on_container_exit_fires_on_first_exited_container() {
 	let fake = fake_two_services_exited(7, 9);
-	let outcome = engine(&fake)
-		.attach_logs_with_options(&compose_two(), false, true, None)
+	let summary = engine(&fake)
+		.attach_logs_with(
+			&compose_two(),
+			&AttachOptions::new().with_abort_on_container_exit(true),
+		)
 		.await
-		.expect("abort path must not error; the outcome carries the verdict");
+		.expect("abort path must not error; the summary carries the verdict");
 
 	// The first container's stream to end wins. The stream from
 	// `proj-first-1` was opened first by the engine, so it is the one whose
 	// chunked body finishes first in the `FuturesUnordered` loop. Whichever
 	// service wins, the exit code must match that container's `/wait`.
-	match outcome {
-		AttachOutcome::Aborted { service, exit_code } => {
-			assert!(
-				(service == "first" && exit_code == 7) || (service == "second" && exit_code == 9),
-				"trigger service and exit code must agree (got {service} / {exit_code})"
-			);
-		}
-		other => panic!("expected Aborted, got {other:?}"),
-	}
+	assert_eq!(summary.outcome, AttachOutcome::Aborted);
+	let service = summary
+		.service
+		.as_deref()
+		.expect("abort summary carries the trigger service");
+	let exit_code = summary
+		.exit_code
+		.expect("abort summary carries the propagated exit code");
+	assert!(
+		(service == "first" && exit_code == 7) || (service == "second" && exit_code == 9),
+		"trigger service and exit code must agree (got {service} / {exit_code})"
+	);
 }
 
 /// Pair to the rejection test below. `--exit-code-from app` is accepted because
@@ -153,8 +170,13 @@ async fn abort_on_container_exit_fires_on_first_exited_container() {
 #[tokio::test]
 async fn abort_with_exit_code_from_returns_named_service_exit_code() {
 	let fake = fake_two_services_exited(7, 9);
-	let outcome = engine(&fake)
-		.attach_logs_with_options(&compose_two(), false, true, Some("second"))
+	let summary = engine(&fake)
+		.attach_logs_with(
+			&compose_two(),
+			&AttachOptions::new()
+				.with_abort_on_container_exit(true)
+				.with_exit_code_from(Some("second".to_string())),
+		)
 		.await
 		.expect("exit-code-from against a known service must be accepted");
 
@@ -163,10 +185,11 @@ async fn abort_with_exit_code_from_returns_named_service_exit_code() {
 	// compose v5.1.3 returns for the same scenario (measured against the same
 	// Podman socket).
 	assert_eq!(
-		outcome,
-		AttachOutcome::Aborted {
-			service: "second".to_string(),
-			exit_code: 9,
+		summary,
+		AttachSummary {
+			outcome: AttachOutcome::Aborted,
+			service: Some("second".to_string()),
+			exit_code: Some(9),
 		}
 	);
 }
@@ -180,7 +203,12 @@ async fn abort_with_exit_code_from_returns_named_service_exit_code() {
 async fn exit_code_from_with_unknown_service_is_rejected() {
 	let fake = fake_two_services_exited(0, 0);
 	let err = engine(&fake)
-		.attach_logs_with_options(&compose_two(), false, true, Some("ghost"))
+		.attach_logs_with(
+			&compose_two(),
+			&AttachOptions::new()
+				.with_abort_on_container_exit(true)
+				.with_exit_code_from(Some("ghost".to_string())),
+		)
 		.await
 		.expect_err("--exit-code-from ghost must be rejected up front");
 	assert!(
@@ -195,15 +223,21 @@ async fn exit_code_from_with_unknown_service_is_rejected() {
 #[tokio::test]
 async fn exit_code_from_with_known_service_is_accepted() {
 	let fake = fake_two_services_exited(7, 9);
-	let outcome = engine(&fake)
-		.attach_logs_with_options(&compose_two(), false, true, Some("first"))
+	let summary = engine(&fake)
+		.attach_logs_with(
+			&compose_two(),
+			&AttachOptions::new()
+				.with_abort_on_container_exit(true)
+				.with_exit_code_from(Some("first".to_string())),
+		)
 		.await
 		.expect("--exit-code-from first (a defined service) must not be rejected");
 	assert_eq!(
-		outcome,
-		AttachOutcome::Aborted {
-			service: "first".to_string(),
-			exit_code: 7,
+		summary,
+		AttachSummary {
+			outcome: AttachOutcome::Aborted,
+			service: Some("first".to_string()),
+			exit_code: Some(7),
 		}
 	);
 }
@@ -212,11 +246,14 @@ async fn exit_code_from_with_known_service_is_accepted() {
 /// container that exits mid-stream is **not** an event — we keep waiting for
 /// the others, and the function returns `StreamsEnded` when they finish. This
 /// is the existing-attached-`up` behavior, kept intact.
+///
+/// Stays on the 4.0.0 two-parameter form so the delegation through
+/// [`Engine::attach_logs_with_options`] is exercised here as well.
 #[tokio::test]
 async fn container_exit_without_abort_flag_does_not_trigger_abort() {
 	let fake = fake_two_services_exited(7, 9);
 	let outcome = engine(&fake)
-		.attach_logs_with_options(&compose_two(), false, false, None)
+		.attach_logs_with_options(&compose_two(), false)
 		.await
 		.expect("attach must not error");
 
