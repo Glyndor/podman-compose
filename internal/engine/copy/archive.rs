@@ -196,9 +196,13 @@ fn unpacked_path(dst_dir: &Path, rel: &Path) -> Option<std::path::PathBuf> {
 /// such entries, returning `Ok(false)`; we turn that into a hard error so the
 /// copy fails loudly instead of silently skipping data. Pure and synchronous so
 /// the guard can be unit-tested without a container.
-fn extract_tar_guarded(tar_bytes: &[u8], dst_dir: &Path) -> Result<()> {
-	let cursor = std::io::Cursor::new(tar_bytes);
-	let mut archive = tar::Archive::new(cursor);
+///
+/// `pub fn` inside the crate-private `archive` module: the path through
+/// `engine` (which is `pub(crate)`) keeps the function off the public API, and
+/// the fuzz harness behind the `test-helpers` feature reaches it through
+/// `crate::fuzz_api`.
+pub fn extract_tar_guarded<R: std::io::Read>(src: R, dst_dir: &Path) -> Result<()> {
+	let mut archive = tar::Archive::new(src);
 	for entry in archive.entries().map_err(ComposeError::Io)? {
 		let mut entry = entry.map_err(ComposeError::Io)?;
 		let rel = entry.path().map(|p| p.into_owned()).ok();
@@ -355,7 +359,7 @@ mod tests {
 	fn extract_tar_guarded_writes_benign_entry() {
 		let dir = tempfile::tempdir().expect("tempdir");
 		let bytes = tar_bytes_with("hello.txt", b"hi");
-		super::extract_tar_guarded(&bytes, dir.path()).expect("extract");
+		super::extract_tar_guarded(&bytes[..], dir.path()).expect("extract");
 		assert_eq!(
 			std::fs::read(dir.path().join("hello.txt")).expect("read"),
 			b"hi"
@@ -462,7 +466,7 @@ mod tests {
 		let mut builder = tar::Builder::new(Vec::new());
 		builder.append(&h, &b"hi"[..]).expect("append");
 		let bytes = builder.into_inner().expect("finish");
-		super::extract_tar_guarded(&bytes, dir.path()).expect("extract");
+		super::extract_tar_guarded(&bytes[..], dir.path()).expect("extract");
 		let mode = std::fs::metadata(dir.path().join("f"))
 			.expect("meta")
 			.permissions()
@@ -479,7 +483,7 @@ mod tests {
 		let dst = dir.path().join("dest");
 		std::fs::create_dir(&dst).expect("mkdir");
 		let bytes = tar_bytes_with("../evil.txt", b"pwned");
-		let err = super::extract_tar_guarded(&bytes, &dst).unwrap_err();
+		let err = super::extract_tar_guarded(&bytes[..], &dst).unwrap_err();
 		assert!(
 			format!("{err}").contains("escapes destination"),
 			"expected a zip-slip refusal, got: {err}"
@@ -627,7 +631,7 @@ mod tests {
 		builder.append(&header, &b"evil"[..]).expect("append");
 		let bytes = builder.into_inner().expect("tar");
 
-		super::extract_tar_guarded(&bytes, &dst).expect("extraction should succeed");
+		super::extract_tar_guarded(&bytes[..], &dst).expect("extraction should succeed");
 
 		let mode = std::fs::metadata(&victim)
 			.expect("stat")

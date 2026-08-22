@@ -2,8 +2,20 @@ Source: podup
 Section: utils
 Priority: optional
 Maintainer: Glyndor <packages@glyndor.net>
-Build-Depends: debhelper-compat (= 13), cargo, rustc (>= 1.85)
-Standards-Version: 4.7.0
+Build-Depends: debhelper-compat (= 13)
+# Cargo and rustc are deliberately absent. debian/rules builds for a musl
+# target, and Debian's toolchain ships no musl standard library, so the build
+# needs a rustup toolchain the workflow installs and pins to the same version
+# rust-ci.yml uses. Declaring Debian's rustc here would make dpkg-checkbuilddeps
+# pass on a compiler that is not the one doing the work - which is the defect
+# Glyndor/podup#1487 is about, stated as a dependency.
+#
+# The cost, so it is a decision rather than a side effect: `dpkg-buildpackage`
+# on a plain Debian box no longer works from Build-Depends alone; the musl
+# target has to be present first. That is acceptable here because the releases
+# standard rules out submitting to the Debian archive - this package is built
+# by one workflow, for one self-hosted archive.
+Standards-Version: 4.7.4.1
 Homepage: https://github.com/Glyndor/podup
 Vcs-Git: https://github.com/Glyndor/podup.git
 Vcs-Browser: https://github.com/Glyndor/podup

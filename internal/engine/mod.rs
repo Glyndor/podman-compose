@@ -4,7 +4,11 @@
 
 mod build;
 mod container;
-mod copy;
+/// `pub(crate)` so the fuzz harness behind the `test-helpers` feature can
+/// reach `archive::extract_tar_guarded` without widening the published API:
+/// the chain stays `engine → copy → archive` all `pub(crate)` (or stricter),
+/// which a third-party crate cannot see.
+pub(crate) mod copy;
 pub(crate) mod events;
 mod terminal_pump;
 pub use events::EventsOptions;
@@ -36,8 +40,8 @@ mod projects;
 pub use projects::{list_projects, list_projects_filtered, LsOptions};
 pub(crate) mod query;
 pub use query::{
-	AttachOutcome, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, PsDisplayOptions,
-	PsFilterOptions, PsOptions, DEFAULT_LOG_TAIL,
+	AttachOptions, AttachOutcome, AttachSummary, ExecOptions, ImagesOptions, LogsDisplay,
+	LogsOptions, PsDisplayOptions, PsFilterOptions, PsOptions, DEFAULT_LOG_TAIL,
 };
 mod secrets;
 mod staging;
@@ -753,3 +757,6 @@ mod tests;
 
 #[cfg(test)]
 mod stream_end_tests;
+#[cfg(unix)]
+#[cfg(test)]
+mod wait_timeout_tests;

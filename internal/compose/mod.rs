@@ -100,8 +100,12 @@ pub fn parse_file_with_env_files_interp(
 			});
 			let mut combined_env_files = env_files.to_vec();
 			combined_env_files.extend(extra_env_files.iter().cloned());
-			let mut included =
-				parse_file_inner_with_env(&inc_path, &inc_dir, &combined_env_files, interpolate)?;
+			let mut included = include::parse_included_file(
+				&inc_path,
+				&inc_dir,
+				&combined_env_files,
+				interpolate,
+			)?;
 			anchor::anchor_compose_file(&mut included, &inc_dir);
 			include::merge_compose_file(&mut file, included);
 		}

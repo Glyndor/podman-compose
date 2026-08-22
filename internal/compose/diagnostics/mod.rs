@@ -15,7 +15,7 @@ mod nested_raw;
 use ignored_fields::{
 	ignored_build_fields, ignored_models, ignored_network_fields, ignored_port_fields,
 	ignored_restart_policy_fields, ignored_secret_config_drivers, ignored_service_fields,
-	ignored_service_network_fields, ignored_volume_mount_fields,
+	ignored_service_network_fields, ignored_volume_mount_fields, port_published_on_all_interfaces,
 };
 pub(super) use nested_raw::raw_nested_unknown_warnings;
 
@@ -28,6 +28,7 @@ pub(super) fn collect(file: &ComposeFile) -> Vec<String> {
 	nested_unknown_keys(file, &mut out);
 	ignored_service_fields(file, &mut out);
 	ignored_port_fields(file, &mut out);
+	port_published_on_all_interfaces(file, &mut out);
 	ignored_volume_mount_fields(file, &mut out);
 	ignored_build_fields(file, &mut out);
 	ignored_network_fields(file, &mut out);

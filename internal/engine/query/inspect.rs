@@ -1,4 +1,11 @@
-//! Container inspection commands: top, port, and log attachment.
+//! Container inspection commands: `top`, `port`, and the single-service
+//! `attach` command.
+//!
+//! The multi-service log-attach subsystem (`attach_logs`,
+//! `attach_logs_with_options`, `attach_logs_with`, the `AttachOutcome` /
+//! `AttachOptions` / `AttachSummary` types and the abort-path plumbing) lives
+//! in `attach.rs`; this file keeps the smaller surface that doesn't share
+//! those types.
 
 use futures_util::StreamExt;
 
@@ -10,30 +17,6 @@ use super::inspect_util::{
 	dedup_preserving_order, is_running_status, parse_port_proto, process_table, select_replica,
 };
 use super::Engine;
-
-/// How an attached `up` stopped streaming.
-///
-/// The distinction has to survive back to the caller because the three endings
-/// mean different things to a script: the containers finishing on their own is
-/// success, the operator pressing Ctrl-C is not, and a stream that died under a
-/// container still running is a failed read. The caller still tears the project
-/// down in every case. Reporting an ending as an error from `attach` itself
-/// would short-circuit that and leave the containers running, which is a worse
-/// bug than the exit code this exists to fix.
-///
-/// `#[non_exhaustive]` since 3.0.0, so a further ending can be added without a
-/// major bump. `StreamBroke` (3.3.0) is one that already was.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttachOutcome {
-	/// Every stream ended on its own.
-	StreamsEnded,
-	/// SIGINT or SIGTERM arrived while streaming.
-	Interrupted,
-	/// At least one stream ended while its container was still running, so live
-	/// output was truncated rather than finished (#1104).
-	StreamBroke,
-}
 
 impl Engine {
 	/// Display running processes in each service container (`docker compose top`).
@@ -323,145 +306,6 @@ impl Engine {
 		}
 		Ok(())
 	}
-
-	/// Attach to log streams for all services with `attach: true` (the default). Streams are multiplexed to stdout with a service-name prefix.
-	pub async fn attach_logs(&self, file: &ComposeFile) -> Result<AttachOutcome> {
-		self.attach_logs_with_options(file, false).await
-	}
-
-	/// Like [`Engine::attach_logs`] but with `up --timestamps` support: when
-	/// `timestamps` is set, each streamed line carries the libpod RFC3339
-	/// timestamp prefix.
-	pub async fn attach_logs_with_options(
-		&self,
-		file: &ComposeFile,
-		timestamps: bool,
-	) -> Result<AttachOutcome> {
-		// Carry (display_name, container_name, is_tty) so the log parser matches
-		// the container's framing mode: TTY containers emit raw bytes; non-TTY
-		// containers emit multiplexed 8-byte-header frames.
-		let attached: Vec<(String, String, bool)> = file
-			.services
-			.iter()
-			.filter(|(_, s)| s.attach.unwrap_or(true))
-			.flat_map(|(name, s)| {
-				let proj_prefix = format!("{}-", self.project);
-				let is_tty = s.tty.unwrap_or(false);
-				self.replica_names(name, s).into_iter().map(move |cname| {
-					let display = cname
-						.strip_prefix(proj_prefix.as_str())
-						.map(|s| s.to_string())
-						.unwrap_or_else(|| cname.clone());
-					(display, cname, is_tty)
-				})
-			})
-			.collect();
-
-		if attached.is_empty() {
-			// Nothing to stream is not an interruption.
-			return Ok(AttachOutcome::StreamsEnded);
-		}
-
-		let streams: Vec<_> = attached
-			.iter()
-			.map(|(display, cname, is_tty)| {
-				let prefix = display.clone();
-				let path = format!(
-					"{API_PREFIX}/containers/{}/logs?stdout=true&stderr=true&follow=true&timestamps={timestamps}",
-					urlencoded(cname),
-				);
-				let client = &self.client;
-				let is_tty = *is_tty;
-				let cname = cname.clone();
-				async move {
-					let resp = match client.get_stream(&path).await {
-						Ok(r) => r,
-						Err(e) => {
-							tracing::warn!("attach_logs {prefix}: {e}");
-							return false;
-						}
-					};
-					// TTY containers produce raw bytes (stdout/stderr merged).
-					// Non-TTY containers produce multiplexed frames with 8-byte headers.
-					let mut stream = if is_tty {
-						crate::libpod::parse_raw(resp.into_body())
-					} else {
-						crate::libpod::parse_multiplexed(resp.into_body())
-					};
-					while let Some(msg) = stream.next().await {
-						match msg {
-							Ok(LogOutput::StdOut { message }) => {
-								print!("{prefix} | {}", String::from_utf8_lossy(&message));
-							}
-							Ok(LogOutput::StdErr { message }) => {
-								eprint!("{prefix} | {}", String::from_utf8_lossy(&message));
-							}
-							// An attach stream lives as long as its container and
-							// ends when the container stops, so a lost chunked
-							// terminator is indistinguishable at the transport
-							// layer from a real mid-stream break (#1104). The
-							// container answers what the transport cannot: still
-							// running means live output was truncated.
-							//
-							// This arm used to discard the error without even a
-							// warning, so `up` in the foreground could lose its
-							// connection to the engine and still exit 0.
-							Err(e) => {
-								let kind = e.stream_end_kind();
-								let broke = super::stream_broke_mid_output(
-									self.container_still_running(&cname).await,
-								);
-								if broke {
-									tracing::warn!(
-										"attach {prefix}: stream ended while the container was \
-										 still running [{kind}]: {e}"
-									);
-								} else {
-									tracing::warn!(
-										"attach {prefix}: stream ended as the container stopped \
-										 [{kind}]"
-									);
-								}
-								return broke;
-							}
-						}
-					}
-					false
-				}
-			})
-			.collect();
-
-		// Which arm wins is the whole point: `docker compose up` exits 130 on both
-		// SIGINT and SIGTERM (measured against v5.1.3, not assumed — it is 130 for
-		// SIGTERM too, not the 143 the signal number would suggest), and podup
-		// exited 0 for both. A CI job that runs `up` in the foreground and is
-		// cancelled therefore reported success.
-		#[cfg(unix)]
-		let outcome = {
-			use tokio::signal::unix::{signal, SignalKind};
-			let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
-			tokio::select! {
-				broke = futures_util::future::join_all(streams) => {
-					// One truncated stream is enough: the output the user was
-					// watching is incomplete whatever the others did.
-					if broke.into_iter().any(|b| b) {
-						AttachOutcome::StreamBroke
-					} else {
-						AttachOutcome::StreamsEnded
-					}
-				}
-				_ = tokio::signal::ctrl_c() => AttachOutcome::Interrupted,
-				_ = sigterm.recv() => AttachOutcome::Interrupted,
-			}
-		};
-		#[cfg(not(unix))]
-		let outcome = tokio::select! {
-			_ = futures_util::future::join_all(streams) => AttachOutcome::StreamsEnded,
-			_ = tokio::signal::ctrl_c() => AttachOutcome::Interrupted,
-		};
-
-		Ok(outcome)
-	}
 }
 
 /// Query string for `attach`: a live-only stdout/stderr stream. `tail=0`
@@ -481,27 +325,5 @@ mod tests {
 		let q = attach_log_query();
 		assert!(q.contains("follow=true"), "got: {q}");
 		assert!(q.contains("tail=0"), "got: {q}");
-	}
-}
-
-#[cfg(test)]
-mod attach_outcome_tests {
-	use super::AttachOutcome;
-
-	/// The two endings must stay distinguishable. They are the difference
-	/// between a CI job that ran to completion and one that was cancelled, and
-	/// before this existed both reported exit 0.
-	#[test]
-	fn the_two_endings_are_not_equal() {
-		assert_ne!(AttachOutcome::StreamsEnded, AttachOutcome::Interrupted);
-	}
-
-	/// A truncated stream is its own ending, not either of the first two. Folding
-	/// it into `StreamsEnded` is what let an attached `up` lose its connection to
-	/// the engine and still exit 0.
-	#[test]
-	fn a_broken_stream_is_neither_of_the_other_two() {
-		assert_ne!(AttachOutcome::StreamBroke, AttachOutcome::StreamsEnded);
-		assert_ne!(AttachOutcome::StreamBroke, AttachOutcome::Interrupted);
 	}
 }

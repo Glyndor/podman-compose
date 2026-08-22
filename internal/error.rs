@@ -27,7 +27,14 @@ pub enum ComposeError {
 	/// A service has neither an `image:` nor a `build:` section.
 	NoImageOrBuild(String),
 	/// A `${VAR}` with the `?err` modifier was required but unset.
-	RequiredVarNotSet { var: String, msg: String },
+	RequiredVarNotSet {
+		/// The variable name as it appeared in the compose file, without the
+		/// `${}` or the `:?` suffix.
+		var: String,
+		/// The author's own explanation, taken verbatim from the text after
+		/// `:?` in the interpolation. Empty when the form was bare `${VAR?}`.
+		msg: String,
+	},
 	/// A `${…}` interpolation reference is malformed (e.g. an invalid character
 	/// in the variable name, as in `${FOO BAR}` or `${FOO.BAR}`).
 	InvalidSubstitution(String),
@@ -73,39 +80,73 @@ pub enum ComposeError {
 	/// A service is scaled to more than one replica but publishes a fixed host
 	/// port, which only one container can bind.
 	ScalePortConflict {
+		/// The compose key of the service, not a container name.
 		service: String,
+		/// The replica count that made the binding impossible; always above one.
 		replicas: usize,
+		/// The host ports the service pins, in the order compose declared them.
+		/// Only fixed ports appear — a range or an unspecified host port cannot
+		/// collide this way.
 		ports: Vec<u16>,
 	},
 	/// A container being waited on (`up`/`start --wait`, or a `service_healthy`
 	/// dependency) exited non-zero before becoming ready.
-	WaitServiceExited { container: String, code: i64 },
+	WaitServiceExited {
+		/// The container name Podman reported, replica suffix included, rather
+		/// than the compose service key.
+		container: String,
+		/// The container's exit status. Non-zero by construction: a zero exit is
+		/// not this error.
+		code: i64,
+	},
 	/// A service requests more replicas than the configured ceiling, which would
 	/// let an untrusted `deploy.replicas`/`scale:` drive unbounded container
 	/// creation (host DoS).
 	ReplicaLimitExceeded {
+		/// The compose key of the service that asked for too many.
 		service: String,
+		/// The count requested, from `deploy.replicas` or `scale:`.
 		replicas: usize,
+		/// The ceiling in force when the request was refused.
 		max: u32,
 	},
 	/// `start --wait --wait-timeout` elapsed before services became healthy.
-	WaitTimeout { secs: u64 },
+	WaitTimeout {
+		/// The budget that elapsed, in whole seconds, as `--wait-timeout`
+		/// received it. Not the time actually spent waiting.
+		secs: u64,
+	},
 	/// A replica index (`--index`) does not name a replica of the service (zero,
 	/// or beyond the replica count). Kept distinct from [`Self::ServiceNotFound`]
 	/// so the index hint renders outside the quoted service name.
-	ReplicaIndex { service: String, index: u32 },
+	ReplicaIndex {
+		/// The compose key of the service the index was meant to address.
+		service: String,
+		/// The index as given. Either zero, which is never valid because
+		/// replicas are numbered from one, or past the service's replica count.
+		index: u32,
+	},
 	/// A filesystem operation failed against a known path; carries the path so the
 	/// message can name the offending file (Rust's `File::create`/`open` errors
 	/// drop it).
 	IoPath {
+		/// The path the operation was attempted against, as resolved rather than
+		/// as written in the compose file.
 		path: String,
+		/// The underlying failure. Carried separately because Rust's own
+		/// `File::create`/`open` errors drop the path.
 		source: std::io::Error,
 	},
 	/// A service's build context could not be accessed; names the service and the
 	/// resolved context path instead of a bare `io error`.
 	BuildContext {
+		/// The compose key of the service whose build context could not be read.
 		service: String,
+		/// The resolved context directory, anchored against the project
+		/// directory rather than the current one.
 		path: String,
+		/// The underlying failure, kept so the message can name both the service
+		/// and the file rather than reporting a bare io error.
 		source: std::io::Error,
 	},
 	/// A targeted service container is not running (e.g. `exec`/`attach` against a

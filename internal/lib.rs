@@ -8,6 +8,11 @@
 // locally with `#![allow(unsafe_code)]` and a soundness comment per block, so a
 // new `unsafe` block elsewhere fails the build.
 #![deny(unsafe_code)]
+// Documentation is part of the public surface for a crate two other products
+// consume as a library, so a missing doc comment fails the build rather than
+// being noticed a year later. Turned on at 35 outstanding items; it is cheap to
+// adopt at that size and expensive at three hundred.
+#![deny(missing_docs)]
 
 /// `podup autostart`: render and manage a rootless `systemctl --user` unit that
 /// brings a compose stack up at boot (service mode).
@@ -53,10 +58,11 @@ pub use compose::{
 pub use engine::{
 	is_safe_project_name, list_projects, list_projects_filtered, resolve_image_digests,
 	retain_active_profiles, retain_active_profiles_with_targets, surface_host_modes,
-	validate_stop_timeout, AttachOutcome, BuildOptions, CommitOptions, CpOptions, Engine,
-	EventsOptions, ExecOptions, ImagesOptions, LogsDisplay, LogsOptions, LsOptions, ProjectLock,
-	PsDisplayOptions, PsFilterOptions, PsOptions, PullOptions, PushOptions, RunOptions,
-	RunOverrides, StatsOptions, VolumesDisplayOptions, VolumesOptions, DEFAULT_LOG_TAIL,
+	validate_stop_timeout, AttachOptions, AttachOutcome, AttachSummary, BuildOptions,
+	CommitOptions, CpOptions, Engine, EventsOptions, ExecOptions, ImagesOptions, LogsDisplay,
+	LogsOptions, LsOptions, ProjectLock, PsDisplayOptions, PsFilterOptions, PsOptions, PullOptions,
+	PushOptions, RunOptions, RunOverrides, StatsOptions, VolumesDisplayOptions, VolumesOptions,
+	DEFAULT_LOG_TAIL,
 };
 /// The crate's error type and `Result` alias, surfaced so callers handle one
 /// error enum across parsing and engine calls.
@@ -80,10 +86,12 @@ pub use libpod::{parse_json_lines, parse_multiplexed, parse_raw, LogOutput};
 ///
 /// These are not part of the public API (the feature is off by default, so the
 /// published crate does not expose them); they let the fuzz harness reach the
-/// crate-private dotenv parser and the libpod stream framer.
+/// crate-private dotenv parser, the libpod stream framer, and the
+/// container→host tar extractor.
 #[cfg(feature = "test-helpers")]
 pub mod fuzz_api {
 	pub use crate::dotenv::parse as dotenv_parse;
+	pub use crate::engine::copy::archive::extract_tar_guarded;
 	pub use crate::libpod::types::stream::{
 		parse_frame, record_stream_bytes, take_json_line, MAX_STREAM_BUF,
 	};

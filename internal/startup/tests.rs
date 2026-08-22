@@ -347,6 +347,8 @@ mod startup_tests {
 					no_start: false,
 					timestamps: false,
 					renew_anon_volumes: false,
+					abort_on_container_exit: false,
+					exit_code_from: None,
 					services: vec![],
 				},
 				false,

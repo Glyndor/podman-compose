@@ -360,4 +360,124 @@ mod tests {
 			&Error::from(ErrorKind::PermissionDenied)
 		));
 	}
+
+	/// `io_to_err` is the sole producer of [`ComposeError::IoPath`] on the
+	/// `export` write paths: any write or flush error against a `-o FILE`
+	/// sink is wrapped with the destination path so the message tells the
+	/// operator which file failed, not the bare `io error:`.
+	#[test]
+	fn io_to_err_with_output_path_wraps_as_iopath() {
+		use super::io_to_err;
+		use crate::error::ComposeError;
+		use std::io::{Error, ErrorKind};
+		use std::path::PathBuf;
+
+		let p = PathBuf::from("/tmp/out.x.tar");
+		let e = Error::new(ErrorKind::PermissionDenied, "denied");
+		let mapped = io_to_err(&Some(p.clone()), e);
+
+		// The variant must be IoPath with the path attached — a bare
+		// `ComposeError::Io(_)` would drop the destination the user just
+		// asked us to write to, and is the regression this variant exists to
+		// prevent.
+		let ComposeError::IoPath { path, source } = mapped else {
+			panic!("expected IoPath, got a different variant");
+		};
+		assert_eq!(path, p.display().to_string(), "path must be preserved");
+		assert_eq!(
+			source.kind(),
+			ErrorKind::PermissionDenied,
+			"underlying io error must round-trip"
+		);
+	}
+
+	/// A stdout sink has no path to name, so `io_to_err` falls back to the
+	/// generic [`ComposeError::Io`] rather than fabricating an empty
+	/// `IoPath`. Pinning the asymmetry so a future refactor does not
+	/// "improve" it into always wrapping.
+	#[test]
+	fn io_to_err_without_output_path_falls_back_to_plain_io() {
+		use super::io_to_err;
+		use crate::error::ComposeError;
+		use std::io::{Error, ErrorKind};
+
+		let e = Error::new(ErrorKind::BrokenPipe, "epipe");
+		let mapped = io_to_err(&None, e);
+		assert!(
+			matches!(mapped, ComposeError::Io(_)),
+			"stdout sink must stay as ComposeError::Io, got {mapped:?}"
+		);
+	}
+}
+
+/// End-to-end check that the destination path actually surfaces as
+/// [`ComposeError::IoPath`] when the operator passes an output the file
+/// system refuses to create — i.e. the production wiring from `Engine::export`
+/// through `std::fs::File::create` into `IoPath`, not just the helper that
+/// shapes the error. The bare `io_to_err` unit test above pins the wrapper;
+/// this one pins the call site that triggers it.
+#[cfg(unix)]
+#[cfg(test)]
+mod export_iopath_tests {
+	use std::path::PathBuf;
+
+	use crate::compose::types::{ComposeFile, Service};
+	use crate::engine::fake_podman::{self, FakeReply};
+	use crate::engine::Engine;
+	use crate::error::ComposeError;
+
+	#[tokio::test]
+	async fn export_to_an_unwritable_destination_surfaces_iopath() {
+		// A single-replica service so the container name resolves without
+		// inspecting Podman.
+		let mut file = ComposeFile::default();
+		file.services.insert(
+			"web".into(),
+			Service {
+				image: Some("nginx:1.27".into()),
+				..Default::default()
+			},
+		);
+
+		// The fake answers the streaming GET the same way it would for a
+		// healthy container — podup never has to read a real byte from us,
+		// because the destination file fails to open before the body is
+		// consumed. The chunked body is what `get_stream` accepts. The
+		// target carries the `http://localhost` prefix the client builds,
+		// so the matcher looks for the trailing `/export` route instead.
+		let fake = fake_podman::start_replying(|method, target| {
+			if method == "GET" && target.contains("/export") {
+				// One empty chunk is enough — the test errors before the
+				// body is fully drained.
+				return FakeReply::ChunkedEnd(vec![String::new()]);
+			}
+			FakeReply::Body(404, r#"{"message":"not used"}"#.to_string())
+		});
+		let engine = Engine::with_base_dir(fake.client(), "proj".into(), std::env::temp_dir());
+
+		// A path under a directory that does not exist: `File::create`
+		// fails synchronously at the parent-component lookup, before any
+		// byte hits the (would-be) sink. The production code wraps that
+		// io error in `IoPath` with the path; the test confirms both.
+		let dest = PathBuf::from("/nonexistent-dir-7c4e1a/out.x.tar");
+
+		let err = engine
+			.export(&file, "web", Some(dest.clone()), None)
+			.await
+			.expect_err("an unwritable destination must surface as an error");
+
+		let msg = err.to_string();
+		let ComposeError::IoPath { path, .. } = err else {
+			panic!("expected IoPath for an unwritable -o FILE, got: {msg:?}");
+		};
+		assert_eq!(
+			path,
+			dest.display().to_string(),
+			"the destination path must appear in the error"
+		);
+		assert!(
+			msg.contains(&dest.display().to_string()),
+			"the rendered message must name the destination, got: {msg}"
+		);
+	}
 }

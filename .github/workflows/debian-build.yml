@@ -17,6 +17,13 @@ on:
       # all-features and compiles the same code fine.
       - "tests/**"
       - ".github/workflows/debian-build.yml"
+      # The release job builds the .deb too, in its own container, and until
+      # this line a change to it triggered nothing. That is the shape of #1295:
+      # the filter left tests/** out, and a broken develop rode twenty pull
+      # requests because the one lane that compiles with debian/rules' feature
+      # set never ran. A gate that does not run is indistinguishable from one
+      # that passes.
+      - ".github/workflows/release.yml"
   pull_request:
     branches:
       - main
@@ -34,14 +41,32 @@ on:
       # all-features and compiles the same code fine.
       - "tests/**"
       - ".github/workflows/debian-build.yml"
+      # The release job builds the .deb too, in its own container, and until
+      # this line a change to it triggered nothing. That is the shape of #1295:
+      # the filter left tests/** out, and a broken develop rode twenty pull
+      # requests because the one lane that compiles with debian/rules' feature
+      # set never ran. A gate that does not run is indistinguishable from one
+      # that passes.
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: read
 
 jobs:
   debian:
-    uses: Glyndor/.github/.github/workflows/rust-debian.yml@fadfbebc989a58a2292438fecbd5a616ffa0bdf3 # v1.15.0
+    # v1.17.0 added rust-toolchain and rust-target. It was pinned here at the
+    # untagged commit first, because the CI standard asks for a reusable to be
+    # proven on a real consumer before its tag is cut - .github's own CI never
+    # exercises a caller. This repository's dpkg-buildpackage job was that
+    # proof, going from red to green in 6m36s on #1525.
+    uses: Glyndor/.github/.github/workflows/rust-debian.yml@e70ff47fd8aefa0f054846815f19b98768d61122 # v1.17.0
     with:
       package-name: podup
       check-vendored: true
       offline-cargo-args: "--no-default-features --features watch,completions"
+      # debian/rules builds for musl so the package carries no libc floor, and
+      # Debian's toolchain ships no musl standard library. Keep this in step
+      # with rust-ci.yml's default: the whole point is that the packaged binary
+      # comes from the compiler CI validates with.
+      rust-toolchain: "1.97"
+      rust-target: x86_64-unknown-linux-musl

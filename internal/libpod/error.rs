@@ -16,7 +16,14 @@ pub enum PodmanError {
 	/// A newline-delimited stream ended with an unterminated record.
 	StreamEndedEarly,
 	/// Podman API returned an error response (4xx/5xx).
-	Api { status: u16, message: String },
+	Api {
+		/// The HTTP status the daemon returned. Compare it with
+		/// [`PodmanError::is_status`] rather than by hand.
+		status: u16,
+		/// The daemon's own message, preserved verbatim. podup never rewrites
+		/// it, so a caller matching on wording is matching on libpod's.
+		message: String,
+	},
 	/// A libpod field-level rejection that podup identified and attributed to a
 	/// specific field of the request it sent.
 	///
@@ -49,7 +56,11 @@ pub enum PodmanError {
 	/// The reachable Podman server speaks a libpod API version below the minimum
 	/// podup supports. Carries the version string the server reported (empty when
 	/// the server sent no `Libpod-API-Version` header).
-	IncompatibleApiVersion { reported: String },
+	IncompatibleApiVersion {
+		/// The version string from the server's `Libpod-API-Version` header, or
+		/// empty when the server sent no such header.
+		reported: String,
+	},
 }
 
 impl fmt::Display for PodmanError {

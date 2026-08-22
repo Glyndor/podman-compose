@@ -223,7 +223,16 @@ jobs:
     name: Build Debian package (${{ matrix.arch }})
     needs: verify
     runs-on: ${{ matrix.runner }}
-    container: debian:sid
+    # debian:trixie, digest-pinned at the same snapshot Glyndor/.github's
+    # rust-debian.yml uses (default for the CI image). Sid was a moving tag:
+    # two releases built from identical source could land in different
+    # environments with nothing in history recording which, and Dependabot's
+    # github-actions ecosystem does not bump a workflow's `container:` image,
+    # so a digest of sid would have no bump path and freeze. Trixie is stable
+    # and matches the suite CI validates against, so the release that ships
+    # to users was produced by the same image the suite exercises. Bump the
+    # digest here when rust-debian.yml's default moves; the two should agree.
+    container: debian:trixie@sha256:fac46bff2e02f51425b6e33b0e1169f55dfb053d83511ca28aa50c09fd5ed7a4
     permissions:
       contents: read
       id-token: write
@@ -247,8 +256,31 @@ jobs:
             build-essential \
             dpkg-dev \
             debhelper \
-            cargo \
-            rustc
+            curl \
+            musl-tools
+
+      - name: Install the pinned Rust toolchain and the musl target
+        env:
+          # The same pin the `build` job uses, and the same one rust-ci.yml
+          # defaults to. Before this the package was compiled by Debian's rustc
+          # while CI validated with 1.97, so the binary users installed came
+          # from a compiler the suite had never run against.
+          RUST_TOOLCHAIN: "1.97"
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          case "$ARCH" in
+            amd64) target=x86_64-unknown-linux-musl ;;
+            arm64) target=aarch64-unknown-linux-musl ;;
+            *) echo "::error::no musl target mapped for $ARCH"; exit 1 ;;
+          esac
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN"
+          . "$HOME/.cargo/env"
+          # Targets are per-toolchain, so this has to name the pinned one
+          # rather than whatever happens to be default.
+          rustup target add "$target" --toolchain "$RUST_TOOLCHAIN"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -16,9 +16,17 @@ use crate::libpod::error::PodmanError;
 #[derive(Debug)]
 pub enum LogOutput {
 	/// Payload demuxed from the stdout stream (frame stream type 1).
-	StdOut { message: Bytes },
+	StdOut {
+		/// The payload bytes, with the frame header already stripped. Not
+		/// guaranteed to end on a line boundary — one frame may split a line.
+		message: Bytes,
+	},
 	/// Payload demuxed from the stderr stream (frame stream type 2).
-	StdErr { message: Bytes },
+	StdErr {
+		/// The payload bytes, header stripped. Same framing caveat as
+		/// [`Self::StdOut`]: a frame boundary is not a line boundary.
+		message: Bytes,
+	},
 }
 
 /// Boxed stream alias used for parse_multiplexed and parse_json_lines return types.

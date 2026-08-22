@@ -54,9 +54,16 @@ impl Engine {
 		// Without this every container here fell back to the per-label hash
 		// instead of the sequential identity colour `ps` and the compose-file
 		// `down` path use — the same class of defect fixed for `logs` (#1082).
+		//
+		// `set_services` registers under the project's name in the process-wide
+		// identity-colour registry. Two `Engine` values alive in one process
+		// (helmly-agent's fleet) key off their own `self.project`, so neither
+		// registration evicts the other (#1517). `set_project` must come
+		// first; without it the registration is a no-op.
 		let by_service = self.live_project_replicas().await?;
 		let mut service_names: Vec<String> = by_service.keys().cloned().collect();
 		service_names.sort();
+		crate::ui::set_project(&self.project);
 		crate::ui::set_services(&service_names);
 
 		let containers: Vec<String> = by_service.into_values().flatten().collect();

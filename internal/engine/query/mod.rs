@@ -8,6 +8,7 @@ use crate::libpod::{urlencoded, LogOutput, API_PREFIX};
 
 use super::Engine;
 
+mod attach;
 mod exec;
 mod exec_interactive;
 mod images;
@@ -25,7 +26,7 @@ pub use exec::ExecOptions;
 use log_prefix::LinePrefixer;
 pub use options::{ImagesOptions, LogsDisplay, LogsOptions, DEFAULT_LOG_TAIL};
 
-pub use inspect::AttachOutcome;
+pub use attach::{AttachOptions, AttachOutcome, AttachSummary};
 
 /// Validate the `--tail`/`--since`/`--until` values client-side so a typo is
 /// rejected with a clear local message instead of a raw podman HTTP 400. `tail`
@@ -627,7 +628,8 @@ fn filter_orphans(names: Vec<String>, known: &std::collections::HashSet<String>)
 	names.into_iter().filter(|n| !known.contains(n)).collect()
 }
 
-/// Kept out of `inspect.rs`, which is 11 lines under the 500-line limit.
+/// Kept out of `attach.rs` so the production module stays within the 500-line
+/// file cap.
 #[cfg(test)]
 mod attach_stream_tests;
 #[cfg(test)]
