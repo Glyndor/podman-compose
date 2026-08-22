@@ -15,7 +15,7 @@ Build-Depends: debhelper-compat (= 13)
 # target has to be present first. That is acceptable here because the releases
 # standard rules out submitting to the Debian archive - this package is built
 # by one workflow, for one self-hosted archive.
-Standards-Version: 4.7.0
+Standards-Version: 4.7.4.1
 Homepage: https://github.com/Glyndor/podup
 Vcs-Git: https://github.com/Glyndor/podup.git
 Vcs-Browser: https://github.com/Glyndor/podup
