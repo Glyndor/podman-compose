@@ -50,9 +50,9 @@ enum ResolveOutcome {
 /// --resolve-image-digests`. An image with no registry digest in local storage
 /// (e.g. built locally, or never pulled) is left unchanged with a warning.
 ///
-/// Inspects each image with at most [`MAX_RESOLVE_CONCURRENCY`] requests in
-/// flight, so a hundred-service project pays ceiling(S/N)+1 round-trips
-/// against libpod instead of the previous S+1. The structural speedup is
+/// Inspects each image with at most `N` requests in flight, where `N` is a
+/// small fixed cap, so a project of `S` services pays ceiling(S/N)+1
+/// round-trips against libpod instead of the previous S+1. The structural speedup is
 /// "one round-trip per cap-quanta of work", not a measured wall-clock
 /// number. Error and ordering behaviour match the serial loop byte-for-byte:
 /// a backend failure (unreachable socket, HTTP 500, 404 on a missing image)
@@ -131,6 +131,10 @@ pub async fn resolve_image_digests(client: &Client, file: &ComposeFile) -> Resul
 	Ok(out)
 }
 
+// `fake_podman` binds a Unix domain socket, so these only build where that
+// exists. `export_iopath_tests` in export.rs is gated the same way and for
+// the same reason.
+#[cfg(unix)]
 #[cfg(test)]
 mod tests {
 	use super::*;
