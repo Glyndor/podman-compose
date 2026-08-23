@@ -10,4 +10,4 @@ permissions:
 
 jobs:
   audit:
-    uses: Glyndor/.github/.github/workflows/rust-audit.yml@fadfbebc989a58a2292438fecbd5a616ffa0bdf3 # v1.15.0
+    uses: Glyndor/.github/.github/workflows/rust-audit.yml@d4bbc5b6ec0c351ca4cb17d948ceaad818da4078 # v1.18.1
