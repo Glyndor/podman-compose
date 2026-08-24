@@ -11,8 +11,13 @@ permissions:
 
 jobs:
   rust:
-    uses: Glyndor/.github/.github/workflows/rust-ci.yml@8ae47ccd49ffdbf59d1acf7e6f9c18165bfba959 # v1.19.0
+    uses: Glyndor/.github/.github/workflows/rust-ci.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
     with:
+      # Each entry here becomes its own check name: `rust / Test (macos-latest)`
+      # and `rust / Test (windows-latest)`. Editing this list changes the names
+      # emitted while the ruleset still requires the old ones, so the PR
+      # carrying the edit blocks itself. A ruleset should require the stable
+      # gate `rust / Extra platforms` instead, which names no platform. #1552.
       extra-test-os: "[\"macos-latest\", \"windows-latest\"]"
       # Measured against the WHOLE crate, deliberately. The gate used to read 90%
       # while a `coverage-ignore-regex` hid 36% of the code — 14,432 of 39,681
@@ -47,6 +52,11 @@ jobs:
       # The 90 gate belongs where the tests can actually run — the `podman-vm`
       # lane — and that is tracked separately rather than papered over here.
       coverage-threshold: 79
+      # This number is inside the check name `rust / MSRV (1.85)`. Bumping it
+      # emits `rust / MSRV (<new>)` while the ruleset still requires the old
+      # string, so the PR carrying the bump blocks itself. A ruleset should
+      # require the stable gate `rust / MSRV` instead, which carries no
+      # version. See #1552.
       msrv: "1.85"
       package-check: true
       semver-check: true
@@ -64,7 +74,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@8ae47ccd49ffdbf59d1acf7e6f9c18165bfba959 # v1.19.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
     with:
       workflow: audit.yml
       max-age-days: 15
@@ -73,7 +83,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@8ae47ccd49ffdbf59d1acf7e6f9c18165bfba959 # v1.19.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
     with:
       workflow: fuzz.yml
       max-age-days: 15
@@ -82,7 +92,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@8ae47ccd49ffdbf59d1acf7e6f9c18165bfba959 # v1.19.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
     with:
       workflow: podman-lane.yml
       max-age-days: 3
@@ -91,7 +101,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@8ae47ccd49ffdbf59d1acf7e6f9c18165bfba959 # v1.19.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
     with:
       workflow: podman-watch.yml
       max-age-days: 3
@@ -102,7 +112,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@8ae47ccd49ffdbf59d1acf7e6f9c18165bfba959 # v1.19.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
     with:
       workflow: benchmark.yml
       max-age-days: 65
@@ -121,7 +131,7 @@ jobs:
   # on a Dependabot-authored pull request - the condition that forced
   # `Analyze (actions)` out of apt.
   pin-policy:
-    uses: Glyndor/.github/.github/workflows/pin-policy-reusable.yml@8ae47ccd49ffdbf59d1acf7e6f9c18165bfba959 # v1.19.0
+    uses: Glyndor/.github/.github/workflows/pin-policy-reusable.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
 
   # Dependabot silently stops proposing updates when its config is not
   # re-registered, and like a dead cron it reports nothing at all. This fails
@@ -132,6 +142,6 @@ jobs:
   # running: run 32435521566 reported "no Dependabot pull request on record"
   # while ten sat open. v1.16.1 pages the window.
   dependabot-freshness:
-    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@8ae47ccd49ffdbf59d1acf7e6f9c18165bfba959 # v1.19.0
+    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
     with:
       max-age-days: 15

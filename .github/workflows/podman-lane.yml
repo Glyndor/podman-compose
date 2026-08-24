@@ -36,6 +36,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # This list appears in the required check names `podman-vm (5)` /
+        # `podman-vm (6)`. Editing it changes the emitted names while the
+        # ruleset still requires the old ones, so the PR carrying the edit
+        # blocks itself. The stable gate a ruleset should require is
+        # `Supported Podman majors`. See #1552.
         podman: ["5", "6"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -442,3 +447,30 @@ jobs:
             echo "::warning::Podman $VER: $FAIL failures, $FLAKY match a connection-drop signature — the rest are the known nested-virt-unstable subset (see the failures section). Not gated until that flakiness is reduced."
           fi
           echo "GREEN: podup core PASSED on Podman $VER ($PASS tests >= baseline $BASELINE; $FAIL in the nested-virt-noisy subset)."
+
+  podman-majors:
+    name: Supported Podman majors
+    # A required status check is matched by name, and `podman-vm (5)` / `podman-vm (6)`
+    # carry the matrix values. The support policy moves that matrix — when Podman 7
+    # ships, `["5", "6"]` becomes `["6", "7"]` — and on that pull request the required
+    # name `podman-vm (5)` stops being emitted while the ruleset still requires it, so
+    # the pull request that carries the change blocks itself. This name does not move.
+    # See #1552.
+    needs: podman-vm
+    # `needs` on its own SKIPS this job when the matrix fails, and a skipped required
+    # check does not block a merge — the exact failure this job exists to prevent.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reflect the matrix result
+        env:
+          RESULT: ${{ needs.podman-vm.result }}
+        run: |
+          set -euo pipefail
+          # Unlike the gates in the shared rust-ci reusable, `skipped` is NOT a pass
+          # here: podman-vm carries no `if:` and runs on every pull request, so a
+          # skipped matrix means something went wrong rather than a caller opting out.
+          case "$RESULT" in
+            success) echo "every supported Podman major passed" ;;
+            *) echo "::error::the Podman matrix did not pass (result: $RESULT)"; exit 1 ;;
+          esac
