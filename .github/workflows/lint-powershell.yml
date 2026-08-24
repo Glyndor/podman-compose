@@ -21,7 +21,7 @@ permissions:
 jobs:
   psscriptanalyzer:
     name: PSScriptAnalyzer
-    uses: Glyndor/.github/.github/workflows/powershell-ci.yml@fadfbebc989a58a2292438fecbd5a616ffa0bdf3 # v1.15.0
+    uses: Glyndor/.github/.github/workflows/powershell-ci.yml@8ae47ccd49ffdbf59d1acf7e6f9c18165bfba959 # v1.19.0
     with:
       paths: "install.ps1"
       # install.ps1 is piped to `iex`, so human-facing status must go through
