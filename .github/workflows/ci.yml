@@ -121,7 +121,7 @@ jobs:
   # on a Dependabot-authored pull request - the condition that forced
   # `Analyze (actions)` out of apt.
   pin-policy:
-    uses: Glyndor/.github/.github/workflows/pin-policy-reusable.yml@8517d94fde00466f59b95c5d1bd838e2ad24a8bf # v1.15.2
+    uses: Glyndor/.github/.github/workflows/pin-policy-reusable.yml@e70ff47fd8aefa0f054846815f19b98768d61122 # v1.17.0
 
   # Dependabot silently stops proposing updates when its config is not
   # re-registered, and like a dead cron it reports nothing at all. This fails
