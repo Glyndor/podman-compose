@@ -8,6 +8,43 @@ updates:
     labels: ["type:deps", "type:ci"]
     open-pull-requests-limit: 10
     target-branch: "develop"
+    # Sixteen Glyndor reusables and five `actions/*` references across the
+    # workflows, all SHA-pinned. Without grouping, one upstream release day
+    # means near-identical pull requests and full CI runs per action. One pull
+    # request per day is enough to review the same information.
+    # Grouped into two, not one. The Glyndor reusables and the actions/* get
+    # opposite answers from the same review, and a single group forces one
+    # answer for both.
+    #
+    # A .github release usually changes nothing this repository calls. The
+    # reusables come back byte-identical and I close the bump as a no-op. A
+    # third-party bump is the opposite: actions/checkout moving is the one
+    # thing here worth reading line by line.
+    #
+    # Under patterns: ["*"] both arrive in the same pull request, so closing
+    # the no-op closes the bump that mattered. That is the whole reason for
+    # the split: one pull request, one answer.
+    #
+    # The second group is named `github-owned`, not `third-party` as in apt.
+    # apt's comment calls it "third-party" but in this repository every
+    # non-Glyndor `uses:` is in the `actions/*` namespace (checkout, setup-python,
+    # upload-artifact, download-artifact, attest-build-provenance) -- all
+    # GitHub-owned, all runner primitives per the org CI standard. `third-party`
+    # is the wrong word here: it implies an external maintainer I need to
+    # audit, when in fact this group is GitHub's own primitives. The name
+    # should describe what it matches.
+    groups:
+      glyndor-reusables:
+        patterns: ["Glyndor/.github*"]
+      github-owned:
+        patterns: ["*"]
+        exclude-patterns: ["Glyndor/.github*"]
+    # Dependabot infers a prefix from the commit history when this is absent,
+    # and the inference has been unstable across repositories (build(deps):
+    # Bump ... in some, chore(deps): bump ... in others). Set it so the
+    # generated title is predictable and matches homebrew-tap and scoop-bucket.
+    commit-message:
+      prefix: chore
 
   - package-ecosystem: "cargo"
     directory: "/"
@@ -16,6 +53,8 @@ updates:
     labels: ["type:deps"]
     open-pull-requests-limit: 10
     target-branch: "develop"
+    commit-message:
+      prefix: chore
 
   - package-ecosystem: "pip"
     directory: "/.github/scripts"
@@ -31,3 +70,5 @@ updates:
     labels: ["type:deps", "type:ci"]
     open-pull-requests-limit: 10
     target-branch: "develop"
+    commit-message:
+      prefix: chore
