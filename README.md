@@ -13,72 +13,65 @@ Package: [crates.io/crates/podup](https://crates.io/crates/podup) · MSRV 1.85 �
 
 ## Install
 
-### Debian / Ubuntu (apt), recommended
-
-Register the signed Glyndor repository and install. Copy-paste:
-
-```bash
-curl -fsSL https://glyndor.net/podup/install/unix | bash -s -- --apt
+```sh
+curl -fsSL https://apt.glyndor.net/install/podup | sudo sh
 ```
 
-The installer verifies the keyring package's Ed25519 signature against its
-pinned release key before anything is installed (fail-closed). The keyring
-package registers `https://apt.glyndor.net` and ships the signing key, so podup
-updates (and key renewals) arrive through `apt upgrade`. The apt build omits
-self-update, since apt owns upgrades. Requires **Podman ≥ 5.0** (rootless) with
-its **API socket listening** — `podman` itself is daemonless, but podup speaks
-the libpod API:
+That is the whole install on Debian and Ubuntu. It registers the signed Glyndor
+apt repository, verifies the archive key's fingerprint before trusting it, and
+installs podup with apt — so upgrades and signing-key renewals arrive through
+`apt upgrade` like any other package. Root is needed because it installs
+packages. It leaves nothing of its own behind: the download is removed, and so
+is anything it had to install just to check the key.
 
-```bash
+podup needs **Podman ≥ 5.0** (rootless) with its API socket listening. Podman is
+daemonless, but podup speaks the libpod API:
+
+```sh
 systemctl --user enable --now podman.socket
 ```
 
-To register the repository by hand instead, fetch the keyring and check the
-key's fingerprint against the one published in the
-[apt repository README](https://github.com/Glyndor/apt#verify-the-signing-key):
+### Optional — macOS
 
-```bash
-curl -fsSLO https://apt.glyndor.net/glyndor-archive-keyring.deb
-sudo dpkg -i glyndor-archive-keyring.deb
-gpg --show-keys /usr/share/keyrings/glyndor.gpg   # compare the fingerprint
-sudo apt update && sudo apt install podup
+```sh
+brew install glyndor/tap/podup
 ```
 
-<details>
-<summary><b>Other methods: Linux/macOS script · Windows · build from source · self-update · Podman version · platforms</b></summary>
+### Optional — Windows
 
-### apt, one-liner (script)
-
-Same as above via the install script (registers the repo, then installs):
-
-```bash
-curl -fsSL https://glyndor.net/podup/install/unix | bash -s -- --apt
+```powershell
+scoop bucket add glyndor https://github.com/Glyndor/scoop-bucket
+scoop install podup
 ```
 
-### Linux / macOS (install script)
+Scoop clones the bucket with git, so git has to be installed first — Scoop's own
+installer does not bring it.
 
-```bash
+### Optional — Linux without apt
+
+```sh
 curl -fsSL https://glyndor.net/podup/install/unix | bash
 ```
 
-### Windows (PowerShell)
+Installs the release binary rather than a package. Use it on a distribution apt
+does not serve; on Debian and Ubuntu the line at the top is better, because apt
+keeps podup current and this does not.
 
-```powershell
-irm https://glyndor.net/podup/install/windows | iex
-```
-
-Both installers verify the Ed25519 signature over `SHA256SUMS` and fail closed
-otherwise.
+<details>
+<summary><b>Build from source · self-update · Podman versions · platforms</b></summary>
 
 ### Build from source
 
-```bash
+```sh
 cargo build --release
 ```
 
 ### Self-update
 
-```bash
+Only for installs that did not come from a package manager — the apt build omits
+it, since apt owns upgrades there.
+
+```sh
 podup update            # download and install the latest signed release
 podup update --check    # report whether a newer release exists, install nothing
 ```
@@ -92,12 +85,12 @@ release's Ed25519 signature and SHA-256 checksum, failing closed otherwise. See
 podup tracks the **latest stable Podman** and supports its **last two majors,
 Podman 5.x and 6.x**. It talks to Podman's native libpod API, requesting the
 `/v5.0.0/libpod` path that Podman 6 still serves; the gate is the major version
-the engine reports, so it needs **Podman ≥ 5.0**. Both supported majors
-run the integration suite in CI on every engine change (Fedora 44 for the
-latest 5.x, rawhide for 6.x). Many distributions still ship 4.x, so check
-`podman --version` and upgrade if needed. Fedora, Debian trixie/sid and recent
-Ubuntu releases carry 5.x; on an older release, install or upgrade Podman
-following the official guide: <https://podman.io/docs/installation>.
+the engine reports, so it needs **Podman ≥ 5.0**. Both supported majors run the
+integration suite in CI on every engine change (Fedora 44 for the latest 5.x,
+rawhide for 6.x). Many distributions still ship 4.x, so check `podman --version`
+and upgrade if needed. Fedora, Debian trixie/sid and recent Ubuntu releases carry
+5.x; on an older release, follow the official guide:
+<https://podman.io/docs/installation>.
 
 ### Platforms
 
