@@ -87,9 +87,23 @@ Podman 5.x and 6.x**. It talks to Podman's native libpod API, requesting the
 `/v5.0.0/libpod` path that Podman 6 still serves; the gate is the major version
 the engine reports, so it needs **Podman ≥ 5.0**. Both supported majors run the
 integration suite in CI on every engine change (Fedora 44 for the latest 5.x,
-rawhide for 6.x). Many distributions still ship 4.x, so check `podman --version`
-and upgrade if needed. Fedora, Debian trixie/sid and recent Ubuntu releases carry
-5.x; on an older release, follow the official guide:
+rawhide for 6.x). Many distributions still ship 4.x, so `podman --version` is
+worth checking before installing — and a distribution never changes its Podman
+major version mid-release, so an LTS that shipped below the floor stays below
+it for its whole supported life.
+
+| distribution                  | Podman | podup runs |
+|-------------------------------|--------|------------|
+| Debian 12 bookworm            | 4.3.1  | no         |
+| Debian 13 trixie              | 5.4.2  | yes        |
+| Ubuntu 22.04 LTS              | 3.4.4  | no         |
+| Ubuntu 24.04 LTS              | 4.9.3  | no         |
+| Ubuntu 26.04 LTS              | 5.7.0  | yes        |
+| Fedora 42 and newer           | 5.x+   | yes        |
+
+Ubuntu 24.04 LTS is not supported: it ships Podman 4.9.3 and will keep shipping
+that for its whole supported life. On any row marked "no", the engine has to
+come from somewhere other than the distribution:
 <https://podman.io/docs/installation>.
 
 ### Platforms
