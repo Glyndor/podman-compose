@@ -132,6 +132,6 @@ jobs:
   # running: run 32435521566 reported "no Dependabot pull request on record"
   # while ten sat open. v1.16.1 pages the window.
   dependabot-freshness:
-    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@e9cbd47344fcb03b1bb2400f8b15ab5289ff497f # v1.16.1
+    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@e70ff47fd8aefa0f054846815f19b98768d61122 # v1.17.0
     with:
       max-age-days: 15
