@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   rust:
-    uses: Glyndor/.github/.github/workflows/rust-ci.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
+    uses: Glyndor/.github/.github/workflows/rust-ci.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       # Each entry here becomes its own check name: `rust / Test (macos-latest)`
       # and `rust / Test (windows-latest)`. Editing this list changes the names
@@ -74,7 +74,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       workflow: audit.yml
       max-age-days: 15
@@ -83,7 +83,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       workflow: fuzz.yml
       max-age-days: 15
@@ -92,7 +92,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       workflow: podman-lane.yml
       max-age-days: 3
@@ -101,7 +101,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       workflow: podman-watch.yml
       max-age-days: 3
@@ -120,7 +120,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       workflow: benchmark.yml
       max-age-days: 65
@@ -139,7 +139,7 @@ jobs:
   # on a Dependabot-authored pull request - the condition that forced
   # `Analyze (actions)` out of apt.
   pin-policy:
-    uses: Glyndor/.github/.github/workflows/pin-policy-reusable.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
+    uses: Glyndor/.github/.github/workflows/pin-policy-reusable.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
 
   # Dependabot silently stops proposing updates when its config is not
   # re-registered, and like a dead cron it reports nothing at all. This fails
@@ -150,6 +150,6 @@ jobs:
   # running: run 32435521566 reported "no Dependabot pull request on record"
   # while ten sat open. v1.16.1 pages the window.
   dependabot-freshness:
-    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@76f8bc6dd79baa995d5bfa347c4b985433cb0ce1 # v1.20.0
+    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       max-age-days: 15
