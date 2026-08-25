@@ -12,6 +12,10 @@
 #
 #   curl -fsSL https://glyndor.net/podup/install/unix | bash -s -- --apt
 #
+# --skip-podman-check: bypass the local-Podman-version precheck. Use this when
+# the engine podup will use is on a different host than the local podman
+# binary (e.g. a `podman machine` VM, or a remote socket).
+#
 # Environment:
 #   PODUP_VERSION      Release tag to install (e.g. v0.3.0). Default: latest.
 #   PODUP_INSTALL_DIR  Installation directory (binary mode). Default: /usr/local/bin.
@@ -22,6 +26,8 @@ REPO="Glyndor/podup"
 INSTALL_DIR="${PODUP_INSTALL_DIR:-/usr/local/bin}"
 VERSION="${PODUP_VERSION:-latest}"
 MODE="binary"
+PODMAN_MIN_MAJOR=5
+SKIP_PODMAN_CHECK=""
 
 log_info()  { printf '\033[1;34m[info]\033[0m %s\n' "$1"; }
 log_ok()    { printf '\033[1;32m[ ok ]\033[0m %s\n' "$1"; }
@@ -33,7 +39,7 @@ fail() {
 }
 
 usage() {
-	sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//'
 	exit 0
 }
 
@@ -41,9 +47,10 @@ usage() {
 
 for arg in "$@"; do
 	case "$arg" in
-		--apt)      MODE="apt" ;;
-		-h|--help)  usage ;;
-		*)          fail "Unknown argument: ${arg} (try --help)" ;;
+		--apt)                MODE="apt" ;;
+		--skip-podman-check)  SKIP_PODMAN_CHECK=1 ;;
+		-h|--help)            usage ;;
+		*)                    fail "Unknown argument: ${arg} (try --help)" ;;
 	esac
 done
 
@@ -441,7 +448,60 @@ or python3 with the 'cryptography' package, or set PODUP_RELEASE_PUBKEY_B64, the
 	log_ok "podup installed: $("${target}" --version)"
 }
 
+# --- Podman precheck ---------------------------------------------------------
+
+# Verify the local Podman engine meets podup's floor. Local podman is NOT
+# required: podup can drive a remote socket, and on macOS it talks to a
+# `podman machine` VM. So absence is a WARN, not a failure. A present local
+# podman whose major version is below PODMAN_MIN_MAJOR is the Ubuntu 24.04
+# case and is refused, since installing podup against it would leave the user
+# with a binary that cannot talk to their engine.
+check_podman() {
+	if ! command -v podman >/dev/null 2>&1; then
+		log_info "No local 'podman' binary found. podup needs Podman >= 5.0 to run; \
+this is fine if the engine podup will use is remote or a 'podman machine' VM."
+		return 0
+	fi
+
+	local version_output
+	# `set -e` would abort on a failing command substitution. podman can fail
+	# (e.g. a broken install, missing runtime files); treat that as an
+	# unparseable version, not a hard failure.
+	if ! version_output="$(podman --version 2>/dev/null)"; then
+		log_info "Local 'podman --version' could not be read; skipping the Podman \
+precheck. podup needs Podman >= 5.0 to run."
+		return 0
+	fi
+
+	# Output is `podman version 5.7.0`; field 3 is the version, then
+	# everything before the first '.' is the major.
+	local raw_version major
+	read -r _ _ raw_version _ <<< "$version_output" || raw_version=""
+	major="${raw_version%%.*}"
+
+	if [[ -z "$major" || ! "$major" =~ ^[0-9]+$ ]]; then
+		log_info "Could not parse the local Podman version ('${version_output}'); \
+skipping the Podman precheck. podup needs Podman >= 5.0 to run."
+		return 0
+	fi
+
+	if [[ "$major" -lt "$PODMAN_MIN_MAJOR" ]]; then
+		if [[ -n "$SKIP_PODMAN_CHECK" ]]; then
+			log_info "Podman precheck skipped by request (--skip-podman-check)"
+			return 0
+		fi
+		fail "Local Podman ${raw_version} is below the >= 5.0 floor podup requires. \
+podup will install, but will not be able to talk to this engine. Upgrade Podman \
+or point podup at a different, newer host (see https://podman.io/docs/installation). \
+If the engine podup will use is on a different host, re-run with --skip-podman-check."
+	fi
+
+	log_ok "Local Podman version meets the >= 5.0 requirement"
+}
+
 # --- Dispatch ----------------------------------------------------------------
+
+check_podman
 
 if [[ "$MODE" == "apt" ]]; then
 	install_apt

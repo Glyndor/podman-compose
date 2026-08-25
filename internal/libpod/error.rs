@@ -95,7 +95,9 @@ impl fmt::Display for PodmanError {
 				};
 				write!(
 					f,
-					"podup requires Podman >= 5.0; this server reports libpod API version {reported}"
+					"podup requires Podman >= 5.0; this server reports libpod API version {reported}. \
+					 Upgrade Podman, or point podup at a host running 5.0 or newer: \
+					 https://podman.io/docs/installation"
 				)
 			}
 		}

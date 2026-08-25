@@ -277,6 +277,32 @@ fn display_incompatible_api_version_reports_version() {
 }
 
 #[test]
+fn display_incompatible_api_version_offers_a_remedy() {
+	let e = PodmanError::IncompatibleApiVersion {
+		reported: "4.9.3".into(),
+	};
+	let msg = e.to_string();
+	assert!(msg.contains("podman.io/docs/installation"), "got {msg:?}");
+	assert!(msg.contains("Upgrade Podman"), "got {msg:?}");
+}
+
+#[test]
+fn display_incompatible_api_version_keeps_diagnosis_before_remedy() {
+	let e = PodmanError::IncompatibleApiVersion {
+		reported: "4.9.3".into(),
+	};
+	let msg = e.to_string();
+	let diagnosis = msg.find("4.9.3").expect("diagnosis should be present");
+	let remedy = msg
+		.find("Upgrade Podman")
+		.expect("remedy should be present");
+	assert!(
+		diagnosis < remedy,
+		"remedy must follow the diagnosis it explains: {msg:?}"
+	);
+}
+
+#[test]
 fn display_incompatible_api_version_handles_missing_header() {
 	// An empty reported version (no `Libpod-API-Version` header) renders a
 	// readable placeholder rather than a blank.

@@ -59,7 +59,7 @@ jobs:
     # proven on a real consumer before its tag is cut - .github's own CI never
     # exercises a caller. This repository's dpkg-buildpackage job was that
     # proof, going from red to green in 6m36s on #1525.
-    uses: Glyndor/.github/.github/workflows/rust-debian.yml@e70ff47fd8aefa0f054846815f19b98768d61122 # v1.17.0
+    uses: Glyndor/.github/.github/workflows/rust-debian.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       package-name: podup
       check-vendored: true
@@ -68,5 +68,5 @@ jobs:
       # Debian's toolchain ships no musl standard library. Keep this in step
       # with rust-ci.yml's default: the whole point is that the packaged binary
       # comes from the compiler CI validates with.
-      rust-toolchain: "1.97"
+      rust-toolchain: "1.98"
       rust-target: x86_64-unknown-linux-musl

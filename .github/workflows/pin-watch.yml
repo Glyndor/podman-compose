@@ -1,0 +1,139 @@
+name: pin-watch
+# Notifies (opens an issue) when a tool version pinned in this repository has
+# drifted from upstream. Four pins are owned here and watched nowhere else:
+#   - the `debian:trixie` container digest in release.yml
+#   - `python-version` in asset-contract.yml (it appears more than once; the
+#     entries must agree, and disagreement is itself a drift)
+#   - `Standards-Version` in debian/control
+#   - `debhelper-compat` in debian/control
+# Rust is watched by Glyndor/.github's rust-toolchain-watch.yml and Podman by
+# this repository's podman-watch.yml, so neither is repeated here.
+#
+# Weekly, not daily: these move on the scale of months, and a daily run would
+# be noise. 05:00 Monday keeps it off audit.yml's 06:00 and fuzz.yml's 07:00 —
+# stacking crons on the same minute only invites GitHub's scheduling delays.
+on:
+  schedule:
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Detect drift in pinned tool versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Every `python3 -c` below is ONE line, deliberately. Automatic dedent
+          # of `-c` source arrived in CPython 3.13 and this runner ships 3.12,
+          # where indented source is an IndentationError — measured against a
+          # real 3.12, not assumed. Un-indenting to column 0 is not the way out
+          # either: inside a YAML `run: |` block a line at column 0 ends the
+          # block. One line sidesteps both traps.
+          DRIFTS=$(mktemp); BODY=$(mktemp)
+          trap 'rm -f "$DRIFTS" "$BODY"' EXIT
+          add_drift() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$DRIFTS"; }
+
+          # ---- 1. debian:trixie container digest ------------------------------
+          # Read the pinned value FROM THE FILE, so the watcher cannot silently
+          # disagree with what the workflow actually uses.
+          PINNED_DIGEST=$(grep -oE 'container: debian:trixie@sha256:[a-f0-9]{64}' \
+            .github/workflows/release.yml | head -n1 | sed 's/.*@//')
+          [[ "$PINNED_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]] \
+            || { echo "::error::could not parse the pinned debian:trixie digest from release.yml"; exit 1; }
+          TOKEN=$(curl -fsSL 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/debian:pull' \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
+          [[ -n "$TOKEN" ]] || { echo "::error::empty token from auth.docker.io"; exit 1; }
+          # The Accept header must offer the manifest-list types or the registry
+          # answers 406 for a multi-arch tag.
+          LATEST_DIGEST=$(curl -fsSL -I -H "Authorization: Bearer $TOKEN" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            'https://registry-1.docker.io/v2/library/debian/manifests/trixie' \
+            | tr -d '\r' | awk -F': ' 'tolower($1) == "docker-content-digest" { print $2; exit }')
+          [[ "$LATEST_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]] \
+            || { echo "::error::registry returned an unexpected digest: '$LATEST_DIGEST'"; exit 1; }
+          [ "$PINNED_DIGEST" = "$LATEST_DIGEST" ] \
+            || add_drift "debian:trixie container digest" ".github/workflows/release.yml" "$PINNED_DIGEST" "$LATEST_DIGEST"
+
+          # ---- 2. python-version ----------------------------------------------
+          # Plain shell does this; no interpreter needed.
+          PY_DISTINCT=$(grep -oE '^[[:space:]]+python-version:[[:space:]]*"?[0-9]+\.[0-9]+' \
+            .github/workflows/asset-contract.yml | grep -oE '[0-9]+\.[0-9]+$' | sort -u)
+          PY_COUNT=$(printf '%s\n' "$PY_DISTINCT" | grep -c . || true)
+          [ "${PY_COUNT:-0}" -gt 0 ] \
+            || { echo "::error::no python-version line found in asset-contract.yml"; exit 1; }
+          if [ "$PY_COUNT" -gt 1 ]; then
+            add_drift "python-version (entries disagree)" ".github/workflows/asset-contract.yml" \
+              "$(printf '%s' "$PY_DISTINCT" | paste -sd ', ' -)" "(they must agree)"
+          else
+            LATEST_PY=$(curl -fsSL https://endoflife.date/api/python.json \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["cycle"])')
+            [[ "$LATEST_PY" =~ ^[0-9]+\.[0-9]+$ ]] \
+              || { echo "::error::endoflife.date returned an unexpected cycle: '$LATEST_PY'"; exit 1; }
+            [ "$PY_DISTINCT" = "$LATEST_PY" ] \
+              || add_drift "python-version" ".github/workflows/asset-contract.yml" "$PY_DISTINCT" "$LATEST_PY"
+          fi
+
+          # ---- 3. Standards-Version -------------------------------------------
+          # The regex MUST admit FOUR components. A three-component one silently
+          # truncates 4.7.4.1 to 4.7.4 and reports a false match — that exact
+          # mistake was already made once on #1526.
+          PINNED_STD=$(grep -oE '^Standards-Version:[[:space:]]+[0-9]+(\.[0-9]+){2,3}' debian/control \
+            | head -n1 | awk '{print $2}')
+          [[ -n "$PINNED_STD" ]] \
+            || { echo "::error::could not parse Standards-Version from debian/control"; exit 1; }
+          LATEST_STD=$(curl -fsSL https://www.debian.org/doc/debian-policy/ \
+            | grep -oE 'version [0-9]+(\.[0-9]+){2,3}' | head -n1 | awk '{print $2}')
+          [[ -n "$LATEST_STD" ]] \
+            || { echo "::error::could not read the current Debian Policy version"; exit 1; }
+          [ "$PINNED_STD" = "$LATEST_STD" ] \
+            || add_drift "Standards-Version" "debian/control" "$PINNED_STD" "$LATEST_STD"
+
+          # ---- 4. debhelper-compat ---------------------------------------------
+          # Compared against what **trixie** ships, NOT sid and NOT unstable. CI
+          # builds in trixie; compat 14 exists only in sid/forky today, so raising
+          # it would break the build. A watcher that reads sid and says "bump to
+          # 14" every Monday is worse than no watcher at all.
+          PINNED_COMPAT=$(grep -oE 'debhelper-compat[[:space:]]*\([[:space:]]*=[[:space:]]*[0-9]+' debian/control \
+            | head -n1 | grep -oE '[0-9]+$')
+          [[ "$PINNED_COMPAT" =~ ^[0-9]+$ ]] \
+            || { echo "::error::could not parse debhelper-compat from debian/control"; exit 1; }
+          DEBHELPER_VER=$(curl -fsSL https://sources.debian.org/api/src/debhelper/ \
+            | python3 -c 'import sys,json; m=[v["version"] for v in json.load(sys.stdin)["versions"] if "trixie" in v.get("suites",[])]; print(m[0].split("~")[0].split("+")[0] if m else "")')
+          [[ "$DEBHELPER_VER" =~ ^[0-9]+(\.[0-9]+)*$ ]] \
+            || { echo "::error::no debhelper version found for trixie (got '$DEBHELPER_VER')"; exit 1; }
+          [ "$PINNED_COMPAT" = "${DEBHELPER_VER%%.*}" ] \
+            || add_drift "debhelper-compat" "debian/control" "$PINNED_COMPAT" "${DEBHELPER_VER%%.*} (debhelper $DEBHELPER_VER in trixie)"
+
+          # ---- Report ----------------------------------------------------------
+          if [ ! -s "$DRIFTS" ]; then echo "No drift in any pinned tool version."; exit 0; fi
+          TITLE="Pinned tool versions have drifted"
+          # Idempotent: the title never changes, so a week that finds the same
+          # drift again does not open a second issue.
+          if gh issue list --state open --search "in:title $TITLE" --json title --jq '.[].title' | grep -qxF "$TITLE"; then
+            echo "Drift found, but the issue is already open — nothing to do."; exit 0
+          fi
+          {
+            echo "| Pin | Pinned at | Pinned | Upstream |"
+            echo "| --- | --- | --- | --- |"
+            while IFS=$'\t' read -r name path pinned upstream; do
+              # shellcheck disable=SC2016  # the backticks are literal markdown for
+              # the issue body, not command substitution waiting to expand.
+              printf '| %s | `%s` | `%s` | `%s` |\n' "$name" "$path" "$pinned" "$upstream"
+            done < "$DRIFTS"
+            echo
+            echo "The container digest has no bump path through Dependabot: the \`github-actions\` ecosystem does not update a workflow's \`container:\` image, so it has to be raised by hand."
+          } > "$BODY"
+          # Label on creation. An unlabelled issue is a process bug, and one filed
+          # by a bot is no exception — podman-watch carries the same note because
+          # #673 and #1016 both landed bare.
+          gh issue create --title "$TITLE" \
+            --label "type:ci" --label "prio:P2" --label "status:ready" \
+            --label "area:ci" --label "effort:S" \
+            --body-file "$BODY"
+          echo "Opened the drift report."

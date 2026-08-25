@@ -11,8 +11,13 @@ permissions:
 
 jobs:
   rust:
-    uses: Glyndor/.github/.github/workflows/rust-ci.yml@fadfbebc989a58a2292438fecbd5a616ffa0bdf3 # v1.15.0
+    uses: Glyndor/.github/.github/workflows/rust-ci.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
+      # Each entry here becomes its own check name: `rust / Test (macos-latest)`
+      # and `rust / Test (windows-latest)`. Editing this list changes the names
+      # emitted while the ruleset still requires the old ones, so the PR
+      # carrying the edit blocks itself. A ruleset should require the stable
+      # gate `rust / Extra platforms` instead, which names no platform. #1552.
       extra-test-os: "[\"macos-latest\", \"windows-latest\"]"
       # Measured against the WHOLE crate, deliberately. The gate used to read 90%
       # while a `coverage-ignore-regex` hid 36% of the code — 14,432 of 39,681
@@ -47,6 +52,11 @@ jobs:
       # The 90 gate belongs where the tests can actually run — the `podman-vm`
       # lane — and that is tracked separately rather than papered over here.
       coverage-threshold: 79
+      # This number is inside the check name `rust / MSRV (1.85)`. Bumping it
+      # emits `rust / MSRV (<new>)` while the ruleset still requires the old
+      # string, so the PR carrying the bump blocks itself. A ruleset should
+      # require the stable gate `rust / MSRV` instead, which carries no
+      # version. See #1552.
       msrv: "1.85"
       package-check: true
       semver-check: true
@@ -64,7 +74,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       workflow: audit.yml
       max-age-days: 15
@@ -73,7 +83,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       workflow: fuzz.yml
       max-age-days: 15
@@ -82,7 +92,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       workflow: podman-lane.yml
       max-age-days: 3
@@ -91,10 +101,18 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       workflow: podman-watch.yml
       max-age-days: 3
+
+  # A newly added scheduled workflow cannot be registered here in the same pull
+  # request that adds it. The guard passes only on a run with `event=schedule`
+  # and `status=success`; GitHub fires crons solely from the default branch, and
+  # `workflow_dispatch` does not count. So a fresh entry fails with "No
+  # successful scheduled run on record" until the workflow has reached `main`
+  # and its cron has fired once. `pin-watch.yml` (#1526) is waiting for exactly
+  # that and gets its entry afterwards.
 
   # Monthly (`0 4 1 * *`), so seventeen days without a run is normal and a
   # weekly threshold here would fail on ordinary work for most of the month.
@@ -102,7 +120,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
+    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       workflow: benchmark.yml
       max-age-days: 65
@@ -121,7 +139,7 @@ jobs:
   # on a Dependabot-authored pull request - the condition that forced
   # `Analyze (actions)` out of apt.
   pin-policy:
-    uses: Glyndor/.github/.github/workflows/pin-policy-reusable.yml@8517d94fde00466f59b95c5d1bd838e2ad24a8bf # v1.15.2
+    uses: Glyndor/.github/.github/workflows/pin-policy-reusable.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
 
   # Dependabot silently stops proposing updates when its config is not
   # re-registered, and like a dead cron it reports nothing at all. This fails
@@ -132,6 +150,6 @@ jobs:
   # running: run 32435521566 reported "no Dependabot pull request on record"
   # while ten sat open. v1.16.1 pages the window.
   dependabot-freshness:
-    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@e9cbd47344fcb03b1bb2400f8b15ab5289ff497f # v1.16.1
+    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
     with:
       max-age-days: 15
