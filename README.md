@@ -85,7 +85,10 @@ release's Ed25519 signature and SHA-256 checksum, failing closed otherwise. See
 podup tracks the **latest stable Podman** and supports its **last two majors,
 Podman 5.x and 6.x**. It talks to Podman's native libpod API, requesting the
 `/v5.0.0/libpod` path that Podman 6 still serves; the gate is the major version
-the engine reports, so it needs **Podman ≥ 5.0**. Both supported majors run the
+the engine reports, so it needs **Podman ≥ 5.0**. When a new major ships, it is
+added and the oldest is dropped — but only once the **newest LTS of each
+distribution family carries the new one or better**, so nobody on a current
+release is stranded. Both supported majors run the
 integration suite in CI on every engine change (Fedora 44 for the latest 5.x,
 rawhide for 6.x). Many distributions still ship 4.x, so `podman --version` is
 worth checking before installing — and a distribution never changes its Podman
