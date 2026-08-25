@@ -106,6 +106,14 @@ jobs:
       workflow: podman-watch.yml
       max-age-days: 3
 
+  # A newly added scheduled workflow cannot be registered here in the same pull
+  # request that adds it. The guard passes only on a run with `event=schedule`
+  # and `status=success`; GitHub fires crons solely from the default branch, and
+  # `workflow_dispatch` does not count. So a fresh entry fails with "No
+  # successful scheduled run on record" until the workflow has reached `main`
+  # and its cron has fired once. `pin-watch.yml` (#1526) is waiting for exactly
+  # that and gets its entry afterwards.
+
   # Monthly (`0 4 1 * *`), so seventeen days without a run is normal and a
   # weekly threshold here would fail on ordinary work for most of the month.
   freshness-benchmark:
