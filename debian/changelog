@@ -1,3 +1,36 @@
+podup (5.1.0) unstable; urgency=medium
+
+  New
+
+  * An unsupported Podman now says what to do about it. podup requires
+    Podman >= 5.0 and Ubuntu 24.04 LTS ships 4.9.3 for its whole supported
+    life, so `apt install podup` succeeded and the tool then could not reach
+    the engine. The error carries a remedy, `install.sh` refuses before
+    installing when a local podman is below the floor, and the README names
+    the releases instead of saying "recent Ubuntu releases" -- which was true
+    and still led readers to the wrong conclusion, since the recent ones are
+    the non-LTS ones.
+
+  * The Podman support policy states when a major is dropped in terms that
+    can be met: once the newest LTS of each distribution family carries the
+    new one. The previous wording waited for stable distributions to "move
+    off" the old major, which never becomes true, because an LTS does not
+    change Podman major mid-release.
+
+  Packaging and CI
+
+  * SBOMs are generated in a job that holds no secrets. `cargo install` runs
+    a build script for every crate it resolves, and that was happening in the
+    job that signs the release.
+
+  * Required status checks no longer carry a value in their name, so the pull
+    request that changes an MSRV or a Podman matrix no longer blocks itself.
+
+  * A weekly watcher reports pinned tool versions that have drifted from
+    upstream; four of this repository's pins had no watcher at all.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sun, 24 Aug 2026 23:40:00 -0500
+
 podup (5.0.0) unstable; urgency=medium
 
   Breaking
