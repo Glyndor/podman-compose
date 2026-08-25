@@ -45,7 +45,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Signing requirements must parse as separate pinned entries
         # A trailing backslash is a line continuation: if the last hash of a
         # block keeps one, pip folds the next package name into the previous
@@ -96,7 +96,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Install pinned cryptography
         # See the shell fixture for the rationale on --require-hashes.
         run: |
