@@ -318,13 +318,23 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  release:
-    name: Publish release
+  # SBOM generation runs here, in its own job, so a third-party build script
+  # executed by `cargo install` cannot reach the signing step. cargo install
+  # builds every crate in the dependency tree of cargo-cyclonedx and
+  # cargo-about (427 crates across the two, several under live RustSec
+  # advisories), and `build.rs` has full filesystem access on the runner that
+  # runs it. The release job holds GLYNDOR_RELEASE_ED25519_KEY on its signing
+  # step; if SBOM generation lived in the same job, a malicious build script
+  # could persist in the workspace and rewrite `.github/scripts/sign.py` or
+  # `.github/scripts/sign-requirements.txt` before the signing step ran them
+  # with the key in its environment. This job holds `contents: read` and no
+  # secrets, so persistence here has nothing to land on. See Glyndor/apt#121.
+  sbom:
+    name: Generate SBOM and license attribution
     needs: [build, build-deb]
-    runs-on: ubuntu-latest
     permissions:
-      contents: write
-
+      contents: read
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -342,15 +352,6 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           merge-multiple: true
-
-      - name: Verify both Debian packages are present
-        run: |
-          for arch in amd64 arm64; do
-            if ! ls podup_*_${arch}.deb >/dev/null 2>&1; then
-              echo "::error::Debian package artifact for ${arch} is missing"
-              exit 1
-            fi
-          done
 
       - name: Generate per-target SBOMs and license attribution
         # Government/enterprise consumers require a machine-readable SBOM
@@ -403,6 +404,51 @@ jobs:
           done
 
           cargo about generate about.hbs > NOTICES.html
+
+      - name: Upload SBOM and NOTICE artifacts
+        # if-no-files-found: error matters: a silent empty upload would let the
+        # release job sign nothing and still succeed, defeating the SBOM gate.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: |
+            *.cdx.json
+            NOTICES.html
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [build, build-deb, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+      - name: Install Rust toolchain
+        # Pin rather than `stable`: a release runs once at tag time and is
+        # immutable, so it must not be built by whatever Rust the runner ships
+        # that day. Keep in step with rust-ci.yml's toolchain default (see the
+        # build job for why this is not a repo-root rust-toolchain.toml).
+        env:
+          RUST_TOOLCHAIN: "1.98"
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          merge-multiple: true
+
+      - name: Verify both Debian packages are present
+        run: |
+          for arch in amd64 arm64; do
+            if ! ls podup_*_${arch}.deb >/dev/null 2>&1; then
+              echo "::error::Debian package artifact for ${arch} is missing"
+              exit 1
+            fi
+          done
 
       - name: Generate checksums
         run: |
