@@ -68,14 +68,23 @@ the signing key and source list), then runs `apt install podup`.
 
 ```bash
 curl -fsSLO https://apt.glyndor.net/glyndor-archive-keyring.deb
-sudo dpkg -i glyndor-archive-keyring.deb
-gpg --show-keys /usr/share/keyrings/glyndor.gpg   # compare the fingerprint
-sudo apt update && sudo apt install podup
+dpkg-deb -x glyndor-archive-keyring.deb keyring-check
+gpg --show-keys keyring-check/usr/share/keyrings/glyndor.gpg
 ```
 
 Check the printed fingerprint against the one published in the
 [apt repository README](https://github.com/Glyndor/apt#verify-the-signing-key)
-— a channel independent of `apt.glyndor.net`.
+— a channel independent of `apt.glyndor.net`. Only once it matches:
+
+```bash
+sudo dpkg -i glyndor-archive-keyring.deb
+sudo apt update && sudo apt install podup
+```
+
+`dpkg -i` runs the package's maintainer scripts as root, which is why the
+fingerprint is read from a copy unpacked with `dpkg-deb -x` rather than from
+the installed keyring: `dpkg-deb -x` runs nothing from the package, so the
+check happens before anything in it can execute.
 
 ### Why key renewal is automatic
 
