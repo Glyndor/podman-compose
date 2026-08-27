@@ -1,0 +1,148 @@
+name: Installer contract (reusable)
+
+# Assert install.sh and the release workflow agree on release asset names.
+# Releases are immutable: once a tag ships, its asset names can never change.
+# install.sh downloads `<name>-${OS}-${ARCH}` for the platform it runs on, and
+# the release workflow publishes a fixed list of assets. If the two drift, the
+# installer breaks for users. This catches the drift on the PR, before any tag.
+#
+# Scope — this gate reads declarations, and only declarations. It compares two
+# files and answers "do install.sh and release.yml agree on the asset names?".
+# That is a cross-reference between two statements of intent, and parsing YAML
+# is the right way to answer it.
+#
+# It deliberately does NOT answer "does the release produce these files". Until
+# 2026-08-17 it tried to, with a third check that required `SHA256SUMS` to
+# appear among the parsed `asset:` keys. Those keys are the build matrix, and
+# the manifest is computed FROM the matrix outputs in a later step, so it can
+# never be one of them: the check was unpassable by construction, and the only
+# way to satisfy it was to declare a matrix entry that produced nothing — the
+# exact defect it existed to catch. It had never run green in any repository.
+# Existence is answered where it can be answered honestly, against the staged
+# files at release time, by `scripts/verify-release-assets.py`.
+
+on:
+  workflow_call:
+    inputs:
+      install-script:
+        description: Path to the install script
+        type: string
+        default: "install.sh"
+      release-workflow:
+        description: Path to the release workflow that publishes assets
+        type: string
+        default: ".github/workflows/release.yml"
+      install-ps1-path:
+        description: Path to the PowerShell install script (skipped if absent)
+        type: string
+        default: "install.ps1"
+
+permissions:
+  contents: read
+
+concurrency:
+  # install-script distinguishes two contract checks in the same repo/ref
+  # (e.g. a repo with more than one installer), which would otherwise cancel
+  # each other's in-flight run.
+  group: installer-contract-${{ github.workflow }}-${{ github.ref }}-${{ inputs.install-script }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: install.sh ↔ release asset names
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify asset names are in sync
+        env:
+          INSTALL_SH: ${{ inputs.install-script }}
+          RELEASE_YML: ${{ inputs.release-workflow }}
+          INSTALL_PS1: ${{ inputs.install-ps1-path }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          from pathlib import Path
+
+          install_sh = Path(os.environ["INSTALL_SH"])
+          release_yml = Path(os.environ["RELEASE_YML"])
+
+          text = install_sh.read_text()
+          template = re.search(r'ARTIFACT="([^"]+)"', text)
+          if not template:
+              sys.exit(f"installer-contract: no ARTIFACT=\"...\" in {install_sh}.")
+          m = re.fullmatch(r'([A-Za-z0-9_.-]+)-\$\{OS\}-\$\{ARCH\}', template.group(1))
+          if not m:
+              sys.exit(
+                  "installer-contract: ARTIFACT template must be "
+                  '"<name>-${OS}-${ARCH}"; got ' + template.group(1)
+              )
+          prefix = m.group(1)
+          oses = set(re.findall(r'OS="([a-z0-9_]+)"', text))
+          arches = set(re.findall(r'ARCH="([a-z0-9_]+)"', text))
+          if not oses or not arches:
+              sys.exit(f"installer-contract: could not parse OS/ARCH arms from {install_sh}.")
+          requestable = {f"{prefix}-{o}-{a}" for o in oses for a in arches}
+
+          published = set(re.findall(r"^\s*-?\s*asset:\s*(\S+)\s*$",
+                                     release_yml.read_text(), re.MULTILINE))
+          if not published:
+              sys.exit(f"installer-contract: could not parse asset names from {release_yml}.")
+
+          missing = sorted(requestable - published)
+          if missing:
+              lines = "\n".join(f"  - {n}" for n in missing)
+              sys.exit(
+                  "installer-contract: install.sh can request assets the release "
+                  f"workflow does not declare:\n{lines}\n"
+                  f"declared: {sorted(published)}\n"
+                  "This gate reads the workflow's asset declarations only. It "
+                  "does not check that the release produces them — "
+                  "scripts/verify-release-assets.py does that against the "
+                  "staging directory at release time."
+              )
+          print(f"OK: all {len(requestable)} installer-requestable assets are published.")
+
+          install_ps1 = Path(os.environ["INSTALL_PS1"])
+          if not install_ps1.is_file():
+              print(f"::notice::installer-contract: {install_ps1} not found, skipping install.ps1 check.")
+          else:
+              ps_text = install_ps1.read_text()
+              ps_template = re.search(r'\$Artifact\s*=\s*"([^"]+)"', ps_text)
+              if not ps_template:
+                  sys.exit(f'installer-contract: no $Artifact = "..." in {install_ps1}.')
+              # The Windows installer builds one artifact per architecture; the OS
+              # is usually a fixed literal in the template (there being only one
+              # Windows), but a $OS/${OS} interpolation is also accepted for a
+              # ps1 that targets more than one OS.
+              ps_m = re.fullmatch(
+                  r'([A-Za-z0-9_.-]+)-(\$\{?OS\}?|[a-z0-9_]+)-\$\{?Arch\}?(\.[A-Za-z0-9]+)?',
+                  ps_template.group(1),
+              )
+              if not ps_m:
+                  sys.exit(
+                      "installer-contract: $Artifact template must be "
+                      '"<name>-<os>-$Arch[.ext]"; got ' + ps_template.group(1)
+                  )
+              ps_prefix, ps_os_token, ps_suffix = ps_m.group(1), ps_m.group(2), ps_m.group(3) or ""
+              if ps_os_token in ("$OS", "${OS}"):
+                  ps_oses = set(re.findall(r"\$OS\s*=\s*['\"]([a-z0-9_]+)['\"]", ps_text))
+              else:
+                  ps_oses = {ps_os_token}
+              ps_arches = set(re.findall(r"\$Arch\s*=\s*['\"]([a-z0-9_]+)['\"]", ps_text))
+              if not ps_oses or not ps_arches:
+                  sys.exit(f"installer-contract: could not parse OS/ARCH arms from {install_ps1}.")
+              ps_requestable = {f"{ps_prefix}-{o}-{a}{ps_suffix}" for o in ps_oses for a in ps_arches}
+
+              ps_missing = sorted(ps_requestable - published)
+              if ps_missing:
+                  lines = "\n".join(f"  - {n}" for n in ps_missing)
+                  sys.exit(
+                      "installer-contract: install.ps1 can request assets the release "
+                      f"workflow does not declare:\n{lines}\n"
+                      f"declared: {sorted(published)}"
+                  )
+              print(f"OK: all {len(ps_requestable)} install.ps1-requestable assets are published.")
+          PY
