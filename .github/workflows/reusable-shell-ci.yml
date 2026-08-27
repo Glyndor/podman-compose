@@ -1,0 +1,192 @@
+name: Shell CI (reusable)
+
+# Lint every shell script in the repository: bash -n catches syntax errors,
+# shellcheck catches quoting, unset-variable and other correctness bugs.
+# Optionally runs the repository's shell test suite (`test-command`).
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory to scan for shell scripts
+        type: string
+        default: "."
+      severity:
+        description: Minimum shellcheck severity to report (style|info|warning|error)
+        type: string
+        default: "style"
+      shellcheck-version:
+        description: Exact shellcheck release tag to install from koalaman/shellcheck; bumped via .github releases
+        type: string
+        default: "v0.11.0"
+      shellcheck-sha256:
+        description: sha256 of that release's linux.x86_64 tarball; travels with shellcheck-version, so overriding one without the other fails the install
+        type: string
+        default: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
+      test-command:
+        description: Command running the repository's shell test suite (skipped when empty)
+        type: string
+        default: ""
+      apt-packages:
+        description: Space-separated apt packages the test suite needs
+        type: string
+        default: ""
+      check-exec-bit:
+        description: Fail when a script the workflows invoke as ./path is not executable in git
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shell-ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.working-directory }}
+  cancel-in-progress: true
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      SEVERITY: ${{ inputs.severity }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Collect shell scripts
+        run: |
+          set -euo pipefail
+          list="$RUNNER_TEMP/shell-files"
+          : > "$list"
+          # By extension.
+          find . -type f \( -name '*.sh' -o -name '*.bash' \) \
+            -not -path './.git/*' -print0 >> "$list"
+          # Extensionless scripts whose shebang names a shell (hooks, bin/ tools).
+          # Restricted to sh/bash/dash: shellcheck cannot lint ksh or zsh, and
+          # running it against them anyway produces false reds rather than
+          # real findings.
+          while IFS= read -r -d '' f; do
+            if head -n1 "$f" | grep -qE '^#!.*(/| )(sh|bash|dash)([[:space:]]|$)'; then
+              printf '%s\0' "$f" >> "$list"
+            fi
+          done < <(find . -type f ! -name '*.*' -not -path './.git/*' -print0)
+
+      - name: Install shellcheck
+        env:
+          SHELLCHECK_VERSION: ${{ inputs.shellcheck-version }}
+          SHELLCHECK_SHA256: ${{ inputs.shellcheck-sha256 }}
+        run: |
+          set -euo pipefail
+          # Pinned by version and by content. Every other tool here arrives
+          # through a registry that verifies what it hands over (Go's sumdb,
+          # crates.io, PyPI); this is a plain download, so the checksum is the
+          # only thing standing between us and whatever the transport returns.
+          # It has to land in a file first: piping curl into tar extracts the
+          # bytes before anything can check them.
+          dir="$RUNNER_TEMP/shellcheck-bin"
+          tarball="$RUNNER_TEMP/shellcheck.tar.xz"
+          mkdir -p "$dir"
+          curl -sSfL -o "$tarball" \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          printf '%s  %s\n' "$SHELLCHECK_SHA256" "$tarball" | sha256sum -c -
+          tar -xJ -f "$tarball" -C "$dir" --strip-components=1 "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          chmod +x "$dir/shellcheck"
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Syntax check
+        run: |
+          set -euo pipefail
+          list="$RUNNER_TEMP/shell-files"
+          [ -s "$list" ] || { echo "No shell scripts found; nothing to check."; exit 0; }
+          while IFS= read -r -d '' f; do
+            bash -n "$f"
+          done < "$list"
+
+      - name: Run shellcheck
+        run: |
+          set -euo pipefail
+          xargs -0 -r shellcheck --severity="$SEVERITY" < "$RUNNER_TEMP/shell-files"
+
+      # A script invoked as `./path` needs the executable bit recorded IN GIT.
+      # `chmod +x` in a working tree is local state; the mode git stores is what
+      # reaches the runner, and when it disagrees the job dies with exit 126 and
+      # "Permission denied" — a message about the file, not about the mode, which
+      # is why it costs a round trip to diagnose every time.
+      #
+      # This happened twice in one day in Glyndor/apt (2026-08-23): once on
+      # scripts/build-installers.sh, once on tests/build-installers.test.sh.
+      #
+      # Deliberately narrow. It does NOT assert that every `.sh` is 0755 — that
+      # would be wrong. `apt/scripts/install-template.sh` is a template that is
+      # read and substituted, never executed, and is correctly 0644; and repos
+      # that invoke their scripts as `bash path` (podup, helmly, unitpm — 21
+      # non-executable scripts between them) have nothing to fix. The check is
+      # derived from how the workflows actually call each script, so a repo that
+      # never uses `./path` finds nothing and passes.
+      #
+      # Default is on rather than opt-in: the SHA pin is the buffer, so no
+      # consumer sees this until it deliberately bumps its pin, which is the
+      # moment to look at a new red.
+      - name: Scripts invoked by path must be executable in git
+        if: ${{ inputs.check-exec-bit }}
+        run: |
+          set -euo pipefail
+          # Every `./something.sh` mentioned anywhere in the calling repo's
+          # workflows. Paths are relative to the repo root, which is where the
+          # runner starts, so that is what the mode is checked against.
+          refs="$(grep -rhoE '\./[A-Za-z0-9_./-]+\.(sh|bash)' .github/workflows/ 2>/dev/null \
+                  | sed 's|^\./||' | sort -u || true)"
+          if [ -z "$refs" ]; then
+            echo "No script is invoked as ./path by any workflow; nothing to check."
+            exit 0
+          fi
+          rc=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            mode="$(git ls-files --stage -- "$f" | awk '{print $1}')"
+            if [ -z "$mode" ]; then
+              echo "note: $f is invoked as ./$f but is not tracked; skipping."
+              continue
+            fi
+            if [ "$mode" != "100755" ]; then
+              echo "::error file=$f::$f is invoked as ./$f but git records mode $mode; the job will fail with exit 126 (Permission denied). Fix with: git update-index --chmod=+x $f"
+              rc=1
+            fi
+          done <<EOF
+          $refs
+          EOF
+          [ "$rc" -eq 0 ] && echo "Every script invoked by path is executable in git."
+          exit "$rc"
+
+  test:
+    name: test
+    if: inputs.test-command != ''
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      TEST_COMMAND: ${{ inputs.test-command }}
+      APT_PACKAGES: ${{ inputs.apt-packages }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install test dependencies
+        run: |
+          set -euo pipefail
+          if [ -n "$APT_PACKAGES" ]; then
+            sudo apt-get update -qq
+            # shellcheck disable=SC2086 # intentional word-splitting of the package list
+            sudo apt-get install -y -qq $APT_PACKAGES
+          fi
+
+      - name: Run tests
+        run: |
+          set -euo pipefail
+          bash -c "$TEST_COMMAND"

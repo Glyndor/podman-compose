@@ -1,0 +1,115 @@
+name: Rust audit (reusable)
+
+# Scheduled supply-chain audit for Rust crates: cargo-audit flags RUSTSEC
+# advisories, cargo-deny enforces the license/ban/source policy in deny.toml.
+# Callers wire the schedule (e.g. weekly cron) in their own workflow.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing the Cargo workspace
+        type: string
+        default: "."
+      # Pinned, not the runner's floating preinstalled Rust — see rust-ci.yml's
+      # toolchain input for why an unpinned toolchain is a problem.
+      toolchain:
+        description: Rust toolchain to pin the audit and deny jobs to
+        type: string
+        default: "1.98"
+      cargo-audit-version:
+        description: Exact version of cargo-audit to install; bumped via .github releases
+        type: string
+        default: "0.22.2"
+      cargo-deny-version:
+        description: Exact version of cargo-deny to install; bumped via .github releases
+        type: string
+        default: "0.20.2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-audit-${{ github.workflow }}-${{ github.ref }}-${{ inputs.working-directory }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      TOOL_VERSION: ${{ inputs.cargo-audit-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+        run: |
+          rustup toolchain install "$TOOLCHAIN" --profile minimal
+          rustup default "$TOOLCHAIN"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+          # The toolchain is part of the key: a cache built under an older
+          # pin must not survive a bump via the `command -v ... ||`
+          # short-circuit below, or the pin would be silently ignored.
+          key: cargo-audit-${{ runner.os }}-${{ inputs.toolchain }}-${{ inputs.cargo-audit-version }}
+
+      - name: Install cargo-audit
+        # A bare "X.Y.Z" passed to `cargo install --version` already installs
+        # that exact release — caret ("^") matching is a Cargo.toml dependency
+        # rule, not a `cargo install` one. The leading "=" here is redundant,
+        # kept only to make the exact pin explicit at a glance.
+        run: command -v cargo-audit >/dev/null || cargo install cargo-audit --version "=$TOOL_VERSION" --locked
+
+      - name: Run cargo audit
+        # --deny warnings so unmaintained/unsound/yanked advisories also fail,
+        # not just vulnerabilities.
+        run: cargo audit --deny warnings
+
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      TOOL_VERSION: ${{ inputs.cargo-deny-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+        run: |
+          rustup toolchain install "$TOOLCHAIN" --profile minimal
+          rustup default "$TOOLCHAIN"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+          # Same reasoning as cargo-audit's cache key above.
+          key: cargo-deny-${{ runner.os }}-${{ inputs.toolchain }}-${{ inputs.cargo-deny-version }}
+
+      - name: Install cargo-deny
+        # Same exact-pin reasoning as cargo-audit above: the bare version is
+        # already exact, not caret-matched.
+        run: command -v cargo-deny >/dev/null || cargo install cargo-deny --version "=$TOOL_VERSION" --locked
+
+      - name: Run cargo deny
+        run: cargo deny check

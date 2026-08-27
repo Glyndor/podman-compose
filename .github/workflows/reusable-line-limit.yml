@@ -1,0 +1,90 @@
+name: Line limit (reusable)
+
+# Enforce the file-size standard: warn past the soft limit, fail past the hard
+# limit. Language-agnostic — scans tracked source files by extension. Counts
+# CODE lines only: blank lines and comment-only lines (including the required
+# doc comments) do not count, so documenting a public API never pushes a file
+# over the limit. The comment detection is a pragmatic heuristic (lines whose
+# first non-space character starts a line/block/doc/template comment).
+
+on:
+  workflow_call:
+    inputs:
+      hard-limit:
+        description: Files with more lines than this fail the build
+        type: number
+        default: 500
+      soft-limit:
+        description: Files with more lines than this emit a warning
+        type: number
+        default: 300
+      extensions:
+        description: Space-separated source file extensions to check
+        type: string
+        default: "rs go ts tsx js jsx mjs cjs py sh astro vue svelte"
+      exclude-pattern:
+        description: Optional extended regex; matching paths are skipped
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: line-limit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  line-limit:
+    name: line limit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check file lengths
+        env:
+          HARD: ${{ inputs.hard-limit }}
+          SOFT: ${{ inputs.soft-limit }}
+          EXTS: ${{ inputs.extensions }}
+          EXCLUDE: ${{ inputs.exclude-pattern }}
+        run: |
+          set -euo pipefail
+          ext_re="$(echo "$EXTS" | tr ' ' '|')"
+          ext_pattern="\.(${ext_re})\$"
+          fail=0
+          while IFS= read -r -d '' f; do
+            [[ "$f" =~ $ext_pattern ]] || continue
+            [ -f "$f" ] || continue
+            case "$f" in
+              vendor/*|*/vendor/*|*.min.*) continue ;;
+            esac
+            if [ -n "$EXCLUDE" ] && echo "$f" | grep -qE "$EXCLUDE"; then
+              continue
+            fi
+            # `#` starts a comment only in hash-comment languages; in Rust it
+            # begins an attribute (#[...]/#![...]), so don't drop those lines.
+            case "$f" in
+              *.sh|*.bash|*.py|*.rb|*.pl|*.yml|*.yaml|*.toml) hash_comment=1 ;;
+              *) hash_comment=0 ;;
+            esac
+            n="$(awk -v hc="$hash_comment" '
+              { line = $0; sub(/^[[:space:]]+/, "", line)
+                if (line == "") next
+                if (line ~ /^(\/\/|\*|\/\*|\*\/|<!--)/) next
+                if (hc == 1 && line ~ /^#/) next
+                code++ }
+              END { print code + 0 }' "$f")"
+            if [ "$n" -gt "$HARD" ]; then
+              echo "::error file=$f::$f has $n code lines (hard limit $HARD — split required)"
+              fail=1
+            elif [ "$n" -gt "$SOFT" ]; then
+              echo "::warning file=$f::$f has $n code lines (soft limit $SOFT — look for a split point)"
+            fi
+          done < <(git ls-files -z)
+          if [ "$fail" -ne 0 ]; then
+            echo "Some files exceed the ${HARD}-line hard limit."
+            exit 1
+          fi
+          echo "All checked files are within the ${HARD}-line hard limit."

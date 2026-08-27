@@ -1,0 +1,97 @@
+name: Schedule freshness (reusable)
+
+# Fails when a scheduled workflow has not succeeded recently enough.
+#
+# Every other guard in this organisation is an assertion that fails loudly. A
+# cron that stops firing is the exception: it emits nothing at all, and "no
+# alert" is indistinguishable from "all clear". On 2026-06-29 every scheduled
+# workflow in the org stopped. podup and apt recovered on 07-15 because they
+# happened to get activity and a disable/enable cycle; authcore, epistle, unitpm
+# and glyndor.net stayed dark for four more weeks, all of them reporting
+# `active` the whole time. It cost a real finding — authcore's GO-2026-5856 was
+# caught by a hand-run of govulncheck, not by the weekly audit that exists for
+# exactly that.
+#
+# Call this from a workflow that already runs often (normal CI) so the absence
+# of a scheduled run becomes a red check on ordinary work. It is the same idea
+# as apt's `ValidFor: 14d`, which expires the archive rather than letting it
+# serve a frozen snapshot when the pipeline stalls.
+#
+# The caller must grant `actions: read` alongside `contents: read`: a called
+# workflow cannot elevate beyond the permissions of the workflow that calls it,
+# and reading run history needs that scope. Without it the run does not start.
+#
+# Add the check only once the schedule has fired successfully at least once —
+# with no successful run on record there is nothing to measure and the job
+# reports that as a failure, which for an established workflow is exactly right.
+
+on:
+  workflow_call:
+    inputs:
+      workflow:
+        description: >-
+          File name of the scheduled workflow to check, e.g. "audit.yml".
+        type: string
+        required: true
+      max-age-days:
+        description: >-
+          Fail when the newest successful scheduled run is older than this.
+          Allow about two periods, so a weekly job tolerates one miss: 15 for a
+          weekly schedule, 3 for a daily one.
+        type: number
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: schedule-freshness-${{ github.workflow }}-${{ github.ref }}-${{ inputs.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  freshness:
+    name: schedule freshness
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read # reading this repository's workflow-run history
+    steps:
+      # `gh api` is banned for the maintainer's own credentials — the org
+      # account has been suspended over raw API traffic before. A workflow is a
+      # different actor: GITHUB_TOKEN is a scoped job token on its own rate
+      # limit, which is the documented exception.
+      - name: Check the newest successful scheduled run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ inputs.workflow }}
+          MAX_AGE_DAYS: ${{ inputs.max-age-days }}
+        run: |
+          set -euo pipefail
+
+          latest=$(gh api \
+            "repos/${REPO}/actions/workflows/${WORKFLOW}/runs?event=schedule&status=success&per_page=1" \
+            --jq '.workflow_runs[0].created_at // empty')
+
+          if [ -z "$latest" ]; then
+            echo "::error::No successful scheduled run on record for ${WORKFLOW}."
+            echo "Either its cron has never fired, or the schedule was dropped." >&2
+            echo "Check that the workflow still exists on the default branch, then" >&2
+            echo "toggle it: gh workflow disable ${WORKFLOW} && gh workflow enable ${WORKFLOW}" >&2
+            exit 1
+          fi
+
+          age_seconds=$(( $(date -u +%s) - $(date -u -d "$latest" +%s) ))
+          age_days=$(( age_seconds / 86400 ))
+
+          echo "Newest successful scheduled run of ${WORKFLOW}: ${latest} (${age_days}d ago)."
+
+          if [ "$age_days" -gt "$MAX_AGE_DAYS" ]; then
+            echo "::error::${WORKFLOW} last succeeded on a schedule ${age_days} days ago, over the ${MAX_AGE_DAYS}-day limit."
+            echo "A schedule that stops firing reports nothing, so treat this as the alert it never sent." >&2
+            echo "GitHub runs crons hours late, so a small overrun right at the boundary is not the problem;" >&2
+            echo "a multiple of the period is. Toggle the workflow off and on to re-register it, then check" >&2
+            echo "the next scheduled fire rather than the next few minutes." >&2
+            exit 1
+          fi
+
+          echo "Within the ${MAX_AGE_DAYS}-day limit."

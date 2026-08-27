@@ -1,0 +1,103 @@
+name: Rust fuzz (reusable)
+
+# Scheduled fuzzing for Rust crates: runs `cargo fuzz run` (cargo-fuzz +
+# libfuzzer, nightly) against each declared target for a short, bounded time to
+# surface parser panics and edge cases on a fixed tree. Callers wire the schedule
+# (e.g. nightly cron) and pass the target list in their own workflow. This is a
+# smoke run, not a corpus-building soak.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing the crate (the one holding the fuzz/ dir)
+        type: string
+        default: "."
+      targets:
+        description: >-
+          JSON array of cargo-fuzz target names, e.g.
+          ["smtp_command","smtp_line","smtp_address"]
+        type: string
+        required: true
+      max-total-time:
+        description: Seconds to fuzz each target (libfuzzer -max_total_time)
+        type: string
+        default: "60"
+      timeout:
+        description: Per-input timeout in seconds (libfuzzer -timeout)
+        type: string
+        default: "10"
+      toolchain:
+        description: Rust toolchain to use (cargo-fuzz requires nightly)
+        type: string
+        default: "nightly-2026-07-16"
+      cargo-fuzz-version:
+        description: Exact version of the tool; bumped via .github releases
+        type: string
+        default: "0.13.2"
+      rss-limit-mb:
+        description: >-
+          libfuzzer -rss_limit_mb value in MiB; empty (the default) omits the
+          flag entirely, leaving libfuzzer's own default in effect
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-fuzz-${{ github.workflow }}-${{ github.ref }}-${{ inputs.working-directory }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: cargo fuzz
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.targets) }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      TOOLCHAIN: ${{ inputs.toolchain }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        run: |
+          rustup toolchain install "$TOOLCHAIN" --profile minimal
+          rustup default "$TOOLCHAIN"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ${{ inputs.working-directory }}/fuzz/target
+          # The tool version is part of the key: fuzz/Cargo.toml's hash alone
+          # doesn't change when the pin is bumped, so a stale cargo-fuzz
+          # binary could otherwise survive the command -v short-circuit below.
+          key: cargo-fuzz-${{ runner.os }}-${{ inputs.cargo-fuzz-version }}-${{ hashFiles(format('{0}/fuzz/Cargo.toml', inputs.working-directory)) }}
+
+      - name: Install cargo-fuzz
+        env:
+          CARGO_FUZZ_VERSION: ${{ inputs.cargo-fuzz-version }}
+        run: command -v cargo-fuzz >/dev/null || cargo install cargo-fuzz --locked --version "$CARGO_FUZZ_VERSION"
+
+      - name: Fuzz ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+          MAX_TOTAL_TIME: ${{ inputs.max-total-time }}
+          FUZZ_TIMEOUT: ${{ inputs.timeout }}
+          RSS_LIMIT_MB: ${{ inputs.rss-limit-mb }}
+        run: |
+          libfuzzer_args=(-max_total_time="$MAX_TOTAL_TIME" -timeout="$FUZZ_TIMEOUT")
+          if [ -n "$RSS_LIMIT_MB" ]; then
+            libfuzzer_args+=(-rss_limit_mb="$RSS_LIMIT_MB")
+          fi
+          cargo fuzz run "$TARGET" -- "${libfuzzer_args[@]}"

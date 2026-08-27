@@ -1,0 +1,125 @@
+name: Rust supply chain (reusable)
+
+# Generate the supply-chain artifacts government and enterprise consumers expect:
+# a machine-readable SBOM (CycloneDX, per US EO 14028) and a third-party license
+# attribution (NOTICES). Run on every PR to keep the generators honest; the
+# release workflow attaches the same artifacts to each published release.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing the Cargo workspace
+        type: string
+        default: "."
+      # Pinned, not the runner's floating preinstalled Rust — see rust-ci.yml's
+      # toolchain input for why an unpinned toolchain is a problem.
+      #
+      # Keep this equal to rust-ci.yml's `toolchain`. It was 1.97 while rust-ci
+      # was already on 1.98, because the bump raised one and not the other and
+      # nothing compared them. A repository whose SBOM is produced by a compiler
+      # its test suite never ran is the defect podup#1487 recorded, and podup
+      # now has a test asserting its own two pins agree — nothing asserts it
+      # across these two reusables, so it is written here instead.
+      toolchain:
+        description: Rust toolchain to pin the SBOM and license job to
+        type: string
+        default: "1.98"
+      about-template:
+        description: cargo-about handlebars template
+        type: string
+        default: "about.hbs"
+      cyclonedx-version:
+        description: Exact version of cargo-cyclonedx to install; bumped via .github releases
+        type: string
+        default: "0.5.9"
+      cargo-about-version:
+        description: Exact version of cargo-about to install; bumped via .github releases
+        type: string
+        default: "0.9.2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-supply-chain-${{ github.workflow }}-${{ github.ref }}-${{ inputs.working-directory }}
+  cancel-in-progress: true
+
+jobs:
+  sbom-and-licenses:
+    name: SBOM and license attribution
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      ABOUT_TEMPLATE: ${{ inputs.about-template }}
+      CYCLONEDX_VERSION: ${{ inputs.cyclonedx-version }}
+      ABOUT_VERSION: ${{ inputs.cargo-about-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+        run: |
+          rustup toolchain install "$TOOLCHAIN" --profile minimal
+          rustup default "$TOOLCHAIN"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+          # The toolchain is part of the key: a cache built under an older
+          # pin must not survive a bump via the `command -v ... ||`
+          # short-circuits below, or the pin would be silently ignored.
+          key: rust-supply-chain-${{ runner.os }}-${{ inputs.toolchain }}-${{ inputs.cyclonedx-version }}-${{ inputs.cargo-about-version }}
+
+      - name: Install generators
+        # `cargo install --version X.Y.Z` already installs that exact release;
+        # the leading "=" below is redundant, kept only for readability —
+        # caret ("^") matching is a Cargo.toml dependency rule, not this one.
+        run: |
+          command -v cargo-cyclonedx >/dev/null || cargo install --locked cargo-cyclonedx --version "=$CYCLONEDX_VERSION"
+          command -v cargo-about >/dev/null || cargo install --locked --features cli cargo-about --version "=$ABOUT_VERSION"
+
+      - name: Generate CycloneDX SBOM
+        run: cargo cyclonedx --format json --all-features
+
+      - name: Generate third-party license attribution (NOTICES)
+        run: cargo about generate "$ABOUT_TEMPLATE" > NOTICES.html
+
+      - name: Compute artifact name suffix
+        # Two same-run calls of this reusable with different working-directory
+        # inputs (e.g. two crates in one repo) must not collide on the fixed
+        # artifact name upload-artifact used to have; qualify it by
+        # working-directory instead. Artifact names reject "/" and other
+        # separator characters, so the raw input can't be interpolated as-is.
+        id: artifact-suffix
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: |
+          suffix="$WORKING_DIRECTORY"
+          suffix="${suffix#./}"
+          # "." and "./" both strip down to the same "root" case; so does an
+          # empty input ("") — none of them denote a real subdirectory name,
+          # and left alone they'd produce a trailing-hyphen artifact name
+          # ("sbom-and-notices-") instead of one qualified by directory.
+          if [ "$suffix" = "." ] || [ -z "$suffix" ]; then
+            suffix="root"
+          fi
+          suffix="$(printf '%s' "$suffix" | tr '/:<>|*?\\"' '-' | tr -s '-')"
+          suffix="$(printf '%s' "$suffix" | sed 's/^-*//; s/-*$//')"
+          echo "suffix=$suffix" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-and-notices-${{ steps.artifact-suffix.outputs.suffix }}
+          path: |
+            ${{ inputs.working-directory }}/**/*.cdx.json
+            ${{ inputs.working-directory }}/NOTICES.html
+          if-no-files-found: error

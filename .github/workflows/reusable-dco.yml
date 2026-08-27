@@ -1,0 +1,119 @@
+name: DCO (reusable)
+
+# Enforce the Developer Certificate of Origin: every commit on a pull request
+# must carry a `Signed-off-by:` trailer. Machine-checked attestation gate rather
+# than a convention, which government and enterprise audits expect.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dco-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dco:
+    name: Signed-off-by present on every commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify Signed-off-by trailers
+        env:
+          # BASE_SHA/HEAD_SHA are the PR's real base and head commits from the
+          # event payload, not refs/pull/N/merge (the synthetic merge commit
+          # actions/checkout builds when it checks out a PR ref). That
+          # synthetic commit is never in this BASE_SHA..HEAD_SHA range to
+          # begin with — it isn't an ancestor of HEAD_SHA — so `--no-merges`
+          # below has nothing to do with excluding it; it skips real merge
+          # commits that may exist on the PR branch itself. Those are covered
+          # separately by "Detect evil merges" below, which checks
+          # merge-commit tree integrity rather than sign-off trailers.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for sha in $(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}"); do
+            author="$(git show -s --format='%an <%ae>' "$sha")"
+            if ! git show -s --format='%(trailers:key=Signed-off-by)' "$sha" \
+              | grep -qi 'Signed-off-by:'; then
+              echo "::error::commit $sha ($author) is missing a Signed-off-by trailer"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Add a sign-off with: git commit -s (or git rebase --signoff)."
+            exit 1
+          fi
+          echo "All commits carry a Signed-off-by trailer."
+
+      - name: Detect evil merges
+        # A merge commit's tree should always equal the clean, conflict-free
+        # merge of its two parents. If it doesn't, the merge was hand-edited
+        # to smuggle in a change that exists in neither parent and therefore
+        # never went through review or DCO sign-off on its own commit. This
+        # check is independent of the Signed-off-by scope above: merge
+        # commits are still exempt from carrying their own trailer, but their
+        # tree must not silently diverge from what a real merge would produce.
+        #
+        # Policy for edge cases:
+        #   - Octopus merges (more than two parents) are rejected outright:
+        #     `git merge-tree --write-tree` only compares two parents, so a
+        #     three-way-or-more merge can't be verified this way and is not
+        #     assumed safe.
+        #   - A merge whose parents conflict, or whose tree otherwise can't
+        #     be recomputed, fails closed rather than being waved through:
+        #     `git merge-tree --write-tree` exiting non-zero means we cannot
+        #     recompute what the merge should have produced, and a
+        #     hand-resolved conflict is unverifiable by construction — there
+        #     is no way to distinguish a faithful resolution from one that
+        #     also smuggled in an unrelated change. This org's flow is
+        #     squash-only, so merge commits inside a PR range are rare and
+        #     always avoidable (rebase onto the base branch instead of
+        #     merging, or re-merge without conflicts), which is what makes
+        #     failing closed here acceptable friction rather than a
+        #     false-positive machine.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          bad=0
+          stderr_file="$(mktemp)"
+          merges="$(git rev-list --merges "${BASE_SHA}..${HEAD_SHA}")" || {
+            echo "::error::could not enumerate merge commits between ${BASE_SHA} and ${HEAD_SHA} — history may be corrupted or incomplete; this check fails closed"
+            exit 1
+          }
+          for m in $merges; do
+            read -r -a parents <<< "$(git show -s --format='%P' "$m")"
+            if [ "${#parents[@]}" -ne 2 ]; then
+              echo "::error::merge commit $m has ${#parents[@]} parents — evil-merge detection only supports ordinary two-parent merges; an octopus merge is rejected rather than assumed safe"
+              bad=1
+              continue
+            fi
+            actual_tree="$(git rev-parse "${m}^{tree}")"
+            if ! clean_tree="$(git merge-tree --write-tree "${parents[0]}" "${parents[1]}" 2>"$stderr_file")"; then
+              echo "::error::merge commit $m cannot be automatically verified (conflicted or merge-tree error); this check fails closed because a hand-resolved merge can carry content that exists in no parent. Rebase the branch onto its base (producing no merge commit) or re-merge without conflicts, then push again."
+              echo "git merge-tree stderr for $m:"
+              cat "$stderr_file"
+              bad=1
+              continue
+            fi
+            if [ "$clean_tree" != "$actual_tree" ]; then
+              echo "::error::merge commit $m's tree does not match the clean merge of its parents ${parents[0]} and ${parents[1]} — it introduces changes present in neither parent"
+              bad=1
+            fi
+          done
+          rm -f "$stderr_file"
+          if [ "$bad" -ne 0 ]; then
+            echo "One or more merge commits smuggle unreviewed changes, use an unsupported merge shape, or could not be automatically verified. See the errors above."
+            exit 1
+          fi
+          echo "No evil merges found."
