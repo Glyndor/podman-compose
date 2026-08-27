@@ -1,0 +1,133 @@
+name: Dependabot freshness (reusable)
+
+# Fails when Dependabot has not opened a pull request recently enough in the
+# calling repository.
+#
+# The companion guard `schedule-freshness.yml` fails when a *workflow* stops
+# firing. Dependabot is not a workflow — it is an integration with its own
+# schedule, and a silent Dependabot emits nothing. "All up to date" and
+# "Dependabot is dead" produce the same signal: silence. This job converts
+# that silence into a red check on ordinary work, by treating the newest
+# dependabot-authored PR as the last time Dependabot spoke.
+#
+# Two differences from `schedule-freshness.yml`, both forced by Dependabot:
+#
+# 1. The signal is a pull request, not a workflow run. We cannot ask for the
+#    newest *scheduled* run of a Dependabot job because there is no such job;
+#    Dependabot runs as a GitHub integration. We list recent PRs across all
+#    states and pick the newest whose author is Dependabot.
+#
+# 2. The age threshold is higher than the schedule-freshness default. The
+#    "2× the period" rule is for workflows that fire on schedule; Dependabot
+#    only opens a PR when there is an upstream update, so a healthy but idle
+#    Dependabot is expected to be silent for stretches. 15 days is well above
+#    one missed run for a daily Dependabot, but still inside the window that
+#    catches a dead Dependabot (template-repository went the lifetime of the
+#    repo without one before this gate landed).
+#
+# The caller is responsible for granting `contents: read`; a called workflow
+# cannot elevate beyond the permissions of the workflow that calls it, and
+# reading public PR history through the API needs that scope.
+#
+# Add the check only once Dependabot has opened at least one PR in the repo
+# — with nothing on record the job reports that as a failure, which for a
+# live Dependabot is exactly right (it means we cannot even prove Dependabot
+# is alive here).
+#
+# Default shell is pinned to bash: `date -u -d "$latest" +%s` is GNU-date
+# syntax, and a future Windows caller would otherwise silently mis-parse the
+# date and fail the arithmetic on an empty string.
+#
+# `concurrency:` cancels an in-flight run when a newer one starts. The group
+# key uses `github.workflow` so an unrelated caller triggering the same
+# reusable does not collide, and `github.ref` to distinguish per-ref runs.
+
+on:
+  workflow_call:
+    inputs:
+      max-age-days:
+        description: >-
+          Fail when the newest Dependabot pull request is older than this.
+          Allow well above one missed run, since Dependabot only opens a PR
+          when there is an upstream update; 15 covers daily cadence.
+        type: number
+        required: true
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: dependabot-freshness-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  freshness:
+    name: dependabot freshness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check the newest Dependabot pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MAX_AGE_DAYS: ${{ inputs.max-age-days }}
+        run: |
+          set -euo pipefail
+
+          # List recent PRs (any state), filter client-side for
+          # dependabot[bot], and pick the newest. Doing the filter and sort in
+          # jq avoids the GitHub API's known wrinkle where
+          # `state=all&sort=created&per_page=1` does not always include
+          # closed/merged PRs in the sort order one would expect, and depends
+          # on the bot author being a queryable user login (it is —
+          # dependabot[bot] — not the app slug `app/dependabot`).
+          #
+          # The window has to be paged, not fixed. A single page of 20 is a
+          # window on *total* PR activity, not on Dependabot's: in a busy
+          # repository the bot's newest pull request falls off the end and the
+          # check reports it as never having run. Measured on Glyndor/podup,
+          # where the twenty newest PRs contained none from Dependabot while
+          # ten sat within the newest forty — the gate failed on a repository
+          # where Dependabot had opened ten pull requests that same day.
+          #
+          # Three pages of 100 is a 300-PR window, and the loop stops at the
+          # first page that yields a hit, so the common case still costs one
+          # request.
+          latest=""
+          pages_read=0
+          for page in 1 2 3; do
+            pages_read="$page"
+            latest=$(gh api \
+              "repos/${REPO}/pulls?state=all&per_page=100&page=${page}" \
+              --jq '[.[] | select(.user.login == "dependabot[bot]")] | sort_by(.created_at) | reverse | .[0].created_at // empty')
+            [ -n "$latest" ] && break
+          done
+
+          if [ -z "$latest" ]; then
+            echo "::error::No Dependabot pull request in the newest $((pages_read * 100)) for ${REPO}."
+            echo "Either Dependabot has never run here, or its schedule was dropped." >&2
+            echo "Check that dependabot.yml is on the default branch and touches the package ecosystem you expect," >&2
+            echo "then disable and re-enable Dependabot to re-register it." >&2
+            exit 1
+          fi
+
+          age_seconds=$(( $(date -u +%s) - $(date -u -d "$latest" +%s) ))
+          age_days=$(( age_seconds / 86400 ))
+
+          echo "Newest Dependabot pull request in ${REPO}: ${latest} (${age_days}d ago)."
+
+          if [ "$age_days" -gt "$MAX_AGE_DAYS" ]; then
+            echo "::error::Dependabot last opened a pull request ${age_days} days ago in ${REPO}, over the ${MAX_AGE_DAYS}-day limit."
+            echo "A silent Dependabot reports nothing, so treat this as the alert it never sent." >&2
+            echo "GitHub runs Dependabot on its own schedule, hours late; a small overrun right at the boundary" >&2
+            echo "is not the problem — a multiple of the period is. Check dependabot.yml is still on the default" >&2
+            echo "branch and that the package ecosystem is configured, then disable/enable Dependabot to" >&2
+            echo "re-register it, and check the next scheduled scan rather than the next few minutes." >&2
+            exit 1
+          fi
+
+          echo "Within the ${MAX_AGE_DAYS}-day limit."

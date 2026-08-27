@@ -1,0 +1,37 @@
+name: Main guard (reusable)
+
+# Enforce that pull requests into `main` come from `develop`, keeping the
+# topic -> develop -> main flow that product repositories follow.
+
+on:
+  workflow_call:
+
+permissions: {}
+
+concurrency:
+  group: main-guard-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  develop-only:
+    name: develop-only
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
+    steps:
+      - name: Require develop as source branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          # The branch name alone is forgeable: a fork can name any branch
+          # `develop`. Require the head to live in this repository too.
+          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "::error::Pull requests into main must come from this repository's develop branch (got $HEAD_REPO)."
+            exit 1
+          fi
+          if [ "$HEAD_REF" != "develop" ]; then
+            echo "::error::Pull requests into main must come from develop (got $HEAD_REF)."
+            exit 1
+          fi
+          echo "Source branch is develop."

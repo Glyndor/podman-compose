@@ -20,4 +20,8 @@ permissions:
 
 jobs:
   shellcheck:
-    uses: Glyndor/.github/.github/workflows/shell-ci.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
+    uses: ./.github/workflows/reusable-shell-ci.yml
+    with:
+      # A test no workflow runs is indistinguishable from one that passes --
+      # the lesson debian-build.yml carries from #1295, applied here.
+      test-command: ./tests/shell/locale-pinned.test.sh

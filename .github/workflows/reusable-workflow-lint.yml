@@ -1,0 +1,213 @@
+name: Workflow lint (reusable)
+
+# Lint the CALLING repository's own workflow YAML with actionlint — the release
+# workflows and other per-repo callers that live outside this repository and
+# are today validated by nobody. This is where the phantom-required-check
+# naming mismatches and the PowerShell $VAR-under-pwsh trap have actually
+# shipped, because nothing caught them before a consumer's CI ran for real.
+# Contrast with actionlint.yml in this repository: that one is this repo's own
+# self-CI over ITS reusables; this one runs actionlint over the CALLER's
+# checkout, wherever the calling job invokes it from.
+#
+# actionlint's embedded shellcheck pass otherwise falls back to whatever
+# shellcheck the runner image ships, which floats independently of the org's
+# pinned version (shell-ci.yml). Installing the same pinned shellcheck here
+# and pointing actionlint at it with -shellcheck keeps that pass reproducible
+# too.
+
+on:
+  workflow_call:
+    inputs:
+      shellcheck-version:
+        description: Exact shellcheck release tag to install from koalaman/shellcheck for actionlint's embedded shellcheck pass; bumped via .github releases
+        type: string
+        default: "v0.11.0"
+      shellcheck-sha256:
+        description: sha256 of that release's linux.x86_64 tarball; travels with shellcheck-version, so overriding one without the other fails the install
+        type: string
+        default: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
+      tooling-isolation:
+        description: Fail when a job that holds a secret also installs third-party tooling
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-lint:
+    name: workflow-lint
+    runs-on: ubuntu-latest
+    env:
+      ACTIONLINT_VERSION: v1.7.12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: actionlint-cache
+        with:
+          path: ~/go/bin/actionlint
+          key: actionlint-${{ runner.os }}-${{ env.ACTIONLINT_VERSION }}
+
+      - name: Install actionlint
+        if: steps.actionlint-cache.outputs.cache-hit != 'true'
+        run: go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+
+      - name: Install shellcheck
+        env:
+          SHELLCHECK_VERSION: ${{ inputs.shellcheck-version }}
+          SHELLCHECK_SHA256: ${{ inputs.shellcheck-sha256 }}
+        run: |
+          set -euo pipefail
+          # Same verified-download idiom as shell-ci.yml: pinned by tag rather
+          # than whatever the runner image preinstalls, and checked against the
+          # release's sha256 before extraction, since a plain HTTPS fetch has no
+          # registry behind it vouching for what came back.
+          dir="$RUNNER_TEMP/shellcheck-bin"
+          tarball="$RUNNER_TEMP/shellcheck.tar.xz"
+          mkdir -p "$dir"
+          curl -sSfL -o "$tarball" \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          printf '%s  %s\n' "$SHELLCHECK_SHA256" "$tarball" | sha256sum -c -
+          tar -xJ -f "$tarball" -C "$dir" --strip-components=1 "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          chmod +x "$dir/shellcheck"
+          echo "SHELLCHECK_BIN=$dir/shellcheck" >> "$GITHUB_ENV"
+
+      - name: Run actionlint over the caller's workflows
+        env:
+          SHELLCHECK_BIN: ${{ env.SHELLCHECK_BIN }}
+        run: actionlint -color "-shellcheck=${SHELLCHECK_BIN}"
+
+      # A job that installs third-party tooling is running code we did not
+      # write: `cargo install` (and the other installers) executes build
+      # scripts over the whole dependency tree, so the secrets a job holds
+      # are reachable from code outside this organisation. Keeping the
+      # install out of any job that holds a secret bounds that reach to
+      # nothing. `pip install --require-hashes` is the exception because a
+      # hash-pinned install resolves nothing — the artifacts are fixed by
+      # the lockfile, so no surprise tree appears.
+      - name: A job holding a secret must not install third-party tooling
+        if: ${{ inputs.tooling-isolation }}
+        run: |
+          python3 - <<'PY'
+          import glob
+          import re
+          import sys
+
+          import yaml
+
+          # `secrets.<id>` is how every GitHub Actions expression reaches a
+          # secret. `secrets: inherit` and `secrets:` declarations on
+          # reusable calls don't match — those are declaration blocks, not
+          # references, and `secrets:` does not contain a `.`.
+          SECRET_RE = re.compile(r"(?<!\w)secrets\.[A-Za-z_]\w*")
+
+          # (`pattern`, `opt-out marker on the same line`). The marker, when
+          # present on the line, exempts that install: the only case where
+          # the resolved tree is fixed is pip with --require-hashes, which
+          # reads the lockfile verbatim and installs exactly what it lists.
+          INSTALL_PATTERNS = (
+              ("cargo install",   None),
+              ("go install",      None),
+              ("gem install",     None),
+              ("npm install -g",  None),
+              ("npm i -g",        None),
+              ("pip install",     "--require-hashes"),
+          )
+
+
+          def normalize_run(value):
+              # `run:` is either a single string or a list of strings. Split
+              # each into lines so the install scan is per-line: a
+              # `--require-hashes` marker on one line only exempts that line.
+              if isinstance(value, list):
+                  out = []
+                  for v in value:
+                      if isinstance(v, str):
+                          out.extend(v.splitlines())
+                  return out
+              if isinstance(value, str):
+                  return value.splitlines()
+              return []
+
+
+          def find_violations(spec_path):
+              violations = []
+              try:
+                  with open(spec_path) as fh:
+                      spec = yaml.safe_load(fh)
+              except yaml.YAMLError as e:
+                  # Silent skip would hide a misconfigured workflow that the
+                  # caller is going to learn about elsewhere in CI for the
+                  # wrong reason. Warning annotation instead.
+                  print(f"::warning file={spec_path}::skipped: YAML parse error: {e}")
+                  return violations
+              if not isinstance(spec, dict):
+                  return violations
+              jobs = spec.get("jobs") or {}
+              for job_id, job in jobs.items():
+                  if not isinstance(job, dict):
+                      continue
+                  # Re-serialize the job so `with:`, `env:`, `if:` and
+                  # `run:` strings are all scanned for a secret reference.
+                  # Comments are stripped by safe_load, so they cannot
+                  # produce a false positive.
+                  job_text = yaml.safe_dump(job)
+                  if not SECRET_RE.search(job_text):
+                      continue
+                  for step in (job.get("steps") or []):
+                      if not isinstance(step, dict):
+                          continue
+                      run = step.get("run")
+                      if run is None:
+                          continue
+                      for line in normalize_run(run):
+                          stripped = line.lstrip()
+                          if not stripped or stripped.startswith("#"):
+                              continue
+                          for pattern, except_marker in INSTALL_PATTERNS:
+                              if pattern in line and not (
+                                  except_marker and except_marker in line
+                              ):
+                                  violations.append((spec_path, job_id, line))
+                                  break
+              return violations
+
+
+          def main():
+              files = sorted(set(
+                  glob.glob(".github/workflows/*.yml")
+                  + glob.glob(".github/workflows/*.yaml")
+              ))
+              violations = []
+              for path in files:
+                  violations.extend(find_violations(path))
+              if violations:
+                  for path, job_id, line in violations:
+                      msg = (
+                          f"job `{job_id}` installs third-party tooling while holding a secret: "
+                          f"`{line.strip()}` — see Glyndor/apt#121. Fix by moving the install "
+                          f"into a job that holds no secrets, or pin it by hash "
+                          f"(e.g. `pip install --require-hashes`)."
+                      )
+                      print(f"::error file={path}::{msg}")
+                  sys.exit(1)
+              print(
+                  "tooling-isolation: no job holding a secret installs third-party tooling."
+              )
+              sys.exit(0)
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          PY
