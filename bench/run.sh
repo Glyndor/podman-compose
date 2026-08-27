@@ -155,8 +155,14 @@ timed() { # tool, compose-file, project, op-args...
 teardown() { run "$1" "$2" "$3" down -v >/dev/null 2>&1; }
 
 # Pre-pull the digest-pinned bases so image download is never on the timed path.
+#
+# LC_ALL=C on the sort: UTF-8 collations ignore punctuation at the primary
+# level, so `sort -u` treats two image references that differ only in a hyphen
+# as equal and drops one. That image is then pulled during the run instead of
+# before it, and the benchmark times a network download rather than a start --
+# silently, as a number that is simply larger.
 echo ">>> pre-pulling pinned images"
-grep -rhoE 'docker\.io/[^ "]+@sha256:[a-f0-9]+' "$SCEN_DIR" | sort -u | while read -r img; do
+grep -rhoE 'docker\.io/[^ "]+@sha256:[a-f0-9]+' "$SCEN_DIR" | LC_ALL=C sort -u | while read -r img; do
 	podman pull -q "$img" >/dev/null 2>&1 || echo "  warning: could not pre-pull $img" >&2
 done
 
