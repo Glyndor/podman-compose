@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   check:
-    uses: Glyndor/.github/.github/workflows/installer-contract.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
+    uses: ./.github/workflows/reusable-installer-contract.yml
   # Per-asset .sig loop, three-slot regex, and ed25519 error classification
   # regression (issue #1359). The fixture carries a release with three
   # populated rotation slots; the test verifies every .sig against the
