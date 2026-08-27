@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   rust:
-    uses: Glyndor/.github/.github/workflows/rust-ci.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
+    uses: ./.github/workflows/reusable-rust-ci.yml
     with:
       # Each entry here becomes its own check name: `rust / Test (macos-latest)`
       # and `rust / Test (windows-latest)`. Editing this list changes the names
@@ -74,7 +74,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
+    uses: ./.github/workflows/reusable-schedule-freshness.yml
     with:
       workflow: audit.yml
       max-age-days: 15
@@ -83,7 +83,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
+    uses: ./.github/workflows/reusable-schedule-freshness.yml
     with:
       workflow: fuzz.yml
       max-age-days: 15
@@ -92,7 +92,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
+    uses: ./.github/workflows/reusable-schedule-freshness.yml
     with:
       workflow: podman-lane.yml
       max-age-days: 3
@@ -101,7 +101,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
+    uses: ./.github/workflows/reusable-schedule-freshness.yml
     with:
       workflow: podman-watch.yml
       max-age-days: 3
@@ -120,26 +120,10 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: Glyndor/.github/.github/workflows/schedule-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
+    uses: ./.github/workflows/reusable-schedule-freshness.yml
     with:
       workflow: benchmark.yml
       max-age-days: 65
-
-  # This repository pins thirteen reusables, more than twice any other in the
-  # org, and was the only one of the five without this guard. On 2026-08-21 ten
-  # Dependabot pull requests proposed 1.15.0 to 1.16.0 across ten caller files;
-  # comparing the surfaces by hand showed all thirteen byte-identical to
-  # v1.16.1, so every one was a no-op and all ten were closed. Nothing here was
-  # going to say that, and the alternative to the hand comparison is merging
-  # no-ops until open-pull-requests-limit fills and Dependabot stops proposing
-  # anything at all, security bumps included.
-  #
-  # Advisory. Promotion to required needs the check seen failing for its own
-  # reason, its emitted name read off a real run, and confirmation that it runs
-  # on a Dependabot-authored pull request - the condition that forced
-  # `Analyze (actions)` out of apt.
-  pin-policy:
-    uses: Glyndor/.github/.github/workflows/pin-policy-reusable.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
 
   # Dependabot silently stops proposing updates when its config is not
   # re-registered, and like a dead cron it reports nothing at all. This fails
@@ -150,6 +134,6 @@ jobs:
   # running: run 32435521566 reported "no Dependabot pull request on record"
   # while ten sat open. v1.16.1 pages the window.
   dependabot-freshness:
-    uses: Glyndor/.github/.github/workflows/dependabot-freshness.yml@d5041b038b7d4935e75400dff612962e6fa14893 # v1.21.0
+    uses: ./.github/workflows/reusable-dependabot-freshness.yml
     with:
       max-age-days: 15
