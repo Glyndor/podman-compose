@@ -10,6 +10,10 @@
 //! working; no survivors is a failed push wearing a zero.
 
 use super::PushOptions;
+// Gated the way pull_tests.rs gates it: fake_podman binds a unix socket, so the
+// import itself does not resolve on Windows. The #[cfg(unix)] on each test is
+// not enough -- a module-level use is compiled everywhere.
+#[cfg(unix)]
 use crate::engine::fake_podman;
 
 fn opts() -> PushOptions {
