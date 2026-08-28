@@ -1,5 +1,8 @@
 name: Supply chain
 
+# Pull request runs with a Cargo path filter (only supply-chain-touching PRs
+# pay the cost); push to develop runs unfiltered (every develop commit must
+# validate the supply chain, so the branch never sits with a stale audit).
 on:
   pull_request:
     branches:

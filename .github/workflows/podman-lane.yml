@@ -10,6 +10,13 @@ name: podman-lane
 # Fedora qemu VM booted in the runner (nested-virt — the ubuntu-24.04 runner exposes
 # /dev/kvm) with full systemd, as a rootless user. Podman 6 = Fedora rawhide;
 # Podman 5 = Fedora 44.
+
+# Three triggers, three questions:
+# workflow_dispatch: starts the lane on demand.
+# pull_request (no paths): must report on every PR; runtime behaviour is the
+# whole point, so this is the gate the merge hangs on.
+# schedule: GitHub only reads this from the default branch, so the cron
+# works because this workflow lives on main.
 on:
   workflow_dispatch:
   # Nightly safety net on the default branch: catches a runtime regression that

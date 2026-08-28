@@ -1,5 +1,10 @@
 name: guard
 
+# Pull request into main only. The reusable's `if:` already restricts to base
+# == main, and I mirrored it here because the rulesets require this check on
+# main and not on develop. A skipped required check reports Success, so the
+# asymmetry is what stops develop merges being blocked by an unanswerable
+# check.
 on:
   pull_request:
     branches: ["main"]

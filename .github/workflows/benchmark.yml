@@ -16,6 +16,10 @@
 #                the `bench` label exists.
 name: benchmark
 
+# Three triggers, three questions:
+# pull_request (with paths): did this PR break the harness code itself?
+# workflow_dispatch: starts the engine job on the self-hosted runner.
+# monthly schedule: keeps the engine job ticking so a missed dispatch is visible.
 on:
   # The harness checks only guard anything if they run when the harness changes.
   # Until #1227 they fired on dispatch and the monthly cron alone, so a PR could

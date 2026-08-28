@@ -13,6 +13,8 @@ name: Publish to crates.io
 # crates.io. It never touches the release, the assets, the tag, or the signing
 # key. crates.io rejects a duplicate version, so a second run is a no-op rather
 # than a hazard.
+# Trigger is workflow_dispatch only: manual recovery for a publish step that
+# already failed in release.yml, never a check that runs on every change.
 on:
   workflow_dispatch:
     inputs:

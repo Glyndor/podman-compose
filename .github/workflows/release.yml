@@ -1,5 +1,9 @@
 name: release
 
+# Trigger is push on a v* tag, plus workflow_dispatch with a tag input. A tag
+# push is the only natural release event (a release is a tag), and I added
+# dispatch so a release that started from a tag push but failed partway can be
+# retried against the same tag, without bumping the version.
 on:
   push:
     tags:
