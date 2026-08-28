@@ -1,0 +1,103 @@
+name: Bug report
+description: Report a bug or unexpected behaviour in podup
+title: "[bug]: "
+labels: ["type:bug", "status:triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, please search existing issues to avoid duplicates.
+        **Security issue? Do NOT file it here**: use the Security tab, "Report a vulnerability" instead.
+  - type: input
+    id: component
+    attributes:
+      label: Component
+      description: Which part of podup is affected (e.g. engine, compose parser, update / self-update, quadlet export, ports, env_file, cli, install.sh, install.ps1, debian package).
+      placeholder: engine
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: podup-version
+    attributes:
+      label: podup version
+      description: The output of `podup --version`, or the version string from the package metadata.
+      placeholder: v5.1.0
+    validations:
+      required: true
+  - type: input
+    id: install-method
+    attributes:
+      label: How did you install podup?
+      description: "Source matters for self-update, signing and packaging issues: only the install.sh / install.ps1 / cargo install paths carry the `update` feature; apt, Homebrew and Scoop own upgrades."
+      placeholder: 'apt · brew · scoop · cargo install · install.sh · install.ps1'
+    validations:
+      required: true
+  - type: input
+    id: podman-version
+    attributes:
+      label: Podman version and major
+      description: "The output of `podman --version`. The major is what gates support: podup requires Podman 5 or 6."
+      placeholder: '5.4.2 (Podman 5)'
+    validations:
+      required: true
+  - type: input
+    id: podman-socket
+    attributes:
+      label: Podman socket
+      description: Where the libpod socket lives (e.g. `unix:///run/user/1000/podman/podman.sock`, `unix://$HOME/.local/share/containers/podman/machine/qemu/podman.sock` on macOS, `npipe:////./pipe/podman-machine-default` on Windows).
+      placeholder: 'unix:///run/user/1000/podman/podman.sock'
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: 'Debian 13 trixie · Ubuntu 24.04 LTS · Fedora 42 · macOS 15 · Windows 11'
+    validations:
+      required: true
+  - type: input
+    id: arch
+    attributes:
+      label: Architecture
+      placeholder: 'x86_64 · aarch64'
+  - type: dropdown
+    id: rootless
+    attributes:
+      label: Is this a rootless install?
+      description: "Podman reports `rootless: true` in `podman info` when the user namespace is unprivileged."
+      options:
+        - label: 'Yes, rootless'
+          value: rootless
+        - label: 'No, rootful'
+          value: rootful
+        - label: 'Not sure'
+          value: unknown
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste relevant output. Redact secrets, IPs, hostnames and emails. Set `RUST_LOG=podup=debug` for a verbose trace.
+      render: shell
+  - type: input
+    id: compose
+    attributes:
+      label: docker-compose.yml (or a minimal reproducer)
+      description: Paste the file or a link to it. Strip comments and replace image tags with placeholders if the file is large.
+      placeholder: 'see https://gist.example/... or paste inline'

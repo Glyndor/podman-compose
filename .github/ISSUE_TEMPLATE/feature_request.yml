@@ -1,0 +1,64 @@
+name: Feature request
+description: Propose a new feature or improvement to podup
+title: "[feat]: "
+labels: ["type:feature", "status:triage"]
+body:
+  - type: input
+    id: component
+    attributes:
+      label: Component
+      description: Which part of podup this affects (e.g. engine, compose parser, update / self-update, quadlet export, ports, env_file, cli, install.sh, install.ps1, debian package, docs).
+      placeholder: engine
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this solve? Why is it needed?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it work?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about, including "do nothing".
+  - type: dropdown
+    id: podman-scope
+    attributes:
+      label: Podman majors this should work with
+      description: podup supports Podman 5 and Podman 6; the latest stable and the one below it. A change that needs Podman 7 is an API break, not a feature.
+      options:
+        - label: 'Both 5 and 6 (default support window)'
+          value: both
+        - label: 'Podman 6 only (newest)'
+          value: 6
+        - label: 'Podman 5 only (older)'
+          value: 5
+        - label: 'Engine-agnostic (no Podman API change)'
+          value: agnostic
+  - type: dropdown
+    id: platforms
+    attributes:
+      label: Platforms this affects
+      description: podup ships on Linux, macOS and Windows (x86_64 and aarch64). Mark all that apply.
+      multiple: true
+      options:
+        - label: 'Linux (x86_64)'
+          value: linux-amd64
+        - label: 'Linux (aarch64)'
+          value: linux-arm64
+        - label: 'macOS (x86_64 and arm64)'
+          value: macos
+        - label: 'Windows (x86_64 and arm64)'
+          value: windows
+  - type: textarea
+    id: install-impact
+    attributes:
+      label: Impact on installation and packaging
+      description: Does this need changes to install.sh, install.ps1, debian/rules, the Homebrew formula or the Scoop manifest? Which paths carry the `update` feature, and which do not?
