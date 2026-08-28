@@ -1,3 +1,11 @@
+podup (5.2.0) unstable; urgency=medium
+
+  * push: --ignore-push-failures no longer exits 0 when every push failed.
+  * stats: --format json propagates serialisation failures instead of
+    printing an empty line and exiting 0.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Fri, 28 Aug 2026 04:55:41 -0500
+
 podup (5.1.0) unstable; urgency=medium
 
   New
