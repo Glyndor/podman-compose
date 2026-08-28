@@ -61,18 +61,32 @@ merges.
 Run the suite before pushing:
 
 ```sh
-cargo fmt --all --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test --locked --all-features --workspace
-for t in tests/shell/*.test.sh; do bash "$t" || echo "FAILED: $t"; done
+fail=0
+cargo fmt --all --check || fail=1
+cargo clippy --locked --all-targets --all-features -- -D warnings || fail=1
+cargo test --locked --all-features --workspace || fail=1
+for t in tests/shell/*.test.sh; do bash "$t" || { echo "FAILED: $t"; fail=1; }; done
 # shellcheck covers every tracked *.sh and every extensionless script with
 # a shell shebang; the workflow runs the same find + xargs pipeline.
 find . -type f \( -name '*.sh' -o -name '*.bash' \) -not -path './.git/*' \
-  -print0 | xargs -0 -r shellcheck --severity=style
+  -print0 | xargs -0 -r shellcheck --severity=style || fail=1
+[ "$fail" -eq 0 ] && echo "all green" || echo "SOMETHING FAILED"
 ```
 
-The Rust toolchain is pinned at `1.98` by `reusable-rust-ci.yml`. The
-declared MSRV is `1.85`; the MSRV gate uses that and only that.
+The `fail` flag is not decoration. Running everything instead of stopping at
+the first red is what you want locally, but it means the block ends on the
+last command and reports whatever that one did. The loop was worse than the
+rest: `|| echo` swallows the status outright, so it printed `FAILED: <file>`
+and still left `$?` at zero. Without the flag, the status you glance at
+disagrees with the output you scrolled past.
+
+The Rust toolchain is pinned by `reusable-rust-ci.yml`'s `toolchain` input,
+and the MSRV by `ci.yml`'s `msrv` input. Read the values there rather than
+from here: nine workflow sites write the toolchain and two write the MSRV,
+`tests/workflow_toolchain_pin/` asserts that each group agrees on every pull
+request, and `pin-watch.yml` compares the toolchain against upstream stable
+every Monday. A number copied into this file would be a tenth site that no
+check reads.
 
 Two rules matter more than coverage:
 
@@ -116,8 +130,17 @@ CI is split by responsibility rather than gathered in one file:
 | `release.yml` | tag validity, Cargo.toml / debian/changelog / Cargo.lock agreement, `cargo audit`, signed binaries, GitHub Release |
 
 Every reusable this repository calls lives in
-`.github/workflows/reusable-*.yml` as a copy taken from a named
-`Glyndor/.github` tag. Nothing is pulled remotely.
+`.github/workflows/reusable-*.yml`. Nothing is pulled remotely, and there is
+no pin to bump: the fourteen files arrived in #1566 as byte-identical copies
+of `Glyndor/.github` v1.21.0, verified file by file against
+`git show v1.21.0:.github/workflows/<name>`.
+
+**They are maintained here now, so byte-identity is provenance and not a
+property to rely on.** Several already differ, and the count only grows.
+`git diff` against that tag is the way to ask which, rather than a list in
+this file that goes stale on the next edit. A fix that belongs upstream too
+has to be made in both places by hand; that is the bill the independence was
+bought with.
 
 **Job ids are load-bearing.** A required status check is named
 `<caller job id> / <inner job name>`, so renaming a job renames its check
