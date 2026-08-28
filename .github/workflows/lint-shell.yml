@@ -24,4 +24,4 @@ jobs:
     with:
       # A test no workflow runs is indistinguishable from one that passes --
       # the lesson debian-build.yml carries from #1295, applied here.
-      test-command: ./tests/shell/locale-pinned.test.sh
+      test-command: ./tests/shell/locale-pinned.test.sh && ./tests/shell/ci-runs-every-test.test.sh
