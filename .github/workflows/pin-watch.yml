@@ -166,6 +166,18 @@ jobs:
           # whose shape is not understood fails the run rather than being
           # dropped. A watcher that silently skips a pin reports success over a
           # smaller set than it claims.
+          #
+          # tests/workflow_toolchain_pin.rs holds the same classification and
+          # asserts the same agreement on every pull request. That overlap is
+          # deliberate, not a copy nobody noticed. The two answer on different
+          # cadences and neither can stand in for the other: the test says so
+          # within minutes of the edit, which is while the fix is still one
+          # line in an open branch, and it cannot reach the network; this one
+          # is the only thing that compares the agreed value against upstream,
+          # and it runs whether or not the Rust suite did. What is duplicated
+          # is a two-entry exception list, and both halves fail loudly on a
+          # site neither of them knows, so a drift between them surfaces as a
+          # red rather than as silence.
           RUST_REPORT=$(python3 - <<'PY'
           import glob
           import sys
