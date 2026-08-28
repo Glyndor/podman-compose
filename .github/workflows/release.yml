@@ -527,30 +527,6 @@ jobs:
             "$venv_py" .github/scripts/verify-signing-key.py "$base" "$sig"
           done
 
-      # Cloned by hand under RUNNER_TEMP rather than with actions/checkout:
-      # `cargo publish` refuses a dirty tree, and this helper's 83 files are
-      # untracked as far as podup's git is concerned. v3.7.1 published its
-      # release and then failed at the publish step for exactly that reason
-      # (#1462). actions/checkout cannot be the tool here — it rejects any
-      # `path:` outside the workspace ("is not under /home/runner/work/..."),
-      # which is what broke v3.8.0.
-      #
-      # The pin is still the commit SHA, not the tag: the tag is a moving
-      # label and the SHA is the boundary. `git fetch` of one SHA at depth 1
-      # is what keeps that guarantee without a full clone.
-      - name: Check out Glyndor/.github for the asset-existence script
-        env:
-          UPSTREAM_SHA: 118244b8d758bdec6d2c5115d815dbc2e5c4f4e9 # v1.16.0
-        run: |
-          set -euo pipefail
-          git init -q "$RUNNER_TEMP/upstream"
-          git -C "$RUNNER_TEMP/upstream" remote add origin \
-            https://github.com/Glyndor/.github.git
-          git -C "$RUNNER_TEMP/upstream" fetch -q --depth 1 origin "$UPSTREAM_SHA"
-          git -C "$RUNNER_TEMP/upstream" checkout -q FETCH_HEAD
-          # Fail loudly rather than run a script that silently is not there.
-          test -f "$RUNNER_TEMP/upstream/scripts/verify-release-assets.py"
-
       - name: Verify every file the installers fetch is staged
         run: |
           set -euo pipefail
@@ -563,7 +539,7 @@ jobs:
           # from install.sh's own ${BASE_URL} fetches, so it covers
           # SHA256SUMS.sig too — install.sh aborts without it, and nothing
           # upstream of here ever checked it was produced.
-          python3 "$RUNNER_TEMP/upstream/scripts/verify-release-assets.py" \
+          python3 scripts/verify-release-assets.py \
             --workdir . \
             --install-script install.sh \
             --install-ps1 install.ps1
