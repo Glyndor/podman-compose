@@ -147,6 +147,14 @@ impl Engine {
 			}
 		}
 
+		// Counted so "some pushes failed" and "every push failed" can be told
+		// apart. --ignore-push-failures used to give both an exit code of 0, so
+		// a gate written as `podup push --ignore-push-failures && deploy.sh`
+		// deployed against a registry that had received nothing at all. The flag
+		// means "do not stop at the first failure", not "never report failure".
+		let mut attempted = 0usize;
+		let mut failed = 0usize;
+
 		for (name, service) in &file.services {
 			if !target_services.is_empty() && !target_services.iter().any(|t| t == name) {
 				continue;
@@ -155,7 +163,10 @@ impl Engine {
 				tracing::debug!("{name}: no image to push, skipping");
 				continue;
 			};
-			self.try_push(image, &opts, quiet).await?;
+			attempted += 1;
+			if !self.try_push(image, &opts, quiet).await? {
+				failed += 1;
+			}
 			// `build.tags` is locally retagged by `apply_extra_tags` after the
 			// build. Push each one too — the registry would otherwise end up
 			// with only the primary `image`, and the other refs a user expects
@@ -165,9 +176,20 @@ impl Engine {
 					if extra == image {
 						continue;
 					}
-					self.try_push(extra, &opts, quiet).await?;
+					attempted += 1;
+					if !self.try_push(extra, &opts, quiet).await? {
+						failed += 1;
+					}
 				}
 			}
+		}
+
+		// Only when every attempt failed. One survivor means the flag did its
+		// job and the run continued, which is exactly what it is for.
+		if attempted > 0 && failed == attempted {
+			return Err(ComposeError::Build(format!(
+				"every push failed ({failed} of {attempted}); --ignore-push-failures does not make that a success"
+			)));
 		}
 		Ok(())
 	}
@@ -177,12 +199,15 @@ impl Engine {
 	/// the caller aborts the whole push. Shared by the primary and the extra
 	/// `build.tags` loop in [`Engine::push_with_quiet`] so the two cannot drift
 	/// on how a per-image failure is treated.
-	async fn try_push(&self, image: &str, opts: &PushOptions, quiet: bool) -> Result<()> {
+	/// `Ok(true)` when the image reached the registry, `Ok(false)` when a
+	/// failure was ignored. The caller counts, because "some failed" and "all
+	/// failed" are different answers and this used to give both as exit 0.
+	async fn try_push(&self, image: &str, opts: &PushOptions, quiet: bool) -> Result<bool> {
 		match self.push_image(image, opts, quiet).await {
-			Ok(()) => Ok(()),
+			Ok(()) => Ok(true),
 			Err(e) if opts.ignore_failures => {
 				warn!("push {image} failed (ignored): {e}");
-				Ok(())
+				Ok(false)
 			}
 			Err(e) => Err(e),
 		}
@@ -269,3 +294,7 @@ mod tests {
 		assert!(matches!(err, ComposeError::Build(m) if m.contains("no progress")));
 	}
 }
+
+#[cfg(test)]
+#[path = "push_exit_tests.rs"]
+mod exit_tests;
