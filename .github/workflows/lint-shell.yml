@@ -36,4 +36,12 @@ jobs:
     with:
       # A test no workflow runs is indistinguishable from one that passes --
       # the lesson debian-build.yml carries from #1295, applied here.
-      test-command: ./tests/shell/locale-pinned.test.sh && ./tests/shell/ci-runs-every-test.test.sh
+      #
+      # Invoked through `bash`, not by path. The executable bit that a `./`
+      # call needs is the one git records, not the one on disk, and `git reset`
+      # drops it back to 100644 without saying so; in CI that is exit 126, and
+      # because these chain with `&&` it aborts the pair rather than failing
+      # one. Naming the interpreter removes the dependency instead of detecting
+      # it, which is also what reusable-shell-ci.yml's exec-bit guard already
+      # says about this repository.
+      test-command: bash ./tests/shell/locale-pinned.test.sh && bash ./tests/shell/ci-runs-every-test.test.sh

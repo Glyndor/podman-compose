@@ -159,8 +159,12 @@ jobs:
       - name: Install build target
         env:
           TARGET: ${{ matrix.target }}
-          # Keep this in step with the `toolchain` default in Glyndor/.github's
-          # rust-ci.yml. It is NOT a repo-root rust-toolchain.toml on purpose: that
+          # Keep this in step with the `toolchain` default in this repository's
+          # reusable-rust-ci.yml, which is where that file lives since #1568.
+          # pin-watch.yml reads both, along with the other seven sites that
+          # write this number, and reports them disagreeing.
+          #
+          # It is NOT a repo-root rust-toolchain.toml on purpose: that
           # file is a directory override that beats `rustup default`, so it would
           # silently pull the MSRV job (which does `rustup default <msrv>`) up to
           # this version and defeat the MSRV gate. A release still must not float

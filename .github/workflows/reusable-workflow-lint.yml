@@ -1,13 +1,15 @@
 name: Workflow lint (reusable)
 
-# Lint the CALLING repository's own workflow YAML with actionlint — the release
-# workflows and other per-repo callers that live outside this repository and
-# are today validated by nobody. This is where the phantom-required-check
-# naming mismatches and the PowerShell $VAR-under-pwsh trap have actually
-# shipped, because nothing caught them before a consumer's CI ran for real.
-# Contrast with actionlint.yml in this repository: that one is this repo's own
-# self-CI over ITS reusables; this one runs actionlint over the CALLER's
-# checkout, wherever the calling job invokes it from.
+# Lint this repository's workflow YAML with actionlint. This is where the
+# phantom-required-check naming mismatches and the PowerShell $VAR-under-pwsh
+# trap have actually shipped, because nothing caught them before CI ran for
+# real.
+#
+# The paragraph here used to describe callers "that live outside this
+# repository" and contrast itself with an actionlint.yml sitting beside it.
+# Both were true in Glyndor/.github and neither survived the copy in #1568:
+# the callers are in this repository now, and there is no actionlint.yml here.
+# It runs over the calling job's checkout, which is this repository's own.
 #
 # actionlint's embedded shellcheck pass otherwise falls back to whatever
 # shellcheck the runner image ships, which floats independently of the org's
@@ -19,7 +21,7 @@ on:
   workflow_call:
     inputs:
       shellcheck-version:
-        description: Exact shellcheck release tag to install from koalaman/shellcheck for actionlint's embedded shellcheck pass; bumped via .github releases
+        description: Exact shellcheck release tag to install from koalaman/shellcheck for actionlint's embedded shellcheck pass; bumped by editing this file
         type: string
         default: "v0.11.0"
       shellcheck-sha256:
