@@ -55,10 +55,10 @@ jobs:
     permissions:
       actions: read # reading this repository's workflow-run history
     steps:
-      # `gh api` is banned for the maintainer's own credentials — the org
-      # account has been suspended over raw API traffic before. A workflow is a
-      # different actor: GITHUB_TOKEN is a scoped job token on its own rate
-      # limit, which is the documented exception.
+      # This step runs as GITHUB_TOKEN, a job-scoped token on its own rate
+      # limit, and reads nothing beyond this repository's own run history. No
+      # personal credential is ever used here, and the `actions: read` grant
+      # above is the whole of what it can reach.
       - name: Check the newest successful scheduled run
         env:
           GH_TOKEN: ${{ github.token }}
