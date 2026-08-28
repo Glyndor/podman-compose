@@ -33,12 +33,15 @@ updates:
     # is the wrong word here: it implies an external maintainer I need to
     # audit, when in fact this group is GitHub's own primitives. The name
     # should describe what it matches.
+    #
+    # That split has nothing left to separate. #1566 through #1568 made this
+    # repository self-contained: every reusable it calls now lives here, so no
+    # `Glyndor/.github` reference survives for the pattern to match. The group
+    # matched nothing and its companion exclusion excluded nothing -- a config
+    # claiming coverage it does not have. apt reached the same state at #125.
     groups:
-      glyndor-reusables:
-        patterns: ["Glyndor/.github*"]
       github-owned:
         patterns: ["*"]
-        exclude-patterns: ["Glyndor/.github*"]
     # Dependabot infers a prefix from the commit history when this is absent,
     # and the inference has been unstable across repositories (build(deps):
     # Bump ... in some, chore(deps): bump ... in others). Set it so the

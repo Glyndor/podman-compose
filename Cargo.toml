@@ -27,6 +27,7 @@ exclude = [
 	"/docs",
 	"/install.ps1",
 	"/install.sh",
+	"/scripts",
 	"/tests",
 ]
 

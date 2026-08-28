@@ -209,7 +209,7 @@ jobs:
 	let deb_yml = "\
 jobs:
   debian:
-    uses: Glyndor/.github/.github/workflows/rust-debian.yml@e70ff47fd8aefa0f054846815f19b98768d61122
+    uses: ./.github/workflows/reusable-rust-debian.yml
     with:
       package-name: podup
       check-vendored: true
