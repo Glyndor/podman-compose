@@ -426,7 +426,7 @@ impl Engine {
 					.await
 					.map_err(ComposeError::Podman)?
 			};
-			print_frame(&report, &running, &stopped, &opts, None);
+			print_frame(&report, &running, &stopped, &opts, None)?;
 			return Ok(());
 		}
 
@@ -448,7 +448,7 @@ impl Engine {
 
 		while let Some(frame) = frames.next().await {
 			match frame {
-				Ok(report) => print_frame(&report, &running, &stopped, &opts, region.as_mut()),
+				Ok(report) => print_frame(&report, &running, &stopped, &opts, region.as_mut())?,
 				Err(e) => {
 					// A `stats --stream` stream lives as long as any sampled
 					// container is running, and ends once none remain. libpod
@@ -624,7 +624,7 @@ fn print_frame(
 	stopped: &[String],
 	opts: &StatsOptions,
 	region: Option<&mut crate::ui::progress::Region>,
-) {
+) -> Result<()> {
 	let rows = frame_rows(report, running, stopped);
 
 	if opts.json {
@@ -635,13 +635,21 @@ fn print_frame(
 		// `stats --format json` was unreadable by anything for as long as it
 		// streamed. `--no-stream` prints one frame and exits, so it stays a
 		// single pretty document, which is valid JSON and nicer to read.
+		// Propagated, not swallowed. `unwrap_or_default()` printed an empty line
+		// on a serialisation failure and carried on, so `stats --format json`
+		// emitted a blank where a frame should be and still exited zero -- a
+		// consumer piping into `jq` sees a gap and no reason for it. The other
+		// five list commands route through `to_pretty_json`, whose contract says
+		// a failure "must propagate as an error and exit non-zero"; stats was
+		// the one that did not. Same error variant, so the message reads alike.
 		let text = if opts.no_stream {
 			serde_json::to_string_pretty(&json)
 		} else {
 			serde_json::to_string(&json)
-		};
-		println!("{}", text.unwrap_or_default());
-		return;
+		}
+		.map_err(|e| ComposeError::Build(format!("invalid stats frame: {e}")))?;
+		println!("{text}");
+		return Ok(());
 	}
 
 	let colour = crate::ui::stdout_colored();
@@ -656,12 +664,14 @@ fn print_frame(
 	// the cursor for no reason.
 	if let Some(region) = region {
 		region.show(&[], &lines);
-		return;
+		return Ok(());
 	}
 	for line in lines {
 		println!("{line}");
 	}
 	println!();
+
+	Ok(())
 }
 
 #[cfg(test)]
