@@ -7,6 +7,12 @@ on:
     paths:
       - "**.sh"
       - ".github/workflows/lint-shell.yml"
+      # While this reusable was a pinned Glyndor/.github reference, a change
+      # to it arrived as a Dependabot commit editing the line above, which
+      # this filter already matched. A local copy is edited directly, so
+      # without this line a pull request that touches only the reusable
+      # merges without ever running it.
+      - ".github/workflows/reusable-shell-ci.yml"
   pull_request:
     branches:
       - main
@@ -14,6 +20,12 @@ on:
     paths:
       - "**.sh"
       - ".github/workflows/lint-shell.yml"
+      # While this reusable was a pinned Glyndor/.github reference, a change
+      # to it arrived as a Dependabot commit editing the line above, which
+      # this filter already matched. A local copy is edited directly, so
+      # without this line a pull request that touches only the reusable
+      # merges without ever running it.
+      - ".github/workflows/reusable-shell-ci.yml"
 
 permissions:
   contents: read

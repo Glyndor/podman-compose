@@ -14,6 +14,12 @@ on:
       - "about.toml"
       - "about.hbs"
       - ".github/workflows/supply-chain.yml"
+      # While this reusable was a pinned Glyndor/.github reference, a change
+      # to it arrived as a Dependabot commit editing the line above, which
+      # this filter already matched. A local copy is edited directly, so
+      # without this line a pull request that touches only the reusable
+      # merges without ever running it.
+      - ".github/workflows/reusable-rust-supply-chain.yml"
   push:
     branches:
       - develop
