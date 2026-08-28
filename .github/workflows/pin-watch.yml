@@ -190,6 +190,17 @@ jobs:
           # `toolchain` input. Anything else consumes one of these.
           KEYS = ("RUST_TOOLCHAIN", "rust-toolchain", "toolchain")
 
+          # A value carrying an expression is a pass-through, not a pin: it
+          # resolves at whichever caller supplied it, and that caller is one of
+          # these sites already.
+          #
+          # The token is assembled rather than written out. actionlint lexes a
+          # literal expression opener inside a `run:` block as an expression,
+          # whatever language the block is in, and reports the quote after it
+          # as a syntax error. Splitting it keeps the two characters from ever
+          # sitting adjacent in the file.
+          EXPRESSION = "$" + "{{"
+
           # Sites that pin a toolchain deliberately different from the stable
           # one. Each names a KIND, not just a reason, and the kind is checked
           # against the value: an exemption keyed only on where it sits admits
@@ -254,12 +265,12 @@ jobs:
               for job in jobs.values() if isinstance(jobs, dict) else []:
                   if isinstance(job, dict):
                       msrv = (job.get("with") or {}).get("msrv")
-                      if isinstance(msrv, str) and msrv and "${{" not in msrv:
+                      if isinstance(msrv, str) and msrv and EXPRESSION not in msrv:
                           msrv_declared.add(msrv)
 
           # A pass-through, not a pin. The value it resolves to is pinned at
           # whichever caller supplied it, and that caller is already counted.
-          sites = [s for s in sites if "${{" not in s[2]]
+          sites = [s for s in sites if EXPRESSION not in s[2]]
           if not sites:
               print("no Rust toolchain pin found in any workflow", file=sys.stderr)
               sys.exit(1)
