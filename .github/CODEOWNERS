@@ -1,2 +1,18 @@
 # Default owner for everything in this repository.
-* @Jaro-c
+*                       @Jaro-c
+
+# Listed again, after the catch-all, because GitHub applies the LAST matching
+# rule: any more specific pattern added below `*` later would leave this path
+# uncovered, and nothing reports that. Naming it explicitly fixes it here.
+#
+# This path is the one that matters. A pull request that edits a workflow can
+# change what the gates do in the same run that the gates evaluate it, so
+# review of this directory is the mitigation for gate spoofing.
+#
+# require_code_owner_review is `false` in both rulesets today, which is correct
+# while there is a single maintainer -- a review requirement nobody else can
+# satisfy blocks the only person who can merge. The mitigation needs this file
+# to already say the right thing on the day it is switched on, which is why the
+# line is here now rather than written in a hurry then. Recorded in the closeout
+# plan of 2026-07-19 and unapplied until today.
+.github/workflows/      @Jaro-c
