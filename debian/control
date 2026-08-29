@@ -42,7 +42,30 @@ Architecture: any
 # must now install one; install.sh serves that case with
 # --skip-podman-check, and apt has no equivalent because a package
 # relationship cannot ask where the socket is.
-Depends: ${shlibs:Depends}, ${misc:Depends}, podman (>= 5.0)
+# unattended-upgrades is a Depends for a different reason than podman, and the
+# difference is worth stating because the two look alike in this field.
+#
+# podman is here because podup cannot work without it. unattended-upgrades is
+# here because of what happens when podup is NOT updated: only the latest
+# release is supported org-wide, nothing is back-ported, and `podup update`
+# refuses on a dpkg-owned binary and redirects to `apt upgrade`. So for an apt
+# install, the package manager is the ONLY update path, and a machine that
+# never runs it sits on a release that will not receive a fix. Secure by
+# default means the operator opts out of that, not into it.
+#
+# What this does and does not buy, so nobody reads more into it than it does.
+# It guarantees the package is PRESENT. It does not guarantee it RUNS: Debian
+# ships no `/etc/apt/apt.conf.d/20auto-upgrades`, which is the switch, and
+# podup ships no maintainer scripts to write one. Ubuntu server ships both.
+# The bootstrap installer at apt.glyndor.net/install/podup writes that file
+# when it is the thing that installed the package, and deliberately leaves an
+# existing configuration alone.
+#
+# The cost, stated rather than discovered: `apt remove unattended-upgrades`
+# now takes podup with it. An operator who schedules upgrades by hand, which
+# the releases standard permits, has to keep the package installed and switch
+# it off through its own configuration instead.
+Depends: ${shlibs:Depends}, ${misc:Depends}, podman (>= 5.0), unattended-upgrades
 Description: docker-compose translator and runner for rootless Podman
  podup parses docker-compose.yml files and drives rootless Podman to
  create the equivalent containers, networks and volumes. It provides
