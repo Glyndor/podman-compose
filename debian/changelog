@@ -1,3 +1,20 @@
+podup (5.3.0) unstable; urgency=medium
+
+  * The package now requires podman (>= 5.0) instead of recommending it.
+    apt installs the engine alongside podup, and refuses the install on a
+    distribution whose podman is older than that. Ubuntu 24.04 LTS ships
+    4.9.3 and has been documented as unsupported since 5.1.0; apt now says
+    so at install time rather than leaving a podup that cannot reach an
+    engine. Driving a remote podman or a podman machine is the case a
+    package relationship cannot express: use the release binary and
+    install.sh there.
+  * The pull-request lane and the release now build the .deb in the same
+    debian:trixie snapshot. They had carried different digests, so the
+    package that shipped was built in an environment no pull request had
+    exercised.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sat, 29 Aug 2026 09:45:00 -0500
+
 podup (5.2.1) unstable; urgency=medium
 
   * No user-visible change. CI only: the Rust toolchain pin is watched

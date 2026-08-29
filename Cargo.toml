@@ -1,6 +1,6 @@
 [package]
 name = "podup"
-version = "5.2.1"
+version = "5.3.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Translate and run docker-compose files on rootless Podman"
