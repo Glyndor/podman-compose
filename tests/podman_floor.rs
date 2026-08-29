@@ -32,7 +32,10 @@ fn floor_from_source(src: &str) -> u64 {
 		.map(str::trim_start)
 		.filter(|l| !l.starts_with("//"))
 		.find_map(|l| l.split_once("MIN_LIBPOD_API_MAJOR: u64 = "))
-		.and_then(|(_, rest)| rest.trim_end_matches(';').trim().parse().ok())
+		// `trim()` first. Trimming the semicolon before the whitespace leaves
+		// a trailing carriage return in front of it, so the `;` is never the
+		// last character and never removed, and the parse fails on `5;`.
+		.and_then(|(_, rest)| rest.trim().trim_end_matches(';').trim().parse().ok())
 		.expect("MIN_LIBPOD_API_MAJOR is declared as a u64 literal")
 }
 
@@ -200,27 +203,33 @@ Depends: ${shlibs:Depends}, ${misc:Depends}, podman (>= 7.0)
 /// the longest round trip. Feeding the parsers CRLF here says it in a second.
 #[test]
 fn the_parsers_do_not_care_about_line_endings() {
-	let crlf = |rel: &str| read(rel).replace('\n', "\r\n");
+	// Normalise to LF first. On a Windows checkout the file already holds
+	// CRLF, so converting without normalising produces `\r\r\n`, which is
+	// not a shape any checkout delivers. This test asserted over it and went
+	// red on windows-latest for a defect of its own fixture rather than of
+	// the parsers it exists to cover.
+	let crlf = |rel: &str| read(rel).replace("\r\n", "\n").replace('\n', "\r\n");
+	let lf = |rel: &str| read(rel).replace("\r\n", "\n");
 
 	assert_eq!(
 		floor_from_source(&crlf("internal/libpod/client/mod.rs")),
-		floor_from_source(&read("internal/libpod/client/mod.rs")),
+		floor_from_source(&lf("internal/libpod/client/mod.rs")),
 		"MIN_LIBPOD_API_MAJOR reads differently under CRLF"
 	);
 	assert_eq!(
 		floor_from_installer(&crlf("install.sh")),
-		floor_from_installer(&read("install.sh")),
+		floor_from_installer(&lf("install.sh")),
 		"PODMAN_MIN_MAJOR reads differently under CRLF"
 	);
 	assert_eq!(
 		floor_from_control(&crlf("debian/control")),
-		floor_from_control(&read("debian/control")),
+		floor_from_control(&lf("debian/control")),
 		"the podman relationship reads differently under CRLF"
 	);
 
 	let crlf_control = crlf("debian/control");
 	let under_crlf = binary_stanza_relationships(&crlf_control);
-	let control = read("debian/control");
+	let control = lf("debian/control");
 	let under_lf = binary_stanza_relationships(&control);
 	assert_eq!(
 		under_crlf.len(),
