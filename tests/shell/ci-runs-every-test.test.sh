@@ -41,16 +41,40 @@ check() { # <description> <expected> <actual>
 }
 
 # What the workflows actually run, with comment lines removed first.
+# The leading `./` is OPTIONAL. It was required until #1595, and that made
+# this function blind to how the fixtures are actually called: asset-contract
+# invokes them as `bash tests/fixtures/releases/test.sh`, with no `./`,
+# following the convention that names the interpreter rather than relying on
+# an executable bit. Requiring the prefix meant the watcher saw an invocation
+# only when it took the form it happened to have been written against.
 invoked() {
 	grep -rh -v '^[[:space:]]*#' .github/workflows/ 2>/dev/null \
-		| grep -oE '\./tests/[A-Za-z0-9_./-]+\.test\.sh' \
+		| grep -oE '(\./)?tests/[A-Za-z0-9_./-]+(\.test|test[A-Za-z0-9_-]*)\.sh' \
 		| sed 's|^\./||' | LC_ALL=C sort -u
 }
 
 # What exists, from git rather than the working tree, so an untracked scratch
 # file does not fail the run for someone mid-edit.
+# Three naming conventions live here and all of them are shell tests.
+# `tests/shell/` uses `*.test.sh`. `tests/fixtures/releases/` uses `test.sh`,
+# `test-sign.sh` and `version-self-test.sh`, because they are fixtures a
+# workflow drives rather than suites cargo could ever find.
+#
+# The glob matches `*test*` rather than enumerating those three. An
+# enumeration is a copy of the tree, and the first draft of this one already
+# proved it: written as `test.sh` and `test-*.sh` it missed
+# `version-self-test.sh`, which a workflow does invoke, and the check went red
+# against a repository that was correct.
+#
+# Only the first was watched until #1595, so the two files covering the
+# release signing path could have been dropped from asset-contract.yml and
+# nothing would have said so. That is the exact defect this file exists to
+# catch, and it was sitting inside the file's own blind spot.
 present() {
-	git ls-files 'tests/**/*.test.sh' 'tests/*.test.sh' | LC_ALL=C sort -u
+	git ls-files \
+		'tests/**/*.test.sh' 'tests/*.test.sh' \
+		'tests/fixtures/**/*test*.sh' \
+		| LC_ALL=C sort -u
 }
 
 inv="$(invoked)"
