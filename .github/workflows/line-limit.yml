@@ -9,7 +9,24 @@ name: Line limit
 # both rulesets require a pull request, so no content reaches develop or main
 # without one. If a direct-push path is ever opened, this scoping stops covering
 # the tree and a push trigger becomes the correct one.
+# On pushes as well as pull requests, and the reason is what this check reads.
+#
+# It diffs nothing. The reusable ends `done < <(git ls-files -z)` and counts
+# code lines in every tracked file matching its extension list, so it is a
+# property of the TREE and evaluates identically either way. A check about the
+# tree that runs only on pull requests cannot see content that arrives by
+# direct merge, which on `main` is every release.
+#
+# This workflow was pull-request-only and nothing here said why. The org's CI
+# standard names that omission by name: "podup restricts it to pull_request,
+# and that is the scoping nobody has justified". It is justified now, in the
+# other direction, and the file says so where the trigger is rather than in a
+# commit message nobody reads twice.
 on:
+  push:
+    branches:
+      - main
+      - develop
   pull_request:
     branches:
       - main
@@ -21,3 +38,22 @@ permissions:
 jobs:
   line-limit:
     uses: ./.github/workflows/reusable-line-limit.yml
+    with:
+      # `yml yaml` on top of the reusable's default list. The limit is a
+      # maintainability rule and workflow YAML is maintained by the same people
+      # under the same constraint: release.yml is 419 code lines and
+      # reusable-rust-ci.yml 321, both past the soft limit, and neither was
+      # being counted. Measured before adopting: of 54 tracked YAML files three
+      # warn and NONE fails, so this arrives amber rather than red, which is
+      # the condition for landing a widened gate at all.
+      extensions: "rs go ts tsx js jsx mjs cjs py sh astro vue svelte yml yaml"
+      # bench/scenarios holds compose files whose size IS the fixture: the
+      # config-heavy scenario is 321 lines because the benchmark measures what
+      # a large project costs. A maintainability warning there is noise, and
+      # noise on a warning teaches people to stop reading warnings.
+      #
+      # The condition, so this expires on its own rather than ageing: it holds
+      # while bench/scenarios contains only generated or deliberately-oversized
+      # fixtures. The day something maintained by hand lands there, the
+      # exclusion is wrong and this sentence is where it says so.
+      exclude-pattern: "^bench/scenarios/"
