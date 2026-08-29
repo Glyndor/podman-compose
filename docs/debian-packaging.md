@@ -97,7 +97,7 @@ is published and `apt upgrade` installs it — nothing for users to re-run.
 
 ## What the skeleton covers
 
-- `debian/control` — source/binary stanzas, build dependencies, `Recommends: podman`
+- `debian/control` — source/binary stanzas, build dependencies, `Depends: podman (>= 5.0)`
 - `debian/rules` — debhelper with cargo overrides, `--locked` release build, tests run during the build
 - `debian/podup.1` + `debian/podup.manpages` — the man page, installed by `dh_installman`
 - `debian/copyright` — DEP-5, MIT
