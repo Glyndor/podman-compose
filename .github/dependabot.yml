@@ -56,6 +56,26 @@ updates:
     labels: ["type:deps"]
     open-pull-requests-limit: 10
     target-branch: "develop"
+    # Grouped by the ANSWER the pull request needs, which is the split the CI
+    # standard asks for, not by convenience. A patch or minor bump of a crate
+    # this repository already depends on is one question with one answer: does
+    # CI still pass. Nineteen of them arrived one per pull request before this,
+    # each carrying the same answer and the same review.
+    #
+    # A major is left OUT of the group deliberately, so it arrives alone. It is
+    # the one that can change behaviour, and the reason to split is the same
+    # reason the org splits its reusable bumps: a pull request that mixes a
+    # question needing thought with several that do not is answered by the
+    # cheap ones.
+    #
+    # The limit is what makes this more than tidiness. It is 10, and once it is
+    # full Dependabot stops proposing anything at all, including the security
+    # bump the queue exists to deliver. Twenty-three direct dependencies and a
+    # 164-crate lockfile can reach that on an ordinary week.
+    groups:
+      cargo-patch-and-minor:
+        patterns: ["*"]
+        update-types: ["patch", "minor"]
     commit-message:
       prefix: chore
 
