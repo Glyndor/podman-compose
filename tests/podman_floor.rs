@@ -27,8 +27,7 @@ fn read(rel: &str) -> String {
 }
 
 /// `const MIN_LIBPOD_API_MAJOR: u64 = 5;`
-fn floor_from_source() -> u64 {
-	let src = read("internal/libpod/client/mod.rs");
+fn floor_from_source(src: &str) -> u64 {
 	src.lines()
 		.map(str::trim_start)
 		.filter(|l| !l.starts_with("//"))
@@ -38,8 +37,7 @@ fn floor_from_source() -> u64 {
 }
 
 /// `PODMAN_MIN_MAJOR=5`
-fn floor_from_installer() -> u64 {
-	let src = read("install.sh");
+fn floor_from_installer(src: &str) -> u64 {
 	src.lines()
 		.map(str::trim_start)
 		.filter(|l| !l.starts_with('#'))
@@ -54,8 +52,7 @@ fn floor_from_installer() -> u64 {
 /// appears: this file exists because the same number in several places went
 /// out of step, and a comment quoting the relationship would satisfy a looser
 /// search. The comment above that field quotes it more than once.
-fn floor_from_control() -> u64 {
-	let src = read("debian/control");
+fn floor_from_control(src: &str) -> u64 {
 	let depends = src
 		.lines()
 		.filter(|l| !l.trim_start().starts_with('#'))
@@ -75,18 +72,32 @@ fn floor_from_control() -> u64 {
 		.unwrap_or_else(|| panic!("cannot read a major out of {version:?}"))
 }
 
+/// The relationship lines of the binary stanza, in order.
+///
+/// Split with `lines()` rather than by searching for an embedded
+/// `"\nPackage: podup\n"`. That search is exact on bytes, so on a checkout
+/// with CRLF endings the newline after `podup` is `\r\n` and the needle is
+/// never found: the test panicked on Windows and nowhere else, over a file
+/// this change did not make platform-specific. `lines()` strips the carriage
+/// return for us.
+fn binary_stanza_relationships(control: &str) -> Vec<&str> {
+	control
+		.lines()
+		.skip_while(|l| l.trim_end() != "Package: podup")
+		.filter(|l| !l.trim_start().starts_with('#'))
+		.filter(|l| l.starts_with("Depends:") || l.starts_with("Recommends:"))
+		.collect()
+}
+
 #[test]
 fn the_package_requires_podman_rather_than_suggesting_it() {
 	let src = read("debian/control");
-	let binary = src
-		.split_once("\nPackage: podup\n")
-		.expect("debian/control has a binary stanza")
-		.1;
-	let relationships: Vec<&str> = binary
-		.lines()
-		.filter(|l| !l.trim_start().starts_with('#'))
-		.filter(|l| l.starts_with("Depends:") || l.starts_with("Recommends:"))
-		.collect();
+	let relationships = binary_stanza_relationships(&src);
+	assert!(
+		!relationships.is_empty(),
+		"no Depends or Recommends line found after the `Package: podup` stanza \
+		 header; the parser has stopped seeing the file it is asserting about"
+	);
 
 	assert!(
 		relationships
@@ -107,9 +118,9 @@ fn the_package_requires_podman_rather_than_suggesting_it() {
 
 #[test]
 fn every_podman_floor_agrees() {
-	let source = floor_from_source();
-	let installer = floor_from_installer();
-	let control = floor_from_control();
+	let source = floor_from_source(&read("internal/libpod/client/mod.rs"));
+	let installer = floor_from_installer(&read("install.sh"));
+	let control = floor_from_control(&read("debian/control"));
 
 	assert_eq!(
 		source, installer,
@@ -152,13 +163,77 @@ Depends: ${shlibs:Depends}, ${misc:Depends}, podman (>= 7.0)
 	// The real files still have to parse, and to a plausible major rather than
 	// to whatever `unwrap_or_default` would hand back.
 	for (name, got) in [
-		("MIN_LIBPOD_API_MAJOR", floor_from_source()),
-		("PODMAN_MIN_MAJOR", floor_from_installer()),
-		("debian/control", floor_from_control()),
+		(
+			"MIN_LIBPOD_API_MAJOR",
+			floor_from_source(&read("internal/libpod/client/mod.rs")),
+		),
+		(
+			"PODMAN_MIN_MAJOR",
+			floor_from_installer(&read("install.sh")),
+		),
+		(
+			"debian/control",
+			floor_from_control(&read("debian/control")),
+		),
 	] {
 		assert!(
 			(1..=99).contains(&got),
 			"{name} parsed as {got}, which is not a plausible Podman major"
 		);
 	}
+}
+
+/// Every parser here reads a file that a Windows checkout delivers with CRLF
+/// endings, and none of them should care.
+///
+/// This is a regression test with a date on it. The first version of
+/// `the_package_requires_podman_rather_than_suggesting_it` located the binary
+/// stanza with `split_once("\nPackage: podup\n")`, which is an exact byte
+/// match, so on CRLF the newline after `podup` is `\r\n` and the needle was
+/// never found. It passed on Linux and macOS and panicked on
+/// `rust / Test (windows-latest)` alone, over a file the change had not made
+/// platform-specific.
+///
+/// The point is not that one function. It is that a parser reading a
+/// repository file is reading a file whose line endings depend on who checked
+/// it out, and the only leg of the matrix that says so is the one that costs
+/// the longest round trip. Feeding the parsers CRLF here says it in a second.
+#[test]
+fn the_parsers_do_not_care_about_line_endings() {
+	let crlf = |rel: &str| read(rel).replace('\n', "\r\n");
+
+	assert_eq!(
+		floor_from_source(&crlf("internal/libpod/client/mod.rs")),
+		floor_from_source(&read("internal/libpod/client/mod.rs")),
+		"MIN_LIBPOD_API_MAJOR reads differently under CRLF"
+	);
+	assert_eq!(
+		floor_from_installer(&crlf("install.sh")),
+		floor_from_installer(&read("install.sh")),
+		"PODMAN_MIN_MAJOR reads differently under CRLF"
+	);
+	assert_eq!(
+		floor_from_control(&crlf("debian/control")),
+		floor_from_control(&read("debian/control")),
+		"the podman relationship reads differently under CRLF"
+	);
+
+	let crlf_control = crlf("debian/control");
+	let under_crlf = binary_stanza_relationships(&crlf_control);
+	let control = read("debian/control");
+	let under_lf = binary_stanza_relationships(&control);
+	assert_eq!(
+		under_crlf.len(),
+		under_lf.len(),
+		"the binary stanza yields {} relationship line(s) under CRLF and {} \
+		 under LF. This is the exact defect that reddened windows-latest and \
+		 nothing else.",
+		under_crlf.len(),
+		under_lf.len()
+	);
+	assert!(
+		!under_crlf.is_empty(),
+		"no relationship line found under CRLF; the comparison above would be \
+		 satisfied by both sides finding nothing"
+	);
 }
