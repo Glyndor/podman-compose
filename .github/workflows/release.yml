@@ -102,9 +102,21 @@ jobs:
       - name: Audit dependencies for known advisories
         # Gate the release on `cargo audit`: a RUSTSEC advisory in a pinned
         # dependency must block publishing, not wait for the weekly cron scan.
+        #
+        # `--deny warnings`, matching reusable-rust-audit.yml. Without it this
+        # step was the WEAKER of the two gates: the weekly cron failed on a
+        # warning-level advisory and the release did not, so the check standing
+        # in front of the immutable artifact was the more permissive one. An
+        # unmaintained or yanked crate is a warning, and a release is the one
+        # place a warning cannot be looked at again later.
+        #
+        # The third-party-timing rule that keeps this off ordinary pull requests
+        # does not apply here and the asymmetry is deliberate: a blocked release
+        # is fixed by releasing again, and a published one cannot be fixed at
+        # all.
         run: |
           cargo install cargo-audit --version "=0.22.2" --locked
-          cargo audit
+          cargo audit --deny warnings
 
   build:
     name: Build ${{ matrix.asset }}

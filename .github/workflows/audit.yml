@@ -1,9 +1,42 @@
 name: Security audit
 
+# Two triggers answering two different questions, and the split is the whole
+# point rather than a convenience.
+#
+# The weekly cron audits the WHOLE tree against an advisory database that moves
+# on somebody else's schedule. A finding there belongs to a third party: RustSec
+# published something today about a crate nobody here touched. That must not be
+# able to block a pull request, which is why this workflow was cron-only, and
+# `standards/testing` says so in as many words: "a finding that belongs to a
+# third party must NOT fail the run, or someone else's disclosure timing blocks
+# every pull request in the organisation".
+#
+# The pull-request trigger asks the other question: does THIS change introduce a
+# dependency with a known advisory? That finding belongs to the pull request, and
+# blocking is the right answer. Scoping it to the manifest and the lockfile is
+# what keeps the two apart: a pull request that touches neither cannot introduce
+# a dependency, so upstream's timing reaches it through the cron and not through
+# a red check it did not cause.
+#
+# The residue, stated rather than discovered: a pull request that does change the
+# lockfile on the day an unrelated advisory lands is blocked by that advisory.
+# That is the narrow case where the two questions overlap, and it lands on the
+# pull request that is changing dependencies, which is where someone is already
+# looking at them.
 on:
   schedule:
     - cron: "0 6 * * 1"  # Every Monday at 06:00 UTC
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - ".github/workflows/audit.yml"
+      - ".github/workflows/reusable-rust-audit.yml"
 
 permissions:
   contents: read

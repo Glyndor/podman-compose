@@ -26,8 +26,11 @@ is anything it had to install just to check the key.
 
 podup needs **Podman ≥ 5.0** (rootless). The package depends on it, so apt
 installs it alongside podup, and refuses the install on a distribution whose
-Podman is older than that. Podman is daemonless, but podup speaks the libpod
-API, so the socket still has to be listening:
+Podman is older than that. It also depends on `unattended-upgrades`: an
+apt-installed podup updates through apt and nothing else, since `podup update`
+refuses to replace a dpkg-owned binary, and only the latest release is
+supported. Podman is daemonless, but podup speaks the libpod API, so the
+socket still has to be listening:
 
 ```sh
 systemctl --user enable --now podman.socket
