@@ -18,12 +18,21 @@ on:
       debian-image:
         description: Container image to build in (a stable suite is reproducible)
         type: string
-        # debian:trixie as of 2026-07-17. Digest-pinned so a retag of the
-        # trixie tag can't silently change the build environment; bump this
-        # default when a newer trixie snapshot is needed. release.yml pins a
-        # digest of its own for the same suite and the two do not agree; see
-        # the note there.
-        default: "debian:trixie@sha256:fac46bff2e02f51425b6e33b0e1169f55dfb053d83511ca28aa50c09fd5ed7a4"
+        # debian:trixie as the registry served it on 2026-08-29.
+        # Digest-pinned so a retag of the trixie tag can't silently change the
+        # build environment; bump this default when a newer trixie snapshot is
+        # needed.
+        #
+        # release.yml pins a digest of its own for the same suite, because a
+        # `container:` needs a literal and cannot read this default. The two
+        # must be the same value: this one is what every pull request builds
+        # the .deb in, that one is what the published .deb is built in, and a
+        # difference means the package that ships was never built in an
+        # environment any pull request exercised. They were different from
+        # before #1568 until #1583, by an image and six weeks. pin-watch.yml
+        # reads both and reports them disagreeing, and
+        # tests/workflow_debian_image.rs asserts it on every pull request.
+        default: "debian:trixie@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1"
       arch:
         description: Architecture to verify/stage (empty matches any)
         type: string

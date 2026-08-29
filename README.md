@@ -24,8 +24,10 @@ installs podup with apt — so upgrades and signing-key renewals arrive through
 packages. It leaves nothing of its own behind: the download is removed, and so
 is anything it had to install just to check the key.
 
-podup needs **Podman ≥ 5.0** (rootless) with its API socket listening. Podman is
-daemonless, but podup speaks the libpod API:
+podup needs **Podman ≥ 5.0** (rootless). The package depends on it, so apt
+installs it alongside podup, and refuses the install on a distribution whose
+Podman is older than that. Podman is daemonless, but podup speaks the libpod
+API, so the socket still has to be listening:
 
 ```sh
 systemctl --user enable --now podman.socket
@@ -105,9 +107,16 @@ it for its whole supported life.
 | Fedora 42 and newer           | 5.x+   | yes        |
 
 Ubuntu 24.04 LTS is not supported: it ships Podman 4.9.3 and will keep shipping
-that for its whole supported life. On any row marked "no", the engine has to
-come from somewhere other than the distribution:
+that for its whole supported life. On any row marked "no", `apt install podup`
+refuses rather than installing a podup that cannot reach an engine, and the
+engine has to come from somewhere other than the distribution:
 <https://podman.io/docs/installation>.
+
+Driving a **remote** Podman, or a `podman machine`, is the case apt cannot
+express: a package relationship only sees the local machine. Use the release
+binary there. `install.sh` warns instead of refusing when no local Podman is
+present, and takes `--skip-podman-check` when a local one is present but is not
+the engine podup will use.
 
 ### Platforms
 
