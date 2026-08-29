@@ -1,3 +1,13 @@
+//! The binary stanza's relationships, and the Podman floor that one of them
+//! carries.
+//!
+//! Two packages are required, for different reasons that look alike in the
+//! `Depends` field. podman because podup cannot work without it.
+//! unattended-upgrades because of what happens when podup is not updated:
+//! only the latest release is supported, and `podup update` refuses on a
+//! dpkg-owned binary, so for an apt install the package manager is the only
+//! update path.
+//!
 //! The Podman floor is written in three places and nothing derives one from
 //! another.
 //!
@@ -116,6 +126,35 @@ fn the_package_requires_podman_rather_than_suggesting_it() {
 			.any(|l| l.starts_with("Recommends:") && l.contains("podman")),
 		"podman is declared as a Recommends as well as a Depends, which is \
 		 apt telling the user two different things about the same package"
+	);
+}
+
+/// The second required package, and the one whose absence is silent.
+///
+/// A missing engine fails loudly the first time podup runs. A machine that
+/// never upgrades fails by staying on a release nobody is fixing, which
+/// nothing reports, so the relationship is the only thing holding it.
+#[test]
+fn the_package_requires_unattended_upgrades() {
+	let src = read("debian/control");
+	let relationships = binary_stanza_relationships(&src);
+
+	assert!(
+		relationships
+			.iter()
+			.any(|l| l.starts_with("Depends:") && l.contains("unattended-upgrades")),
+		"unattended-upgrades must be a Depends. For an apt install the package \
+		 manager is the only update path: `podup update` refuses on a \
+		 dpkg-owned binary and redirects to `apt upgrade`, nothing is \
+		 back-ported, and a machine that never upgrades sits on a release that \
+		 will not receive a fix. Relationships found: {relationships:?}"
+	);
+	assert!(
+		!relationships
+			.iter()
+			.any(|l| l.starts_with("Recommends:") && l.contains("unattended-upgrades")),
+		"unattended-upgrades is declared as a Recommends as well as a Depends, \
+		 which is apt being told two different things about one package"
 	);
 }
 
