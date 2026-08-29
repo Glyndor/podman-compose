@@ -97,6 +97,21 @@ jobs:
         run: |
           export PATH="$RUNNER_TEMP/fixturevenv/bin:$PATH"
           bash tests/fixtures/releases/test.sh
+
+      # sign.py is what puts the organisation's Ed25519 signature on every
+      # released artifact, and until now nothing tested it. Its sibling
+      # verify-signing-key.py had tests; the script that produces what that one
+      # verifies did not.
+      #
+      # It belongs in this workflow rather than the shell lane because
+      # `.github/scripts/sign.py` is already in this workflow's paths filter,
+      # so the pull request that changes the script is the one that runs the
+      # test. The shell lane triggers on `**.sh` and would not see a Python
+      # change at all.
+      - name: Run the signing-script fixture
+        run: |
+          export PATH="$RUNNER_TEMP/fixturevenv/bin:$PATH"
+          bash tests/fixtures/releases/test-sign.sh
   # Same fixture on Windows so the install.ps1 path (Windows PowerShell
   # 5.1 and PowerShell 7+) is covered. The PowerShell script is a thin
   # test harness: it exercises the same per-asset loop and asserts the
