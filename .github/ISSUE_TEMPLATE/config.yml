@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Glyndor/podup/security/policy
+    about: "Do not open a public issue. Use the Security tab of this repository and click 'Report a vulnerability'."
+  - name: Discussions
+    url: https://github.com/Glyndor/podup/discussions
+    about: "Questions, ideas and 'is this supposed to work this way?' go here, not in an issue."
+  - name: Podman compatibility
+    url: https://github.com/containers/podman/issues
+    about: "If the problem reproduces with plain `podman` against the libpod REST API, it belongs upstream, not here."

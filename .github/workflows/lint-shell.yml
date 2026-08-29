@@ -7,6 +7,12 @@ on:
     paths:
       - "**.sh"
       - ".github/workflows/lint-shell.yml"
+      # While this reusable was a pinned Glyndor/.github reference, a change
+      # to it arrived as a Dependabot commit editing the line above, which
+      # this filter already matched. A local copy is edited directly, so
+      # without this line a pull request that touches only the reusable
+      # merges without ever running it.
+      - ".github/workflows/reusable-shell-ci.yml"
   pull_request:
     branches:
       - main
@@ -14,6 +20,12 @@ on:
     paths:
       - "**.sh"
       - ".github/workflows/lint-shell.yml"
+      # While this reusable was a pinned Glyndor/.github reference, a change
+      # to it arrived as a Dependabot commit editing the line above, which
+      # this filter already matched. A local copy is edited directly, so
+      # without this line a pull request that touches only the reusable
+      # merges without ever running it.
+      - ".github/workflows/reusable-shell-ci.yml"
 
 permissions:
   contents: read
@@ -24,4 +36,12 @@ jobs:
     with:
       # A test no workflow runs is indistinguishable from one that passes --
       # the lesson debian-build.yml carries from #1295, applied here.
-      test-command: ./tests/shell/locale-pinned.test.sh && ./tests/shell/ci-runs-every-test.test.sh
+      #
+      # Invoked through `bash`, not by path. The executable bit that a `./`
+      # call needs is the one git records, not the one on disk, and `git reset`
+      # drops it back to 100644 without saying so; in CI that is exit 126, and
+      # because these chain with `&&` it aborts the pair rather than failing
+      # one. Naming the interpreter removes the dependency instead of detecting
+      # it, which is also what reusable-shell-ci.yml's exec-bit guard already
+      # says about this repository.
+      test-command: bash ./tests/shell/locale-pinned.test.sh && bash ./tests/shell/ci-runs-every-test.test.sh

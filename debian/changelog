@@ -1,3 +1,11 @@
+podup (5.2.1) unstable; urgency=medium
+
+  * No user-visible change. CI only: the Rust toolchain pin is watched
+    here now, in all nine places it is written, and a path-filtered
+    workflow is failed when it does not name the reusable it calls.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sat, 29 Aug 2026 03:20:00 -0500
+
 podup (5.2.0) unstable; urgency=medium
 
   * push: --ignore-push-failures no longer exits 0 when every push failed.

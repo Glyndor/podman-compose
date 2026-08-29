@@ -1,5 +1,8 @@
 name: Supply chain
 
+# Pull request runs with a Cargo path filter (only supply-chain-touching PRs
+# pay the cost); push to develop runs unfiltered (every develop commit must
+# validate the supply chain, so the branch never sits with a stale audit).
 on:
   pull_request:
     branches:
@@ -11,6 +14,12 @@ on:
       - "about.toml"
       - "about.hbs"
       - ".github/workflows/supply-chain.yml"
+      # While this reusable was a pinned Glyndor/.github reference, a change
+      # to it arrived as a Dependabot commit editing the line above, which
+      # this filter already matched. A local copy is edited directly, so
+      # without this line a pull request that touches only the reusable
+      # merges without ever running it.
+      - ".github/workflows/reusable-rust-supply-chain.yml"
   push:
     branches:
       - develop
