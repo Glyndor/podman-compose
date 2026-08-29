@@ -18,11 +18,11 @@ on:
         type: string
         default: "1.98"
       cargo-audit-version:
-        description: Exact version of cargo-audit to install; bumped via .github releases
+        description: Exact version of cargo-audit to install; bumped by editing this file
         type: string
         default: "0.22.2"
       cargo-deny-version:
-        description: Exact version of cargo-deny to install; bumped via .github releases
+        description: Exact version of cargo-deny to install; bumped by editing this file
         type: string
         default: "0.20.2"
 

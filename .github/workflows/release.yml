@@ -159,8 +159,12 @@ jobs:
       - name: Install build target
         env:
           TARGET: ${{ matrix.target }}
-          # Keep this in step with the `toolchain` default in Glyndor/.github's
-          # rust-ci.yml. It is NOT a repo-root rust-toolchain.toml on purpose: that
+          # Keep this in step with the `toolchain` default in this repository's
+          # reusable-rust-ci.yml, which is where that file lives since #1568.
+          # pin-watch.yml reads both, along with the other seven sites that
+          # write this number, and reports them disagreeing.
+          #
+          # It is NOT a repo-root rust-toolchain.toml on purpose: that
           # file is a directory override that beats `rustup default`, so it would
           # silently pull the MSRV job (which does `rustup default <msrv>`) up to
           # this version and defeat the MSRV gate. A release still must not float
@@ -227,15 +231,20 @@ jobs:
     name: Build Debian package (${{ matrix.arch }})
     needs: verify
     runs-on: ${{ matrix.runner }}
-    # debian:trixie, digest-pinned at the same snapshot Glyndor/.github's
-    # rust-debian.yml uses (default for the CI image). Sid was a moving tag:
+    # debian:trixie, digest-pinned. Sid was a moving tag:
     # two releases built from identical source could land in different
     # environments with nothing in history recording which, and Dependabot's
     # github-actions ecosystem does not bump a workflow's `container:` image,
     # so a digest of sid would have no bump path and freeze. Trixie is stable
-    # and matches the suite CI validates against, so the release that ships
-    # to users was produced by the same image the suite exercises. Bump the
-    # digest here when rust-debian.yml's default moves; the two should agree.
+    # and matches the suite CI validates against.
+    #
+    # It is meant to be the same image reusable-rust-debian.yml defaults to,
+    # so the release that ships to users comes out of the environment the
+    # debian-build lane exercised. Measured 2026-08-28, the two digests are
+    # different and were before #1568 too, so that sentence has never been
+    # true here. pin-watch.yml now reads both and reports the disagreement
+    # every Monday; choosing which one wins changes what gets built and is
+    # not settled in #1582.
     container: debian:trixie@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1
     permissions:
       contents: read

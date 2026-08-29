@@ -1,13 +1,22 @@
 name: pin-watch
 # Notifies (opens an issue) when a tool version pinned in this repository has
-# drifted from upstream. Four pins are owned here and watched nowhere else:
+# drifted from upstream. Five pins are owned here and watched nowhere else:
 #   - the `debian:trixie` container digest in release.yml
 #   - `python-version` in asset-contract.yml (it appears more than once; the
 #     entries must agree, and disagreement is itself a drift)
 #   - `Standards-Version` in debian/control
 #   - `debhelper-compat` in debian/control
-# Rust is watched by Glyndor/.github's rust-toolchain-watch.yml and Podman by
-# this repository's podman-watch.yml, so neither is repeated here.
+#   - the Rust toolchain, which is written in fifteen places across eight
+#     workflow files and carries the same agreement rule as python-version
+# Podman is watched by this repository's podman-watch.yml, so it is not
+# repeated here.
+#
+# Rust used to be excluded on the same grounds, and the reason it gave named
+# Glyndor/.github's rust-toolchain-watch.yml. #1568 stopped this repository
+# calling that repository at all, and that reusable was not among the copies
+# taken across, so from then until #1582 the toolchain pin was watched by
+# nobody. Copying it unchanged would not have worked either: it takes one
+# `toolchain` input, and there is no single value here to hand it.
 #
 # Weekly, not daily: these move on the scale of months, and a daily run would
 # be noise. 05:00 Monday keeps it off audit.yml's 06:00 and fuzz.yml's 07:00 —
@@ -40,12 +49,39 @@ jobs:
           add_drift() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$DRIFTS"; }
 
           # ---- 1. debian:trixie container digest ------------------------------
-          # Read the pinned value FROM THE FILE, so the watcher cannot silently
-          # disagree with what the workflow actually uses.
-          PINNED_DIGEST=$(grep -oE 'container: debian:trixie@sha256:[a-f0-9]{64}' \
-            .github/workflows/release.yml | head -n1 | sed 's/.*@//')
-          [[ "$PINNED_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]] \
-            || { echo "::error::could not parse the pinned debian:trixie digest from release.yml"; exit 1; }
+          # Read the pinned values FROM THE FILES, so the watcher cannot
+          # silently disagree with what the workflows actually use.
+          #
+          # There are TWO of them and they are meant to be the same image:
+          # release.yml builds the published .deb in its own `container:`, and
+          # reusable-rust-debian.yml's `debian-image` default is what the
+          # debian-build lane exercises on every pull request. release.yml's
+          # own comment says the two should agree. Measured 2026-08-28, they do
+          # not, and had not since before #1568 replaced the remote reference:
+          # the release ships from a snapshot the suite never ran in. Which of
+          # the two wins changes what gets built, so this reports the
+          # disagreement rather than resolving it.
+          # The `|| true` is what makes an unreadable pin an ERROR rather than
+          # a silent death. Without it grep's exit 1 propagates out of the
+          # command substitution, `set -e` kills the run before the check
+          # below, and the log says nothing about which pin could not be read.
+          read_digest() { # <file> <grep pattern>
+            grep -oE "$2" "$1" | head -n1 | sed 's/.*@//' || true
+          }
+          RELEASE_DIGEST=$(read_digest .github/workflows/release.yml \
+            'container: debian:trixie@sha256:[a-f0-9]{64}')
+          LANE_DIGEST=$(read_digest .github/workflows/reusable-rust-debian.yml \
+            'default: "debian:trixie@sha256:[a-f0-9]{64}')
+          for pair in "release.yml:$RELEASE_DIGEST" "reusable-rust-debian.yml:$LANE_DIGEST"; do
+            [[ "${pair#*:}" =~ ^sha256:[a-f0-9]{64}$ ]] \
+              || { echo "::error::could not parse the pinned debian:trixie digest in ${pair%%:*} (read '${pair#*:}')"; exit 1; }
+          done
+          # Reported the way python-version reports its own disagreement: the
+          # last column says what is required, not an upstream value, because
+          # for this row there is no upstream being compared against.
+          [ "$RELEASE_DIGEST" = "$LANE_DIGEST" ] \
+            || add_drift "debian:trixie digest (release.yml and the debian-build lane disagree)" \
+                 ".github/workflows/" "$RELEASE_DIGEST, $LANE_DIGEST" "(they must agree)"
           TOKEN=$(curl -fsSL 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/debian:pull' \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
           [[ -n "$TOKEN" ]] || { echo "::error::empty token from auth.docker.io"; exit 1; }
@@ -57,8 +93,15 @@ jobs:
             | tr -d '\r' | awk -F': ' 'tolower($1) == "docker-content-digest" { print $2; exit }')
           [[ "$LATEST_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]] \
             || { echo "::error::registry returned an unexpected digest: '$LATEST_DIGEST'"; exit 1; }
-          [ "$PINNED_DIGEST" = "$LATEST_DIGEST" ] \
-            || add_drift "debian:trixie container digest" ".github/workflows/release.yml" "$PINNED_DIGEST" "$LATEST_DIGEST"
+          # Both sites are compared, not just release.yml's. While they agree
+          # that is one row either way; while they do not, reporting only one
+          # of them would leave the other stale with nothing saying so.
+          [ "$RELEASE_DIGEST" = "$LATEST_DIGEST" ] \
+            || add_drift "debian:trixie container digest" ".github/workflows/release.yml" \
+                 "$RELEASE_DIGEST" "$LATEST_DIGEST"
+          [ "$LANE_DIGEST" = "$LATEST_DIGEST" ] || [ "$LANE_DIGEST" = "$RELEASE_DIGEST" ] \
+            || add_drift "debian:trixie image default" ".github/workflows/reusable-rust-debian.yml" \
+                 "$LANE_DIGEST" "$LATEST_DIGEST"
 
           # ---- 2. python-version ----------------------------------------------
           # Plain shell does this; no interpreter needed.
@@ -109,6 +152,207 @@ jobs:
             || { echo "::error::no debhelper version found for trixie (got '$DEBHELPER_VER')"; exit 1; }
           [ "$PINNED_COMPAT" = "${DEBHELPER_VER%%.*}" ] \
             || add_drift "debhelper-compat" "debian/control" "$PINNED_COMPAT" "${DEBHELPER_VER%%.*} (debhelper $DEBHELPER_VER in trixie)"
+
+          # ---- 5. Rust toolchain ------------------------------------------------
+          # Read every pin site from the files, the way the four above read
+          # theirs. Nothing derives one site from another, so "the sites
+          # disagree" is a drift in its own right and is reported before any
+          # upstream comparison: a release built on a toolchain CI never tested
+          # is a difference that surfaces once, at the tag, on a release that is
+          # immutable org-wide.
+          #
+          # The classification is explicit and closed. A pin site that is not
+          # one of the two named exceptions counts as a stable pin, and a site
+          # whose shape is not understood fails the run rather than being
+          # dropped. A watcher that silently skips a pin reports success over a
+          # smaller set than it claims.
+          #
+          # tests/workflow_toolchain_pin.rs holds the same classification and
+          # asserts the same agreement on every pull request. That overlap is
+          # deliberate, not a copy nobody noticed. The two answer on different
+          # cadences and neither can stand in for the other: the test says so
+          # within minutes of the edit, which is while the fix is still one
+          # line in an open branch, and it cannot reach the network; this one
+          # is the only thing that compares the agreed value against upstream,
+          # and it runs whether or not the Rust suite did. What is duplicated
+          # is a two-entry exception list, and both halves fail loudly on a
+          # site neither of them knows, so a drift between them surfaces as a
+          # red rather than as silence.
+          RUST_REPORT=$(python3 - <<'PY'
+          import glob
+          import sys
+
+          import yaml
+
+          # The three spellings a toolchain pin takes here: an env var the
+          # release and publish workflows hand to rustup, the input a caller
+          # passes to reusable-rust-debian, and the default on a reusable's own
+          # `toolchain` input. Anything else consumes one of these.
+          KEYS = ("RUST_TOOLCHAIN", "rust-toolchain", "toolchain")
+
+          # A value carrying an expression is a pass-through, not a pin: it
+          # resolves at whichever caller supplied it, and that caller is one of
+          # these sites already.
+          #
+          # The token is assembled rather than written out. actionlint lexes a
+          # literal expression opener inside a `run:` block as an expression,
+          # whatever language the block is in, and reports the quote after it
+          # as a syntax error. Splitting it keeps the two characters from ever
+          # sitting adjacent in the file.
+          EXPRESSION = "$" + "{{"
+
+          # Sites that pin a toolchain deliberately different from the stable
+          # one. Each names a KIND, not just a reason, and the kind is checked
+          # against the value: an exemption keyed only on where it sits admits
+          # anything that lands there, which is how a rewritten pin walks
+          # through a rule written to let one specific pin past.
+          NOT_STABLE = {
+              (".github/workflows/reusable-rust-fuzz.yml", "inputs.toolchain.default"):
+                  ("nightly", "cargo-fuzz requires a nightly toolchain"),
+              (".github/workflows/asset-contract.yml", "env.RUST_TOOLCHAIN"):
+                  ("msrv", "mirrors the self_test in internal/update/install.rs"),
+          }
+
+
+          def is_stable_shape(value):
+              return value.count(".") == 1 and value.replace(".", "").isdigit()
+
+
+          KIND_SHAPE = {
+              "nightly": lambda v: v.startswith("nightly-"),
+              "msrv": is_stable_shape,
+          }
+
+          sites = []
+
+
+          def walk(node, path):
+              if isinstance(node, dict):
+                  for key, value in node.items():
+                      if key in ("env", "with") and isinstance(value, dict):
+                          for name, pinned in value.items():
+                              if name in KEYS and isinstance(pinned, str) and pinned:
+                                  sites.append((path, f"{key}.{name}", pinned))
+                      walk(value, path)
+              elif isinstance(node, list):
+                  for value in node:
+                      walk(value, path)
+
+
+          files = sorted(set(
+              glob.glob(".github/workflows/*.yml")
+              + glob.glob(".github/workflows/*.yaml")
+          ))
+          msrv_declared = set()
+          for path in files:
+              try:
+                  spec = yaml.safe_load(open(path))
+              except (OSError, yaml.YAMLError) as exc:
+                  print(f"cannot read {path}: {exc}", file=sys.stderr)
+                  sys.exit(1)
+              if not isinstance(spec, dict):
+                  continue
+              on = spec.get("on", spec.get(True))
+              call = (on or {}).get("workflow_call") if isinstance(on, dict) else None
+              if isinstance(call, dict):
+                  declared = (call.get("inputs") or {}).get("toolchain")
+                  if isinstance(declared, dict) and isinstance(declared.get("default"), str):
+                      sites.append((path, "inputs.toolchain.default", declared["default"]))
+              jobs = spec.get("jobs") or {}
+              walk(jobs, path)
+              # The MSRV travels as its own input and is a separate agreement:
+              # it moves when the crate's floor moves, never when stable does.
+              for job in jobs.values() if isinstance(jobs, dict) else []:
+                  if isinstance(job, dict):
+                      msrv = (job.get("with") or {}).get("msrv")
+                      if isinstance(msrv, str) and msrv and EXPRESSION not in msrv:
+                          msrv_declared.add(msrv)
+
+          # A pass-through, not a pin. The value it resolves to is pinned at
+          # whichever caller supplied it, and that caller is already counted.
+          sites = [s for s in sites if EXPRESSION not in s[2]]
+          if not sites:
+              print("no Rust toolchain pin found in any workflow", file=sys.stderr)
+              sys.exit(1)
+
+          stable, msrv_copies, unknown = [], [], []
+          for path, where, pinned in sites:
+              listed = NOT_STABLE.get((path, where))
+              if listed is None:
+                  if is_stable_shape(pinned):
+                      stable.append((path, where, pinned))
+                  else:
+                      unknown.append((
+                          path, where, pinned,
+                          "is neither a MAJOR.MINOR stable toolchain nor a listed exception",
+                      ))
+                  continue
+              kind, why = listed
+              if not KIND_SHAPE[kind](pinned):
+                  unknown.append((
+                      path, where, pinned,
+                      f"is listed as the {kind} pin ({why}) and no longer looks like one",
+                  ))
+              elif kind == "msrv":
+                  msrv_copies.append((path, where, pinned))
+
+          if unknown:
+              for path, where, pinned, why in unknown:
+                  print(
+                      f"{path} {where} pins '{pinned}', which {why}; "
+                      f"classify it in NOT_STABLE or fix the pin",
+                      file=sys.stderr,
+                  )
+              sys.exit(1)
+
+          # Emitted as TSV for the shell to turn into drift rows. One line per
+          # group; the shell decides what to do with each.
+          print("stable\t{}\t{}".format(
+              len(stable), ",".join(sorted({p for _, _, p in stable}))))
+          print("msrv\t{}\t{}".format(
+              len(msrv_copies) + len(msrv_declared),
+              ",".join(sorted({p for _, _, p in msrv_copies} | msrv_declared))))
+          PY
+          ) || { echo "::error::could not classify the Rust toolchain pins"; exit 1; }
+
+          RUST_STABLE_N=$(printf '%s\n' "$RUST_REPORT" | awk -F'\t' '$1=="stable"{print $2}')
+          RUST_STABLE_V=$(printf '%s\n' "$RUST_REPORT" | awk -F'\t' '$1=="stable"{print $3}')
+          RUST_MSRV_N=$(printf '%s\n' "$RUST_REPORT" | awk -F'\t' '$1=="msrv"{print $2}')
+          RUST_MSRV_V=$(printf '%s\n' "$RUST_REPORT" | awk -F'\t' '$1=="msrv"{print $3}')
+          echo "Rust: $RUST_STABLE_N stable pin sites at [$RUST_STABLE_V]; $RUST_MSRV_N MSRV sites at [$RUST_MSRV_V]."
+
+          case "$RUST_MSRV_V" in
+            *,*) add_drift "Rust MSRV ($RUST_MSRV_N sites disagree)" ".github/workflows/" \
+                   "$RUST_MSRV_V" "(they must agree)" ;;
+          esac
+
+          case "$RUST_STABLE_V" in
+            *,*)
+              add_drift "Rust toolchain ($RUST_STABLE_N sites disagree)" ".github/workflows/" \
+                "$RUST_STABLE_V" "(they must agree)"
+              ;;
+            *)
+              # First-party channel manifest: the file rustup itself reads to
+              # resolve `stable`. The strict SemVer check rejects a pre-release
+              # shape, which parses as a version and is not current stable.
+              # Fetched whole, then parsed, and the parser reads to EOF. An
+              # awk that `exit`s on the first match closes the pipe under
+              # whatever feeds it, and `pipefail` then turns a fetch that
+              # actually succeeded into a failed run: curl reports 23, a shell
+              # builtin reports 141. `[pkg.rust]` sits near the top of a large
+              # file, so the early exit fires every time rather than rarely.
+              RUST_CHANNEL=$(curl -fsSL --max-time 30 https://static.rust-lang.org/dist/channel-rust-stable.toml)
+              LATEST_RUST=$(printf '%s\n' "$RUST_CHANNEL" \
+                | awk '/^\[pkg\.rust\]$/ { flag = 1; next }
+                       flag && /^version = / && !seen { gsub(/"/, ""); v = $3; seen = 1 }
+                       END { print v }')
+              [[ "$LATEST_RUST" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+                || { echo "::error::unexpected upstream Rust version: $LATEST_RUST"; exit 1; }
+              [ "$RUST_STABLE_V" = "${LATEST_RUST%.*}" ] \
+                || add_drift "Rust toolchain ($RUST_STABLE_N sites, in step with each other)" \
+                     ".github/workflows/" "$RUST_STABLE_V" "$LATEST_RUST"
+              ;;
+          esac
 
           # ---- Report ----------------------------------------------------------
           if [ ! -s "$DRIFTS" ]; then echo "No drift in any pinned tool version."; exit 0; fi
