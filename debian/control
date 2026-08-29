@@ -23,8 +23,26 @@ Rules-Requires-Root: no
 
 Package: podup
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
-Recommends: podman (>= 5.0)
+# podman is a Depends, not a Recommends. podup is a translator: it turns a
+# compose file into calls on Podman's libpod API and does nothing else, so a
+# podup without an engine is not a degraded install, it is an install that
+# cannot do the one thing it is for.
+#
+# The floor is the same one MIN_LIBPOD_API_MAJOR enforces at run time and
+# PODMAN_MIN_MAJOR checks in install.sh. Three copies of one number, tied by
+# tests/podman_floor.rs, because as a Depends this one decides whether the
+# package installs at all rather than merely what apt suggests alongside it.
+#
+# The consequence, stated rather than discovered: on a distribution whose
+# podman is below the floor, `apt install podup` now FAILS instead of leaving
+# a podup that cannot reach an engine. Ubuntu 24.04 LTS ships 4.9.3 and is
+# already documented as unsupported, so apt now refuses what the README
+# already said would not work. The cost is the operator driving a REMOTE
+# socket or a `podman machine`, who has no local engine to satisfy this and
+# must now install one; install.sh serves that case with
+# --skip-podman-check, and apt has no equivalent because a package
+# relationship cannot ask where the socket is.
+Depends: ${shlibs:Depends}, ${misc:Depends}, podman (>= 5.0)
 Description: docker-compose translator and runner for rootless Podman
  podup parses docker-compose.yml files and drives rootless Podman to
  create the equivalent containers, networks and volumes. It provides
