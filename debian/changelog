@@ -1,3 +1,16 @@
+podup (5.4.0) unstable; urgency=medium
+
+  * The package now requires unattended-upgrades as well as podman. An
+    apt-installed podup updates through apt and nothing else, since
+    `podup update` refuses to replace a dpkg-owned binary and only the
+    latest release is supported, so a machine that never upgrades sits on
+    a release that will not receive a fix. Removing unattended-upgrades
+    now removes podup with it; an operator who schedules upgrades by hand
+    keeps the package and switches it off in its own configuration.
+  * No change to any command. The rest of this release is CI and tests.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sat, 29 Aug 2026 16:35:00 -0500
+
 podup (5.3.0) unstable; urgency=medium
 
   * The package now requires podman (>= 5.0) instead of recommending it.
