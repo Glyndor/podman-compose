@@ -97,7 +97,12 @@ is published and `apt upgrade` installs it — nothing for users to re-run.
 
 ## What the skeleton covers
 
-- `debian/control` — source/binary stanzas, build dependencies, `Depends: podman (>= 5.0), unattended-upgrades`
+- `debian/control` — source/binary stanzas, build dependencies, `Depends: podman
+  (>= 5.0), unattended-upgrades, glyndor-archive-keyring`. The third is what aims
+  the second: it ships the `.sources` file and the `Allowed-Origins` entry, so
+  without it unattended-upgrades runs and never looks at Glyndor. A fork
+  publishing its own archive must declare `Provides: glyndor-archive-keyring` on
+  its own keyring package, or this relationship cannot be satisfied by it.
 - `debian/rules` — debhelper with cargo overrides, `--locked` release build, tests run during the build
 - `debian/podup.1` + `debian/podup.manpages` — the man page, installed by `dh_installman`
 - `debian/copyright` — DEP-5, MIT
