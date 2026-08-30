@@ -51,6 +51,24 @@ relied on for integrity.
 
    cargo-install and manual layouts (`~/.cargo/bin`, `/usr/local/bin`) belong to
    none of them and update normally.
+
+   **On an apt install, the refusal also says when apt will never do it either.**
+   Being told to use `apt upgrade podup` is correct and, on some machines, only
+   half the story: unattended-upgrades installs only from origins its own
+   configuration permits, and the rule permitting Glyndor is shipped by
+   `glyndor-archive-keyring`. A machine with podup and without that package is
+   never upgraded automatically, and — because the rule that would have fixed it
+   travels in the update it never receives — never finds out. So the refusal
+   reads apt's merged configuration once, at that moment only, and appends the
+   reason and the remedy when nothing will act.
+
+   It looks at three things, because there are three ways to be stuck. The
+   package's README documents `Unattended-Upgrade::Allowed-Origins` *or*
+   `Unattended-Upgrade::Origins-Pattern` as alternatives, so either permitting
+   Glyndor counts; and `Unattended-Upgrade::Package-Blacklist` can veto podup by
+   name while the origin is allowed. When no rule of either kind is present at
+   all, nothing is said: that is a machine the question does not apply to rather
+   than a broken one.
 3. Fetch `SHA256SUMS` and `SHA256SUMS.sig` and **verify the Ed25519 signature**
    of `SHA256SUMS` against the embedded public key — *before* the binary is
    downloaded, so a tampered or unsigned release is rejected without first

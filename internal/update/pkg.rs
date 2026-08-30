@@ -127,6 +127,93 @@ fn dpkg_owns(path: &Path) -> bool {
 	}
 }
 
+/// What this machine's unattended-upgrades configuration says about Glyndor.
+#[derive(Debug, PartialEq)]
+pub(crate) enum GlyndorAutoUpdate {
+	/// Some rule permits the origin and nothing vetoes the package.
+	Permitted,
+	/// Nothing will ever install a Glyndor update here, with the reason.
+	Blocked(&'static str),
+	/// The question could not be answered, so nothing is said about it.
+	Unknown,
+}
+
+/// Read the verdict out of `apt-config dump` output.
+///
+/// Pure so the three configurations that matter can be fed to it directly.
+/// A check that has only ever been seen to agree with the configuration we
+/// write ourselves has not been tested against the ones it meets in the field.
+///
+/// **Two lists, not one.** unattended-upgrades' own README documents
+/// `Allowed-Origins` *or* `Origins-Pattern` as alternatives, and the keyring
+/// happens to write the first. An operator using the second is covered, and a
+/// check that knew only about the first would tell them nothing will ever
+/// update them while their machine updates itself fine. That false alarm is the
+/// noise this exists to avoid, so it would have been worse than saying nothing.
+///
+/// **And a third way to be stuck.** `Package-Blacklist` vetoes by name, so an
+/// allowed origin is not sufficient on its own.
+///
+/// The origin match is deliberately loose — any entry mentioning `Glyndor`
+/// counts, rather than `Glyndor:stable` exactly. An operator who allowed a
+/// different Glyndor suite has thought about this and does not need telling;
+/// the machine worth warning is the one whose configuration has never heard of
+/// Glyndor at all.
+pub(crate) fn glyndor_auto_update(apt_config_dump: &str) -> GlyndorAutoUpdate {
+	let mut saw_any_rule = false;
+	let mut permits_glyndor = false;
+	let mut blacklists_podup = false;
+
+	for line in apt_config_dump.lines() {
+		let line = line.trim();
+		let Some(rest) = line.strip_prefix("Unattended-Upgrade::") else {
+			continue;
+		};
+		if rest.starts_with("Allowed-Origins") || rest.starts_with("Origins-Pattern") {
+			saw_any_rule = true;
+			if rest.contains("Glyndor") {
+				permits_glyndor = true;
+			}
+		} else if rest.starts_with("Package-Blacklist") && rest.contains("podup") {
+			blacklists_podup = true;
+		}
+	}
+
+	if blacklists_podup {
+		return GlyndorAutoUpdate::Blocked(
+			"podup is in Unattended-Upgrade::Package-Blacklist, so unattended-upgrades \
+			 will never install an update for it even though the origin is allowed",
+		);
+	}
+	if permits_glyndor {
+		return GlyndorAutoUpdate::Permitted;
+	}
+	// No rule of either kind was seen at all: unattended-upgrades is probably not
+	// configured on this machine, or `apt-config` returned something this does not
+	// understand. Either way the honest answer is that the question was not
+	// answered, not that the machine is broken.
+	if !saw_any_rule {
+		return GlyndorAutoUpdate::Unknown;
+	}
+	GlyndorAutoUpdate::Blocked(
+		"the Glyndor archive is in neither Unattended-Upgrade::Allowed-Origins nor \
+		 Unattended-Upgrade::Origins-Pattern, so unattended-upgrades will never \
+		 install a podup update. Installing glyndor-archive-keyring adds the rule; \
+		 `apt upgrade` once is what pulls it in",
+	)
+}
+
+/// Ask apt for its merged configuration. `None` when it cannot be asked.
+fn apt_config_dump() -> Option<String> {
+	let out = std::process::Command::new("apt-config")
+		.arg("dump")
+		.output()
+		.ok()?;
+	out.status
+		.success()
+		.then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 /// Error returned when the running binary is managed by package manager `pm`.
 pub fn package_managed_error(pm: &str) -> ComposeError {
 	// The example command used to be `apt upgrade podup` unconditionally, which
@@ -137,10 +224,23 @@ pub fn package_managed_error(pm: &str) -> ComposeError {
 		"Scoop" => "scoop update podup",
 		_ => "apt upgrade podup",
 	};
+	// For apt only, and only here: the operator has just asked to update and is
+	// being sent to a mechanism that, on some machines, will never run. Telling
+	// them to use apt without saying that would be a correct instruction and a
+	// misleading one. This is the single place it is worth the process spawn --
+	// nothing on an ordinary command path pays for it.
+	let also = if pm == "apt" {
+		match apt_config_dump().as_deref().map(glyndor_auto_update) {
+			Some(GlyndorAutoUpdate::Blocked(why)) => format!(". Note that {why}"),
+			_ => String::new(),
+		}
+	} else {
+		String::new()
+	};
 	ComposeError::Update(format!(
 		"this podup was installed by {pm}; update it with your package manager \
 		 (`{how}`) rather than `podup update`, which would break the package's \
-		 record of the file"
+		 record of the file{also}"
 	))
 }
 
@@ -153,6 +253,87 @@ mod tests {
 	/// assert on is the one the real code sees there; a fixture written with
 	/// `\\` would simply not parse into components on Linux and the tests would
 	/// pass by asserting nothing.
+	/// The configuration on the machine this was written on, verbatim from
+	/// `apt-config dump`. A covered machine, and the one shape the check would
+	/// have been accidentally fitted to if it were the only fixture.
+	const REAL_COVERED: &str = "\
+Unattended-Upgrade::Allowed-Origins \"\";
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}\";
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}-security\";
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}ESMApps:${distro_codename}-apps-security\";
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}ESM:${distro_codename}-infra-security\";
+Unattended-Upgrade::Allowed-Origins:: \"Glyndor:stable\";
+Unattended-Upgrade::DevRelease \"auto\";
+";
+
+	#[test]
+	fn the_configuration_our_keyring_writes_reads_as_permitted() {
+		assert_eq!(
+			glyndor_auto_update(REAL_COVERED),
+			GlyndorAutoUpdate::Permitted
+		);
+	}
+
+	/// The case the first draft of this check would have got wrong. The package's
+	/// own README documents `Allowed-Origins` **or** `Origins-Pattern`, so an
+	/// operator using the second is covered — and a check that knew only about
+	/// the first would have told them nothing will ever update them while their
+	/// machine updated itself fine.
+	#[test]
+	fn an_origins_pattern_machine_is_covered_too() {
+		let dump = "\
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}-security\";
+Unattended-Upgrade::Origins-Pattern:: \"origin=Glyndor\";
+";
+		assert_eq!(glyndor_auto_update(dump), GlyndorAutoUpdate::Permitted);
+	}
+
+	/// Allowed origin and a vetoed package: an allowlist that looks perfect on a
+	/// machine that will still never update podup.
+	#[test]
+	fn a_blacklisted_package_is_blocked_despite_an_allowed_origin() {
+		let dump = "\
+Unattended-Upgrade::Allowed-Origins:: \"Glyndor:stable\";
+Unattended-Upgrade::Package-Blacklist:: \"podup\";
+";
+		let GlyndorAutoUpdate::Blocked(why) = glyndor_auto_update(dump) else {
+			panic!("a blacklisted podup must be Blocked");
+		};
+		assert!(
+			why.contains("Package-Blacklist"),
+			"the reason must name the list that is doing it: {why}"
+		);
+	}
+
+	/// The machine #1602 is about: unattended-upgrades configured and running,
+	/// Glyndor in neither list, podup never updated and never told.
+	#[test]
+	fn a_machine_with_no_glyndor_rule_is_blocked_and_told_the_remedy() {
+		let dump = "\
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}\";
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}-security\";
+";
+		let GlyndorAutoUpdate::Blocked(why) = glyndor_auto_update(dump) else {
+			panic!("a machine with no Glyndor rule must be Blocked");
+		};
+		assert!(
+			why.contains("glyndor-archive-keyring") && why.contains("apt upgrade"),
+			"a warning without the remedy is one the reader can do nothing with: {why}"
+		);
+	}
+
+	/// No rule of either kind: unattended-upgrades is not configured, or the
+	/// output is not what this understands. Saying nothing beats guessing, and
+	/// `Unknown` is what the caller renders as silence.
+	#[test]
+	fn a_machine_with_no_rules_at_all_is_unknown_rather_than_blocked() {
+		assert_eq!(
+			glyndor_auto_update("APT::Architecture \"amd64\";\n"),
+			GlyndorAutoUpdate::Unknown
+		);
+		assert_eq!(glyndor_auto_update(""), GlyndorAutoUpdate::Unknown);
+	}
+
 	#[test]
 	fn homebrew_layouts_are_recognised_on_every_prefix() {
 		for p in [
