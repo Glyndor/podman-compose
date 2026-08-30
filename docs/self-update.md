@@ -29,12 +29,28 @@ relied on for integrity.
    the current build is already newest (unless `--force`), and `--check` returns
    here without downloading anything.
 2. **Refuse a package-manager-managed binary.** If the running executable is
-   owned by a system package manager (e.g. installed from the `.deb`, detected
-   via `dpkg-query`), `podup update` refuses **before downloading anything** and
-   redirects you to the package manager (e.g. `apt upgrade podup`); overwriting
-   the file in place would desync the manager's records. This applies even with
-   `--force`. cargo-install / manual layouts (`~/.cargo/bin`, `/usr/local/bin`)
-   are not package-owned and update normally.
+   owned by a package manager, `podup update` refuses **before downloading
+   anything** and names that manager's own command instead — overwriting the
+   file in place would desync its records. This applies even with `--force`.
+   Three are recognised:
+
+   | manager | how | told to run |
+   | --- | --- | --- |
+   | apt | `dpkg-query -S` on the resolved path | `apt upgrade podup` |
+   | Homebrew | the path resolves inside a `Cellar` | `brew upgrade podup` |
+   | Scoop | the path is under a Scoop root's `apps` or `shims` | `scoop update podup` |
+
+   apt is asked because `dpkg-query` is an authoritative database lookup. The
+   other two are read off the path: `brew` would cost a process spawn on every
+   update to learn a prefix already visible in the path, and Scoop is a
+   PowerShell function rather than an executable, so there is nothing to spawn.
+   Both path checks are shaped to fail one way only — a layout that merely looks
+   like theirs refuses an update that would have worked, which is visible and
+   recoverable, rather than missing one and rewriting a file its manager still
+   believes it knows.
+
+   cargo-install and manual layouts (`~/.cargo/bin`, `/usr/local/bin`) belong to
+   none of them and update normally.
 3. Fetch `SHA256SUMS` and `SHA256SUMS.sig` and **verify the Ed25519 signature**
    of `SHA256SUMS` against the embedded public key — *before* the binary is
    downloaded, so a tampered or unsigned release is rejected without first

@@ -87,8 +87,9 @@ cargo build --release
 
 ### Self-update
 
-Only for installs that did not come from a package manager — the apt build omits
-it, since apt owns upgrades there.
+Only for installs that did not come from a package manager. The apt build omits
+the subcommand entirely, and an apt, Homebrew or Scoop install is refused before
+anything is downloaded and pointed at that manager's own upgrade command.
 
 ```sh
 podup update            # download and install the latest signed release
