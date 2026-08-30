@@ -1,3 +1,24 @@
+podup (5.5.0) unstable; urgency=medium
+
+  * `podup update` no longer overwrites a Homebrew or Scoop install. It
+    refused only for dpkg, and off Linux did not look at all, so on those
+    two it rewrote the binary underneath a manifest that still claimed to
+    know the contents. It now names each manager's own upgrade command.
+  * On an apt install, the refusal also says when apt will never do it
+    either. unattended-upgrades installs only from origins its own
+    configuration permits, and a machine without that rule is never
+    upgraded and never finds out; the refusal now reads apt's merged
+    configuration and gives the reason and the remedy.
+  * The package now also requires glyndor-archive-keyring. It ships the
+    rule that points unattended-upgrades at Glyndor, so without it the
+    daemon runs, the logs look healthy, and podup is never upgraded.
+  * podup is no longer published to crates.io. The library target stays and
+    the tests build against it; 5.4.0 remains on crates.io because a
+    published version cannot be deleted, only yanked.
+  * No change to any command's flags or output.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sun, 30 Aug 2026 16:04:17 -0500
+
 podup (5.4.0) unstable; urgency=medium
 
   * The package now requires unattended-upgrades as well as podman. An
