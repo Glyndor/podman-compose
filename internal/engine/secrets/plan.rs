@@ -8,6 +8,7 @@ use crate::compose::types::{ComposeFile, Service, ServiceConfigRef, ServiceSecre
 use crate::error::{ComposeError, Result};
 
 use super::super::staging;
+use super::secret_bytes::SecretBytes;
 
 /// Podman's hard limit on secret payload size (from `containers/common`): the
 /// payload must be larger than 0 and strictly smaller than this many bytes.
@@ -21,7 +22,7 @@ pub(super) const MAX_SECRET_BYTES: usize = 512_000;
 /// the secret.
 pub(super) enum Payload {
 	/// Inline `content:`/`environment:` — the bytes, already resolved.
-	Inline(Vec<u8>),
+	Inline(SecretBytes),
 	/// `file:` — the resolved host path to read at creation time.
 	File(PathBuf),
 }
@@ -53,7 +54,7 @@ struct SourceDef<'a> {
 /// Where a secret/config's bytes come from once the compose def is resolved.
 enum Source {
 	/// Inline `content:`/`environment:` — `(scoped podman name, payload bytes)`.
-	Inline(String, Vec<u8>),
+	Inline(String, SecretBytes),
 	/// `file:` — `(scoped podman name, resolved host path)`.
 	File(String, PathBuf),
 	/// `external: true` — name of the pre-existing podman secret.
@@ -166,7 +167,7 @@ fn resolve_source(
 	if let Some(content) = content {
 		return Ok(Some(Source::Inline(
 			scoped_name(project, kind, name),
-			content.as_bytes().to_vec(),
+			SecretBytes::new(content.as_bytes().to_vec()),
 		)));
 	}
 	if let Some(env_var) = environment {
@@ -177,7 +178,7 @@ fn resolve_source(
 		})?;
 		return Ok(Some(Source::Inline(
 			scoped_name(project, kind, name),
-			value.into_bytes(),
+			SecretBytes::new(value.into_bytes()),
 		)));
 	}
 	if let Some(host_path) = file_source {
@@ -363,7 +364,7 @@ mod tests {
 	/// The inline bytes of a plan's payload, or `None` for an external/file source.
 	fn inline_bytes(p: &NativePlan) -> Option<&[u8]> {
 		match &p.payload {
-			Some(Payload::Inline(b)) => Some(b),
+			Some(Payload::Inline(b)) => Some(b.expose_secret()),
 			_ => None,
 		}
 	}

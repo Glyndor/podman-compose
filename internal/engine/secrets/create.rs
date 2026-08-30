@@ -11,6 +11,7 @@ use crate::error::{ComposeError, Result};
 use crate::libpod::{urlencoded, API_PREFIX};
 
 use super::plan::{check_secret_size, Payload};
+use super::secret_bytes::SecretBytes;
 use super::{collect_payload_union, Engine};
 
 impl Engine {
@@ -27,7 +28,7 @@ impl Engine {
 	/// secret carries the `podup.project=<proj>` label so the label-guarded
 	/// teardown on `down` still only removes secrets podup owns.
 	pub(in crate::engine) async fn create_project_secrets(&self, file: &ComposeFile) -> Result<()> {
-		let mut work: Vec<(String, Vec<u8>)> = Vec::new();
+		let mut work: Vec<(String, SecretBytes)> = Vec::new();
 		for (name, payload) in collect_payload_union(&self.project, file, &self.base_dir)? {
 			let bytes = match payload {
 				Payload::Inline(bytes) => bytes,
@@ -35,12 +36,14 @@ impl Engine {
 				// the compose→plan mapping remains unit-testable. The cap is the
 				// same bounded read the compose-adjacent files get; Podman's own
 				// 512 kB secret limit is enforced right after, in `create_secret`.
-				Payload::File(path) => crate::filesystem::read_capped(&path).map_err(|e| {
-					ComposeError::Unsupported(format!(
-						"secret/config source {} could not be read: {e}",
-						path.display()
-					))
-				})?,
+				Payload::File(path) => {
+					SecretBytes::new(crate::filesystem::read_capped(&path).map_err(|e| {
+						ComposeError::Unsupported(format!(
+							"secret/config source {} could not be read: {e}",
+							path.display()
+						))
+					})?)
+				}
 			};
 			work.push((name, bytes));
 		}
@@ -127,8 +130,8 @@ impl Engine {
 	/// recognises and rewraps into a legible "something else created a secret
 	/// of that name in between" message — the operator can act on it without
 	/// having to read the libpod error verbatim.
-	async fn create_secret(&self, name: &str, payload: &[u8]) -> Result<()> {
-		check_secret_size(name, payload.len())?;
+	async fn create_secret(&self, name: &str, payload: &SecretBytes) -> Result<()> {
+		check_secret_size(name, payload.byte_len())?;
 		// Guard the delete-then-create: if a secret of this name already exists and
 		// is not labelled as ours, refuse rather than clobber a foreign secret.
 		// Our own secret (or a 404) is replaced fresh, keeping re-`up` idempotent.
@@ -174,7 +177,7 @@ impl Engine {
 		self.client
 			.post_bytes_json::<serde_json::Value>(
 				&path,
-				bytes::Bytes::copy_from_slice(payload),
+				bytes::Bytes::copy_from_slice(payload.expose_secret()),
 				"application/octet-stream",
 			)
 			.await
