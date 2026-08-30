@@ -13,8 +13,9 @@ are welcome; unsolicited pull requests are not accepted.
 
 It builds and ships **podup**, a docker-compose translator and runner for
 rootless Podman. A single static Rust binary, with no daemon and no
-Python runtime. The Rust library crate is consumed by
-`helmly-agent`; the `podup` binary is what end users install.
+Python runtime. The `podup` binary is what end users install; there is a library
+target and the integration tests build against it, but it is not published to
+crates.io and carries no semver promise about its Rust API.
 
 Nothing automated writes to this repository's git. `release.yml` builds
 binaries and attaches them to a GitHub Release; it never commits back.

@@ -116,8 +116,11 @@ The packaging mechanics carry over regardless of channel:
 
 - **SemVer discipline**, in force since `1.0.0`: the CLI surface is stable and
   breaking changes wait for a major bump.
-- **crates.io** — the crate metadata is in place (`cargo package` verifies
-  clean) for publishing podup as a library; this is independent of the `.deb`.
+- **Not crates.io.** podup carries `publish = false`: it was published for
+  helmly-agent, which turned out not to consume it, and crates.io reports no
+  reverse dependencies. 5.4.0 stays up because a published version cannot be
+  deleted, only yanked, and leaving it reserves the name. The `.deb` was always
+  independent of that.
 
 ## Versioning
 
