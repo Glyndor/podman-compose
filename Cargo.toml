@@ -20,7 +20,9 @@ description = "Translate and run docker-compose files on rootless Podman"
 license = "MIT"
 repository = "https://github.com/Glyndor/podup"
 homepage = "https://glyndor.net/projects/podup"
-documentation = "https://docs.rs/podup"
+# Not docs.rs: it only builds published crates, so it would sit at 5.4.0 for
+# good and read as the current API. The repository's own docs move with the code.
+documentation = "https://github.com/Glyndor/podup/tree/main/docs"
 readme = "README.md"
 keywords = ["podman", "compose", "quadlet", "docker-compose", "rootless"]
 categories = ["command-line-utilities", "virtualization", "development-tools"]

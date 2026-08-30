@@ -69,3 +69,52 @@ fn no_workflow_owned_here_runs_cargo_publish() {
 		 packaging check that assumes it is: {offenders:#?}"
 	);
 }
+
+/// The claim that helmly-agent consumed the library lived in `README.md` **and**
+/// `CONTRIBUTING.md`, and fixing the first did not fix the second. Prose does not
+/// have one home, so grepping the file you happen to be editing is not a check.
+///
+/// Deliberately narrow: these three markers, not the words "crates.io", which the
+/// docs use correctly all over — the threat model lists it as untrusted network,
+/// and the packaging notes explain why podup is not on it.
+#[test]
+fn no_document_still_says_the_library_is_published_or_consumed() {
+	const STALE: [&str; 3] = [
+		"crate is consumed by",
+		"docs.rs/podup",
+		"cargo install podup",
+	];
+
+	let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+	let mut files: Vec<std::path::PathBuf> =
+		vec![root.join("README.md"), root.join("CONTRIBUTING.md")];
+	// `fs::read_dir` rather than `git ls-files`: the Debian package build has no
+	// git binary, and a test that cannot run there is a test that fails there.
+	for entry in fs::read_dir(root.join("docs")).expect("docs/ is readable") {
+		let path = entry.expect("entry is readable").path();
+		if path.extension().is_some_and(|e| e == "md") {
+			files.push(path);
+		}
+	}
+	assert!(
+		files.len() > 3,
+		"too few documents found; the scan is reading the wrong tree"
+	);
+
+	let mut offenders = Vec::new();
+	for f in &files {
+		let Ok(text) = fs::read_to_string(f) else {
+			continue;
+		};
+		let name = f.file_name().unwrap().to_string_lossy().into_owned();
+		for marker in STALE {
+			if text.contains(marker) {
+				offenders.push(format!("{name}: {marker:?}"));
+			}
+		}
+	}
+	assert!(
+		offenders.is_empty(),
+		"podup is not published, so these read as promises it no longer keeps: {offenders:#?}"
+	);
+}
