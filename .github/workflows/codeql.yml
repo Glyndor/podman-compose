@@ -1,0 +1,81 @@
+name: CodeQL
+# Replaces GitHub's default setup, which analysed this repository from a
+# server-side configuration nothing here could see or change.
+#
+# Two reasons, and the second is the one that pays for the first.
+#
+# Default setup only analyses the DEFAULT branch. Every pull request landed on
+# `develop` unscanned, and its alerts appeared later attributed to whichever
+# commit promoted `develop` to `main` — so a finding was never attached to the
+# change that introduced it, and a promotion presented a batch of them at once.
+# Scanning pull requests is what puts the alert next to the diff that caused it.
+#
+# And default setup cannot load a model pack. `rust/cleartext-logging` treats the
+# return value of any function whose NAME matches a sensitive-data heuristic as
+# sensitive — `create_project_secrets` matches on `secret` — so seven assertions
+# formatting a `Result<()>` are reported as logging a secret. The query provides
+# `ModelsAsDataBarrier` for exactly this, and a barrier model needs a config this
+# repository owns. Glyndor/podup#1593 is unrelated; the alerts are #3 to #9.
+#
+# The job names `Analyze (rust)` and the rest carry a matrix value, so editing
+# the language list moves them. Nothing requires them today. Promoting one to
+# required needs a stable gate first, the way `Supported Podman majors` wraps the
+# Podman matrix. See #1552 before adding one.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  # So the first run after switching the repository over does not have to wait
+  # for a push, and so a re-scan can be asked for when only the queries changed.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # Uploading the SARIF results is what needs this; everything else is read.
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # The three languages default setup analysed, kept identical on purpose:
+        # this workflow is meant to change WHERE the analysis runs, not what it
+        # covers, so a difference in the alert count after the switch means the
+        # migration is wrong rather than that the theory was.
+        include:
+          - language: actions
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: rust
+            # `none` rather than `manual`: the Rust extractor reads the source
+            # without a cargo build, which is what default setup did. Building
+            # would need the toolchain pinned here as a sixteenth site, and
+            # pin-watch already calls fifteen too many.
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@fddeee1a7ece751b577e409a89057319e3172939 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@fddeee1a7ece751b577e409a89057319e3172939 # v4
+        with:
+          category: "/language:${{ matrix.language }}"
