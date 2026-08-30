@@ -34,6 +34,7 @@
 mod create;
 mod plan;
 mod remove;
+mod secret_bytes;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -201,7 +202,7 @@ mod tests {
 		assert_eq!(union.len(), 1);
 		assert!(matches!(
 			union.get("proj_secret_tok"),
-			Some(Payload::Inline(b)) if b == b"shared"
+			Some(Payload::Inline(b)) if b.expose_secret() == b"shared"
 		));
 	}
 
