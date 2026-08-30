@@ -1,6 +1,13 @@
 //! Engine integration tests (split for the source line limit).
 use super::*;
 
+// Seven assertions in this suite deliberately do not print the `Result` they
+// assert on, while others still do. `rust/cleartext-logging` takes its sources
+// from the NAME of the called function, so `create_project_secrets` is a taint
+// source and those seven were the sinks it reached through `?`. Nothing
+// syntactic separates them from the rest, so this note is what keeps the
+// inconsistency from reading as an oversight somebody tidies up. #1599.
+
 // ---------------------------------------------------------------------------
 // Pause / unpause
 // ---------------------------------------------------------------------------
@@ -73,7 +80,7 @@ async fn engine_run_command_succeeds() {
 			),
 		)
 		.await;
-	assert!(result.is_ok(), "run failed: {result:?}");
+	assert!(result.is_ok(), "run failed");
 }
 
 #[tokio::test]
@@ -100,9 +107,13 @@ async fn engine_run_nonzero_exit_returns_run_exited() {
 			),
 		)
 		.await;
+	// Split rather than flattened. Dropping the formatted value would otherwise
+	// lose the difference between "succeeded" and "failed with the wrong
+	// variant"; `expect_err` prints the `Ok` value, which here is `()`.
+	let err = result.expect_err("expected RunExited, got Ok");
 	assert!(
-		matches!(result, Err(podup::ComposeError::RunExited(_))),
-		"expected RunExited, got {result:?}"
+		matches!(err, podup::ComposeError::RunExited(_)),
+		"expected RunExited, got a different ComposeError variant"
 	);
 }
 

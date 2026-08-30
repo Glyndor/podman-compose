@@ -5,6 +5,13 @@
 //! engine carrying the overrides under test.
 use super::*;
 
+// Seven assertions in this suite deliberately do not print the `Result` they
+// assert on, while others still do. `rust/cleartext-logging` takes its sources
+// from the NAME of the called function, so `create_project_secrets` is a taint
+// source and those seven were the sinks it reached through `?`. Nothing
+// syntactic separates them from the rest, so this note is what keeps the
+// inconsistency from reading as an oversight somebody tidies up. #1599.
+
 #[tokio::test]
 async fn engine_run_applies_user_workdir_env_and_entrypoint() {
 	let client = match podman().await {
@@ -45,7 +52,7 @@ async fn engine_run_applies_user_workdir_env_and_entrypoint() {
 		.await;
 	assert!(
 		result.is_ok(),
-		"run with user/workdir/env/entrypoint failed: {result:?}"
+		"run with user/workdir/env/entrypoint failed"
 	);
 }
 
@@ -98,10 +105,7 @@ async fn engine_run_applies_volume_publish_and_interactive() {
 			),
 		)
 		.await;
-	assert!(
-		result.is_ok(),
-		"run with volume/publish/interactive failed: {result:?}"
-	);
+	assert!(result.is_ok(), "run with volume/publish/interactive failed");
 }
 
 #[cfg(feature = "test-helpers")]
@@ -147,7 +151,7 @@ async fn engine_run_no_deps_skips_dependency_startup() {
 		.unwrap_or_default();
 	let dep_present = names.iter().any(|n| n.contains("-dep"));
 	engine.down(&file).await.unwrap();
-	assert!(result.is_ok(), "run --no-deps failed: {result:?}");
+	assert!(result.is_ok(), "run --no-deps failed");
 	assert!(
 		!dep_present,
 		"dependency container created despite --no-deps: {names:?}"
@@ -188,7 +192,7 @@ async fn engine_run_starts_dependencies_by_default() {
 		.unwrap_or_default();
 	let dep_present = names.iter().any(|n| n.contains("-dep"));
 	engine.down(&file).await.unwrap();
-	assert!(result.is_ok(), "run with deps failed: {result:?}");
+	assert!(result.is_ok(), "run with deps failed");
 	assert!(
 		dep_present,
 		"dependency was not started by default: {names:?}"

@@ -4,21 +4,91 @@
 //! manager's record of the installed file. When the running binary is tracked by
 //! such a manager the caller refuses and redirects the user to it.
 
-#[cfg(target_os = "linux")]
 use std::path::Path;
 
 use crate::ComposeError;
 
-/// Name of the system package manager that owns the running binary, if any.
+/// Name of the package manager that owns the running binary, if any.
 ///
-/// Only `dpkg`/`apt` is detected, on Linux. cargo-install layouts
-/// (`~/.cargo/bin`, `/usr/local/bin`) are not owned by `dpkg` and update
-/// normally. A path no package owns returns `None`.
-#[cfg(target_os = "linux")]
+/// Three are detected: apt on Linux, Homebrew on macOS and Linux, and Scoop on
+/// Windows. cargo-install layouts (`~/.cargo/bin`, `/usr/local/bin`) belong to
+/// none of them and update normally, and a path no manager owns returns `None`.
+///
+/// apt is asked; the other two are read off the path. That asymmetry is not
+/// laziness. `dpkg-query` is a real database lookup with an authoritative
+/// answer, while `brew` costs a process spawn on every `podup update` to learn
+/// a prefix that is already visible in the path, and Scoop is a PowerShell
+/// function rather than an executable, so there is nothing to spawn at all.
+///
+/// Both path checks can be wrong in one direction only, which is the direction
+/// that matters. A layout that merely looks like Homebrew's or Scoop's makes
+/// podup refuse to self-update and send the user to a package manager that does
+/// not own it — wrong, visible, and recoverable by hand. The opposite mistake,
+/// missing a managed install, silently rewrites a file whose manager still
+/// believes it knows the contents. These heuristics are shaped to fail the
+/// first way.
 pub fn managing_package_manager() -> Option<&'static str> {
 	let exe = std::env::current_exe().ok()?;
 	let path = std::fs::canonicalize(&exe).unwrap_or(exe);
-	dpkg_owns(&path).then_some("apt")
+
+	#[cfg(target_os = "linux")]
+	if dpkg_owns(&path) {
+		return Some("apt");
+	}
+	if homebrew_owns(&path) {
+		return Some("Homebrew");
+	}
+	if scoop_owns(&path) {
+		return Some("Scoop");
+	}
+	None
+}
+
+/// Whether `path` sits inside a Homebrew Cellar.
+///
+/// Homebrew installs every formula under `<prefix>/Cellar/<name>/<version>/`
+/// and links a symlink into `<prefix>/bin`, so the caller's `canonicalize`
+/// resolves into the Cellar whichever of the two the user invoked. The prefix
+/// itself moves — `/opt/homebrew` on Apple silicon, `/usr/local` on Intel,
+/// `/home/linuxbrew/.linuxbrew` on Linux, anywhere at all for a custom install
+/// — but the `Cellar` component does not, which is what makes it the thing to
+/// match rather than any of the prefixes.
+fn homebrew_owns(path: &Path) -> bool {
+	path.components()
+		.any(|c| c.as_os_str().eq_ignore_ascii_case("Cellar"))
+}
+
+/// Whether `path` sits inside a Scoop installation.
+///
+/// Scoop puts apps in `<root>/apps/<name>/<version>/` with shims in
+/// `<root>/shims`. The shim is a launcher that starts the real executable, so
+/// `current_exe` is the one under `apps` either way. The root defaults to
+/// `%USERPROFILE%\scoop` and is moved with the `SCOOP` environment variable,
+/// so that is consulted first; the `scoop`-then-`apps` pair is the fallback for
+/// a root the variable does not name, such as a machine-wide `SCOOP_GLOBAL`
+/// install another user configured.
+fn scoop_owns(path: &Path) -> bool {
+	scoop_owns_under(path, std::env::var_os("SCOOP").as_deref().map(Path::new))
+}
+
+/// The body of [`scoop_owns`] with the root passed in rather than read from the
+/// environment, so the configured-root branch can be tested without mutating
+/// `SCOOP` — which in a parallel test binary is a race against every other test
+/// in the process rather than a fixture.
+fn scoop_owns_under(path: &Path, root: Option<&Path>) -> bool {
+	if let Some(root) = root {
+		if path.starts_with(root.join("apps")) || path.starts_with(root.join("shims")) {
+			return true;
+		}
+	}
+	let parts: Vec<_> = path
+		.components()
+		.map(|c| c.as_os_str().to_owned())
+		.collect();
+	parts.windows(2).any(|w| {
+		w[0].eq_ignore_ascii_case("scoop")
+			&& (w[1].eq_ignore_ascii_case("apps") || w[1].eq_ignore_ascii_case("shims"))
+	})
 }
 
 /// Whether dpkg's database records `path` as belonging to an installed package.
@@ -57,24 +127,304 @@ fn dpkg_owns(path: &Path) -> bool {
 	}
 }
 
-/// Non-Linux platforms have no supported package-manager-managed install yet.
-#[cfg(not(target_os = "linux"))]
-pub fn managing_package_manager() -> Option<&'static str> {
-	None
+/// What this machine's unattended-upgrades configuration says about Glyndor.
+#[derive(Debug, PartialEq)]
+pub(crate) enum GlyndorAutoUpdate {
+	/// Some rule permits the origin and nothing vetoes the package.
+	Permitted,
+	/// Nothing will ever install a Glyndor update here, with the reason.
+	Blocked(&'static str),
+	/// The question could not be answered, so nothing is said about it.
+	Unknown,
+}
+
+/// Read the verdict out of `apt-config dump` output.
+///
+/// Pure so the three configurations that matter can be fed to it directly.
+/// A check that has only ever been seen to agree with the configuration we
+/// write ourselves has not been tested against the ones it meets in the field.
+///
+/// **Two lists, not one.** unattended-upgrades' own README documents
+/// `Allowed-Origins` *or* `Origins-Pattern` as alternatives, and the keyring
+/// happens to write the first. An operator using the second is covered, and a
+/// check that knew only about the first would tell them nothing will ever
+/// update them while their machine updates itself fine. That false alarm is the
+/// noise this exists to avoid, so it would have been worse than saying nothing.
+///
+/// **And a third way to be stuck.** `Package-Blacklist` vetoes by name, so an
+/// allowed origin is not sufficient on its own.
+///
+/// The origin match is deliberately loose — any entry mentioning `Glyndor`
+/// counts, rather than `Glyndor:stable` exactly. An operator who allowed a
+/// different Glyndor suite has thought about this and does not need telling;
+/// the machine worth warning is the one whose configuration has never heard of
+/// Glyndor at all.
+pub(crate) fn glyndor_auto_update(apt_config_dump: &str) -> GlyndorAutoUpdate {
+	let mut saw_any_rule = false;
+	let mut permits_glyndor = false;
+	let mut blacklists_podup = false;
+
+	for line in apt_config_dump.lines() {
+		let line = line.trim();
+		let Some(rest) = line.strip_prefix("Unattended-Upgrade::") else {
+			continue;
+		};
+		if rest.starts_with("Allowed-Origins") || rest.starts_with("Origins-Pattern") {
+			saw_any_rule = true;
+			if rest.contains("Glyndor") {
+				permits_glyndor = true;
+			}
+		} else if rest.starts_with("Package-Blacklist") && rest.contains("podup") {
+			blacklists_podup = true;
+		}
+	}
+
+	if blacklists_podup {
+		return GlyndorAutoUpdate::Blocked(
+			"podup is in Unattended-Upgrade::Package-Blacklist, so unattended-upgrades \
+			 will never install an update for it even though the origin is allowed",
+		);
+	}
+	if permits_glyndor {
+		return GlyndorAutoUpdate::Permitted;
+	}
+	// No rule of either kind was seen at all: unattended-upgrades is probably not
+	// configured on this machine, or `apt-config` returned something this does not
+	// understand. Either way the honest answer is that the question was not
+	// answered, not that the machine is broken.
+	if !saw_any_rule {
+		return GlyndorAutoUpdate::Unknown;
+	}
+	GlyndorAutoUpdate::Blocked(
+		"the Glyndor archive is in neither Unattended-Upgrade::Allowed-Origins nor \
+		 Unattended-Upgrade::Origins-Pattern, so unattended-upgrades will never \
+		 install a podup update. Installing glyndor-archive-keyring adds the rule; \
+		 `apt upgrade` once is what pulls it in",
+	)
+}
+
+/// Ask apt for its merged configuration. `None` when it cannot be asked.
+fn apt_config_dump() -> Option<String> {
+	let out = std::process::Command::new("apt-config")
+		.arg("dump")
+		.output()
+		.ok()?;
+	out.status
+		.success()
+		.then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// Error returned when the running binary is managed by package manager `pm`.
 pub fn package_managed_error(pm: &str) -> ComposeError {
+	// The example command used to be `apt upgrade podup` unconditionally, which
+	// was correct while apt was the only manager detected and is a wrong
+	// instruction the moment it is not.
+	let how = match pm {
+		"Homebrew" => "brew upgrade podup",
+		"Scoop" => "scoop update podup",
+		_ => "apt upgrade podup",
+	};
+	// For apt only, and only here: the operator has just asked to update and is
+	// being sent to a mechanism that, on some machines, will never run. Telling
+	// them to use apt without saying that would be a correct instruction and a
+	// misleading one. This is the single place it is worth the process spawn --
+	// nothing on an ordinary command path pays for it.
+	let also = if pm == "apt" {
+		match apt_config_dump().as_deref().map(glyndor_auto_update) {
+			Some(GlyndorAutoUpdate::Blocked(why)) => format!(". Note that {why}"),
+			_ => String::new(),
+		}
+	} else {
+		String::new()
+	};
 	ComposeError::Update(format!(
 		"this podup was installed by {pm}; update it with your package manager \
-		 (e.g. `apt upgrade podup`) rather than `podup update`, which would break \
-		 the package's record of the file"
+		 (`{how}`) rather than `podup update`, which would break the package's \
+		 record of the file{also}"
 	))
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// Paths here use `/` even for the Windows layouts. `Path::components` splits
+	/// on `\\` as well when it runs on Windows, so the component sequence these
+	/// assert on is the one the real code sees there; a fixture written with
+	/// `\\` would simply not parse into components on Linux and the tests would
+	/// pass by asserting nothing.
+	/// The configuration on the machine this was written on, verbatim from
+	/// `apt-config dump`. A covered machine, and the one shape the check would
+	/// have been accidentally fitted to if it were the only fixture.
+	const REAL_COVERED: &str = "\
+Unattended-Upgrade::Allowed-Origins \"\";
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}\";
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}-security\";
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}ESMApps:${distro_codename}-apps-security\";
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}ESM:${distro_codename}-infra-security\";
+Unattended-Upgrade::Allowed-Origins:: \"Glyndor:stable\";
+Unattended-Upgrade::DevRelease \"auto\";
+";
+
+	#[test]
+	fn the_configuration_our_keyring_writes_reads_as_permitted() {
+		assert_eq!(
+			glyndor_auto_update(REAL_COVERED),
+			GlyndorAutoUpdate::Permitted
+		);
+	}
+
+	/// The case the first draft of this check would have got wrong. The package's
+	/// own README documents `Allowed-Origins` **or** `Origins-Pattern`, so an
+	/// operator using the second is covered — and a check that knew only about
+	/// the first would have told them nothing will ever update them while their
+	/// machine updated itself fine.
+	#[test]
+	fn an_origins_pattern_machine_is_covered_too() {
+		let dump = "\
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}-security\";
+Unattended-Upgrade::Origins-Pattern:: \"origin=Glyndor\";
+";
+		assert_eq!(glyndor_auto_update(dump), GlyndorAutoUpdate::Permitted);
+	}
+
+	/// Allowed origin and a vetoed package: an allowlist that looks perfect on a
+	/// machine that will still never update podup.
+	#[test]
+	fn a_blacklisted_package_is_blocked_despite_an_allowed_origin() {
+		let dump = "\
+Unattended-Upgrade::Allowed-Origins:: \"Glyndor:stable\";
+Unattended-Upgrade::Package-Blacklist:: \"podup\";
+";
+		let GlyndorAutoUpdate::Blocked(why) = glyndor_auto_update(dump) else {
+			panic!("a blacklisted podup must be Blocked");
+		};
+		assert!(
+			why.contains("Package-Blacklist"),
+			"the reason must name the list that is doing it: {why}"
+		);
+	}
+
+	/// The machine #1602 is about: unattended-upgrades configured and running,
+	/// Glyndor in neither list, podup never updated and never told.
+	#[test]
+	fn a_machine_with_no_glyndor_rule_is_blocked_and_told_the_remedy() {
+		let dump = "\
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}\";
+Unattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}-security\";
+";
+		let GlyndorAutoUpdate::Blocked(why) = glyndor_auto_update(dump) else {
+			panic!("a machine with no Glyndor rule must be Blocked");
+		};
+		assert!(
+			why.contains("glyndor-archive-keyring") && why.contains("apt upgrade"),
+			"a warning without the remedy is one the reader can do nothing with: {why}"
+		);
+	}
+
+	/// No rule of either kind: unattended-upgrades is not configured, or the
+	/// output is not what this understands. Saying nothing beats guessing, and
+	/// `Unknown` is what the caller renders as silence.
+	#[test]
+	fn a_machine_with_no_rules_at_all_is_unknown_rather_than_blocked() {
+		assert_eq!(
+			glyndor_auto_update("APT::Architecture \"amd64\";\n"),
+			GlyndorAutoUpdate::Unknown
+		);
+		assert_eq!(glyndor_auto_update(""), GlyndorAutoUpdate::Unknown);
+	}
+
+	#[test]
+	fn homebrew_layouts_are_recognised_on_every_prefix() {
+		for p in [
+			"/opt/homebrew/Cellar/podup/5.4.0/bin/podup",
+			"/usr/local/Cellar/podup/5.4.0/bin/podup",
+			"/home/linuxbrew/.linuxbrew/Cellar/podup/5.4.0/bin/podup",
+			"/somewhere/entirely/custom/Cellar/podup/5.4.0/bin/podup",
+		] {
+			assert!(homebrew_owns(Path::new(p)), "not detected as Homebrew: {p}");
+		}
+	}
+
+	#[test]
+	fn ordinary_layouts_are_not_mistaken_for_homebrew() {
+		for p in [
+			"/usr/local/bin/podup",
+			"/home/me/.cargo/bin/podup",
+			"/usr/bin/podup",
+			"/home/me/podup/target/release/podup",
+		] {
+			assert!(
+				!homebrew_owns(Path::new(p)),
+				"falsely detected as Homebrew: {p}"
+			);
+		}
+	}
+
+	#[test]
+	fn scoop_layouts_are_recognised_without_the_variable() {
+		for p in [
+			"/c/Users/me/scoop/apps/podup/5.4.0/podup.exe",
+			"/c/Users/me/scoop/shims/podup.exe",
+			"/c/ProgramData/scoop/apps/podup/current/podup.exe",
+		] {
+			assert!(
+				scoop_owns_under(Path::new(p), None),
+				"not detected as Scoop: {p}"
+			);
+		}
+	}
+
+	#[test]
+	fn a_relocated_scoop_root_is_recognised_through_the_variable() {
+		// The fallback cannot see this one: no component is named `scoop`.
+		let exe = Path::new("/d/tools/apps/podup/5.4.0/podup.exe");
+		assert!(
+			!scoop_owns_under(exe, None),
+			"the fallback should not match a root with no `scoop` component"
+		);
+		assert!(
+			scoop_owns_under(exe, Some(Path::new("/d/tools"))),
+			"a root named by SCOOP must be honoured"
+		);
+	}
+
+	#[test]
+	fn ordinary_layouts_are_not_mistaken_for_scoop() {
+		for p in [
+			"/c/Program Files/podup/podup.exe",
+			"/home/me/.cargo/bin/podup",
+			// `scoop` present but not followed by apps or shims: a checkout of
+			// the bucket repository, not an install.
+			"/home/me/src/scoop/bucket/podup.json",
+		] {
+			assert!(
+				!scoop_owns_under(Path::new(p), None),
+				"falsely detected as Scoop: {p}"
+			);
+		}
+	}
+
+	#[test]
+	fn the_error_tells_each_manager_its_own_command() {
+		for (pm, cmd) in [
+			("apt", "apt upgrade podup"),
+			("Homebrew", "brew upgrade podup"),
+			("Scoop", "scoop update podup"),
+		] {
+			let ComposeError::Update(msg) = package_managed_error(pm) else {
+				panic!("expected an Update error");
+			};
+			assert!(
+				msg.contains(pm),
+				"{pm} is not named in its own error: {msg}"
+			);
+			assert!(
+				msg.contains(cmd),
+				"{pm} is told to run something other than {cmd}: {msg}"
+			);
+		}
+	}
 
 	#[test]
 	fn package_managed_error_names_the_manager() {

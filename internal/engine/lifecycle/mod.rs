@@ -526,4 +526,6 @@ mod drop_recheck_tests;
 #[cfg(test)]
 mod scale_tests;
 #[cfg(test)]
+mod teardown_tests;
+#[cfg(test)]
 mod tests;

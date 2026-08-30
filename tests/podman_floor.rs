@@ -1,12 +1,15 @@
 //! The binary stanza's relationships, and the Podman floor that one of them
 //! carries.
 //!
-//! Two packages are required, for different reasons that look alike in the
+//! Three packages are required, for different reasons that look alike in the
 //! `Depends` field. podman because podup cannot work without it.
 //! unattended-upgrades because of what happens when podup is not updated:
 //! only the latest release is supported, and `podup update` refuses on a
 //! dpkg-owned binary, so for an apt install the package manager is the only
-//! update path.
+//! update path. glyndor-archive-keyring because it is what points that engine
+//! at Glyndor: it ships the `.sources` file and the `Allowed-Origins` entry,
+//! and without it unattended-upgrades runs, the logs look healthy, and podup is
+//! never upgraded.
 //!
 //! The Podman floor is written in three places and nothing derives one from
 //! another.
@@ -155,6 +158,37 @@ fn the_package_requires_unattended_upgrades() {
 			.any(|l| l.starts_with("Recommends:") && l.contains("unattended-upgrades")),
 		"unattended-upgrades is declared as a Recommends as well as a Depends, \
 		 which is apt being told two different things about one package"
+	);
+}
+
+/// The third relationship, and the one that makes the second do anything.
+///
+/// `unattended-upgrades` is the engine; this is what aims it. The keyring
+/// package ships `/etc/apt/sources.list.d/glyndor.sources` and
+/// `/etc/apt/apt.conf.d/51glyndor-unattended-upgrades`, and with neither of
+/// them the daemon runs against Debian's own security suite and nothing else.
+/// Two paths reached that state — `dpkg -i` of a release `.deb`, and adding the
+/// repository by hand — and on both, podup installed and never updated again.
+/// #1602.
+#[test]
+fn the_package_requires_the_archive_keyring() {
+	let control = read("debian/control");
+	let lines = binary_stanza_relationships(&control);
+	assert!(
+		lines
+			.iter()
+			.any(|l| l.starts_with("Depends:") && l.contains("glyndor-archive-keyring")),
+		"glyndor-archive-keyring must be a Depends rather than a Recommends. As a \
+		 Recommends, `--no-install-recommends` and every `dpkg -i` skip it, and what \
+		 they skip is the file that tells unattended-upgrades the Glyndor archive is \
+		 allowed at all. Found: {lines:?}"
+	);
+	assert!(
+		!lines
+			.iter()
+			.any(|l| l.starts_with("Recommends:") && l.contains("glyndor-archive-keyring")),
+		"glyndor-archive-keyring is declared as a Recommends as well as a Depends, \
+		 which is contradictory: {lines:?}"
 	);
 }
 

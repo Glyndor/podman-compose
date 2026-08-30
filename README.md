@@ -7,7 +7,7 @@ binary, with no daemon and no Python runtime.
 
 [![CI](https://github.com/Glyndor/podup/actions/workflows/ci.yml/badge.svg)](https://github.com/Glyndor/podup/actions/workflows/ci.yml)
 
-Package: [crates.io/crates/podup](https://crates.io/crates/podup) · MSRV 1.85 · License: MIT
+MSRV 1.85 · License: MIT
 
 <img src="docs/assets/podup-demo.gif" alt="podup running a compose stack on rootless Podman" width="760">
 
@@ -26,10 +26,24 @@ is anything it had to install just to check the key.
 
 podup needs **Podman ≥ 5.0** (rootless). The package depends on it, so apt
 installs it alongside podup, and refuses the install on a distribution whose
-Podman is older than that. It also depends on `unattended-upgrades`: an
-apt-installed podup updates through apt and nothing else, since `podup update`
-refuses to replace a dpkg-owned binary, and only the latest release is
-supported. Podman is daemonless, but podup speaks the libpod API, so the
+Podman is older than that. It also depends on `unattended-upgrades`, because an
+apt-installed podup updates through apt and nothing else: `podup update` refuses
+to replace a dpkg-owned binary, and only the latest release is supported. And on
+`glyndor-archive-keyring`, which is what points that engine at Glyndor rather
+than only at Debian's own security suite: it ships the `.sources` file and the
+`Allowed-Origins` entry, and the entry is appended to whatever the machine
+already allows rather than replacing it.
+
+That dependency guarantees `unattended-upgrades` is installed, not that it is
+running. What switches it on is `/etc/apt/apt.conf.d/20auto-upgrades`, which is
+system-wide policy for every package on the machine rather than podup's to set,
+so no podup maintainer script writes it. The one-line installer above writes it
+when it is absent, and Ubuntu normally has it already. If you registered the
+archive yourself and then ran `apt install podup` on Debian, podup and the
+allowlist are both installed but nothing upgrades it until you run `apt upgrade`. `systemctl status unattended-upgrades` says which of the two you
+have.
+
+Podman is daemonless, but podup speaks the libpod API, so the
 socket still has to be listening:
 
 ```sh
@@ -73,8 +87,9 @@ cargo build --release
 
 ### Self-update
 
-Only for installs that did not come from a package manager — the apt build omits
-it, since apt owns upgrades there.
+Only for installs that did not come from a package manager. The apt build omits
+the subcommand entirely, and an apt, Homebrew or Scoop install is refused before
+anything is downloaded and pointed at that manager's own upgrade command.
 
 ```sh
 podup update            # download and install the latest signed release
@@ -142,9 +157,10 @@ Full command reference: [docs/commands.md](docs/commands.md).
 ## Design
 
 Rootless-native libpod API, real compose-spec support (`extends`, profiles,
-`develop.watch`, inline secrets), and systemd Quadlet export. The Rust library
-crate is consumed by [helmly-agent](https://github.com/Glyndor/helmly-agent);
-API docs at [docs.rs/podup](https://docs.rs/podup).
+`develop.watch`, inline secrets), and systemd Quadlet export. There is a library
+target, and the integration tests are built against it, but podup is distributed
+as a binary: it is not published to crates.io and carries no semver promise about
+its Rust API.
 
 ```mermaid
 sequenceDiagram

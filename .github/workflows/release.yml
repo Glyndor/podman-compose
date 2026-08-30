@@ -606,25 +606,3 @@ jobs:
 
       - name: Remove release artifacts
         run: rm -f podup-* podup_* NOTICES.html* SHA256SUMS SHA256SUMS.sig install.sh.sig install.ps1.sig
-
-      # `cargo publish` refuses a dirty tree, and it does so *after* the
-      # release already exists — which is unrecoverable in place, since
-      # `gh release create` will not accept a tag that has one. Checking here
-      # turns that into a named failure before anything is published. v3.7.1
-      # lost its crates.io publish to a helper checked out into the workspace
-      # (#1462); this is the guard that would have named it.
-      - name: Working tree must be clean before publishing
-        run: |
-          set -euo pipefail
-          dirty="$(git status --porcelain)"
-          if [ -n "$dirty" ]; then
-            echo "::error::working tree is not clean; cargo publish would refuse it"
-            echo "$dirty" | head -20
-            exit 1
-          fi
-          echo "Working tree is clean."
-
-      - name: Publish to crates.io
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --locked

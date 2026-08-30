@@ -2,6 +2,7 @@ use crate::quadlet::{QuadletOutput, QuadletUnit};
 
 mod fields;
 mod fields_logging;
+mod fields_resources;
 mod health;
 mod network_volume;
 mod units;
