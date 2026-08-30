@@ -1,4 +1,4 @@
-//! Every Cargo lockfile in the tree is in Dependabot's rotation.
+//! Every crate with its own lockfile is in Dependabot's rotation.
 //!
 //! `Cargo.toml` excludes `fuzz` and `bench/timeit` from the workspace, so each
 //! resolves its own dependencies into its own `Cargo.lock`. Dependabot's cargo
@@ -13,7 +13,6 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 fn repo(rel: &str) -> String {
 	let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
@@ -44,37 +43,74 @@ fn cargo_directories(yaml: &str) -> Vec<String> {
 	dirs
 }
 
-/// Every tracked `Cargo.lock`, as the directory Dependabot would name for it.
-fn tracked_lockfile_directories() -> Vec<String> {
-	let out = Command::new("git")
-		.args([
-			"ls-files",
-			"-z",
-			"Cargo.lock",
-			"*/Cargo.lock",
-			"**/Cargo.lock",
-		])
-		.current_dir(env!("CARGO_MANIFEST_DIR"))
-		.output()
-		.expect("git ls-files runs");
-	assert!(out.status.success(), "git ls-files failed: {out:?}");
-	let mut dirs: Vec<String> = String::from_utf8_lossy(&out.stdout)
-		.split('\0')
-		.filter(|p| !p.is_empty())
-		.map(|p| match p.rsplit_once('/') {
-			Some((parent, _)) => format!("/{parent}"),
-			None => "/".to_string(),
-		})
-		.collect();
+/// The directories Dependabot has to name, derived from the cause rather than
+/// from the tree.
+///
+/// A crate listed in `[workspace] exclude` resolves its own dependencies into
+/// its own `Cargo.lock`, which is exactly why the entry for `/` does not reach
+/// it. Reading that list is therefore the same question as finding the
+/// lockfiles, and it survives environments the tree does not: the first version
+/// of this shelled out to `git ls-files`, and the Debian package build has no
+/// `git` binary at all, so both tests died with `NotFound` inside
+/// `dpkg-buildpackage` rather than reporting anything.
+fn directories_needing_an_entry() -> Vec<String> {
+	let manifest = repo("Cargo.toml");
+
+	// Anchored to the `[workspace]` table on purpose. `Cargo.toml` carries a
+	// second `exclude`, under `[package]`, listing what `cargo package` leaves
+	// out of the crate archive — and the file says so in a comment right above
+	// it: "Not to be confused with `[workspace] exclude`". Matching the first
+	// `exclude` in the file finds that one, whose entries are not crates, so the
+	// derived list comes back as just `/` and the coverage test passes by having
+	// nothing to check.
+	let mut in_workspace = false;
+	let mut list = String::new();
+	let mut collecting = false;
+	for line in manifest.lines() {
+		let t = line.trim();
+		if t.starts_with('[') && !collecting {
+			in_workspace = t == "[workspace]";
+			continue;
+		}
+		if in_workspace && t.starts_with("exclude") {
+			collecting = true;
+		}
+		if collecting {
+			list.push_str(t);
+			if t.contains(']') {
+				break;
+			}
+		}
+	}
+
+	let inner = list
+		.split_once('[')
+		.map(|(_, rest)| rest.split_once(']').map(|(i, _)| i).unwrap_or(""))
+		.unwrap_or("");
+
+	let mut dirs = vec!["/".to_string()];
+	for raw in inner.split(',') {
+		let name = raw.trim().trim_matches('"');
+		if name.is_empty() {
+			continue;
+		}
+		// An excluded path is only a crate if it has a manifest of its own.
+		if Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join(name)
+			.join("Cargo.toml")
+			.is_file()
+		{
+			dirs.push(format!("/{name}"));
+		}
+	}
 	dirs.sort();
-	dirs.dedup();
 	dirs
 }
 
 #[test]
 fn every_cargo_lockfile_has_a_dependabot_entry() {
 	let declared = cargo_directories(&repo(".github/dependabot.yml"));
-	let present = tracked_lockfile_directories();
+	let present = directories_needing_an_entry();
 
 	// A scanner that found nothing would pass this test by reporting no gaps,
 	// which is the failure this repository keeps meeting. Both sides get a
@@ -82,7 +118,18 @@ fn every_cargo_lockfile_has_a_dependabot_entry() {
 	// least the entry for it.
 	assert!(
 		present.contains(&"/".to_string()),
-		"no workspace Cargo.lock found — the scanner is reading the wrong tree: {present:?}"
+		"no workspace entry derived — the scanner is reading the wrong tree: {present:?}"
+	);
+	// The floor that matters, and the one the first version of this test did not
+	// have. `Cargo.toml` excludes two crates, so a derived list of just `/` means
+	// the parser broke rather than that there is nothing to cover — and with
+	// nothing to cover, the comparison below passes while checking nothing. That
+	// is exactly how the first version passed against the wrong `exclude` key.
+	assert!(
+		present.len() > 1,
+		"only the workspace root was derived from [workspace] exclude, so this test would \
+		 pass without checking anything. The parser is broken, or the exclusions are gone \
+		 and this assertion is what should be updated: {present:?}"
 	);
 	assert!(
 		declared.contains(&"/".to_string()),
@@ -92,8 +139,9 @@ fn every_cargo_lockfile_has_a_dependabot_entry() {
 	let missing: Vec<&String> = present.iter().filter(|d| !declared.contains(d)).collect();
 	assert!(
 		missing.is_empty(),
-		"these Cargo.lock files are in the tree and in no Dependabot cargo entry, so nothing \
-		 ever updates them: {missing:?}. Declared: {declared:?}"
+		"these crates are excluded from the workspace, so they carry their own Cargo.lock, \
+		 and no Dependabot cargo entry names them — nothing ever updates them: {missing:?}. \
+		 Declared: {declared:?}"
 	);
 }
 
@@ -104,10 +152,11 @@ fn no_dependabot_cargo_entry_points_at_a_directory_with_no_lockfile() {
 	// fail on it, it just never opens anything, which reads identically to a
 	// crate with no updates available.
 	let declared = cargo_directories(&repo(".github/dependabot.yml"));
-	let present = tracked_lockfile_directories();
+	let present = directories_needing_an_entry();
 	let stale: Vec<&String> = declared.iter().filter(|d| !present.contains(d)).collect();
 	assert!(
 		stale.is_empty(),
-		"these Dependabot cargo entries name a directory with no tracked Cargo.lock: {stale:?}"
+		"these Dependabot cargo entries name a directory that is neither the workspace root \
+		 nor an excluded crate: {stale:?}"
 	);
 }
