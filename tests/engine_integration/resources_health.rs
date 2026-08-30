@@ -1,6 +1,13 @@
 //! Engine integration tests (split for the source line limit).
 use super::*;
 
+// Seven assertions in this suite deliberately do not print the `Result` they
+// assert on, while others still do. `rust/cleartext-logging` takes its sources
+// from the NAME of the called function, so `create_project_secrets` is a taint
+// source and those seven were the sinks it reached through `?`. Nothing
+// syntactic separates them from the rest, so this note is what keeps the
+// inconsistency from reading as an oversight somebody tidies up. #1599.
+
 // Volumes, secrets, configs
 // ---------------------------------------------------------------------------
 
@@ -141,7 +148,7 @@ async fn file_secret_bound() {
 	engine.down(&file).await.unwrap();
 	assert!(
 		read.is_ok(),
-		"the container could not read /run/secrets/filesecret: {read:?}"
+		"the container could not read /run/secrets/filesecret"
 	);
 }
 
