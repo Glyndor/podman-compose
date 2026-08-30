@@ -79,6 +79,43 @@ updates:
     commit-message:
       prefix: chore
 
+  # `Cargo.toml` excludes `fuzz` and `bench/timeit` from the workspace, so each
+  # carries its own `Cargo.lock` and the `/` entry above never touches either.
+  # That is not a detail of layout: a lockfile nothing updates is a lockfile
+  # that keeps whatever advisory it was pinned to, and `cargo audit` in
+  # `audit.yml` reads the workspace lock rather than these two. The fuzz harness
+  # is the sharper of the pair, since it exists to be fed hostile input.
+  #
+  # Both group every update type, majors included, unlike the crate above. The
+  # reason the main entry leaves majors out is that a major can change what
+  # podup does for a user; nothing here is shipped, so a major in either is the
+  # same question as a patch — does the harness still build and run.
+  - package-ecosystem: "cargo"
+    directory: "/fuzz"
+    schedule:
+      interval: "daily"
+    labels: ["type:deps", "type:ci"]
+    open-pull-requests-limit: 5
+    target-branch: "develop"
+    groups:
+      fuzz-crate:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+
+  - package-ecosystem: "cargo"
+    directory: "/bench/timeit"
+    schedule:
+      interval: "daily"
+    labels: ["type:deps", "type:ci"]
+    open-pull-requests-limit: 5
+    target-branch: "develop"
+    groups:
+      bench-timeit-crate:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+
   - package-ecosystem: "pip"
     directory: "/.github/scripts"
     # The release-signing scripts (`.github/scripts/sign.py`,
