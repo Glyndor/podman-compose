@@ -56,7 +56,10 @@ Architecture: any
 # What this does and does not buy, so nobody reads more into it than it does.
 # It guarantees the package is PRESENT. It does not guarantee it RUNS: Debian
 # ships no `/etc/apt/apt.conf.d/20auto-upgrades`, which is the switch, and
-# podup ships no maintainer scripts to write one. Ubuntu server ships both.
+# podup ships no maintainer scripts to write one. An Ubuntu install normally
+# has the switch already, though measured on 26.04 no package owns the file and
+# it is not one of unattended-upgrades' conffiles, so that is true about the
+# outcome and wrong about the mechanism.
 # The bootstrap installer at apt.glyndor.net/install/podup writes that file
 # when it is the thing that installed the package, and deliberately leaves an
 # existing configuration alone.
@@ -65,7 +68,30 @@ Architecture: any
 # now takes podup with it. An operator who schedules upgrades by hand, which
 # the releases standard permits, has to keep the package installed and switch
 # it off through its own configuration instead.
-Depends: ${shlibs:Depends}, ${misc:Depends}, podman (>= 5.0), unattended-upgrades
+#
+# glyndor-archive-keyring is the third, and it is what makes the second mean
+# anything. unattended-upgrades is the engine; the keyring is what points it at
+# Glyndor. It ships two files and nothing else:
+#
+#   /etc/apt/sources.list.d/glyndor.sources            the archive
+#   /etc/apt/apt.conf.d/51glyndor-unattended-upgrades  the Allowed-Origins entry
+#
+# Without it the daemon runs, the logs look healthy, and podup is never upgraded
+# — which is the exact outcome the unattended-upgrades dependency was added to
+# prevent. Two install paths reached that state: `dpkg -i` of the .deb from a
+# GitHub release, and adding the repository by hand rather than through the
+# bootstrap installer. #1602.
+#
+# No bootstrap problem, measured rather than reasoned: the keyring is in the
+# archive index and `apt-cache policy` resolves it from apt.glyndor.net, so a
+# machine that already reaches the repository can install it. A standalone
+# `dpkg -i` with no repository at all fails on the unmet dependency, which is
+# the intended answer rather than a gap.
+#
+# A fork publishing its own archive — which install-template.sh supports through
+# KEYRING_URL and GLYNDOR_APT_FPR — must declare `Provides: glyndor-archive-keyring`
+# on its own keyring package, or this relationship cannot be satisfied by it.
+Depends: ${shlibs:Depends}, ${misc:Depends}, podman (>= 5.0), unattended-upgrades, glyndor-archive-keyring
 Description: docker-compose translator and runner for rootless Podman
  podup parses docker-compose.yml files and drives rootless Podman to
  create the equivalent containers, networks and volumes. It provides
