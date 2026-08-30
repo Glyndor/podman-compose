@@ -11,6 +11,7 @@ use crate::error::{ComposeError, Result};
 use crate::libpod::{urlencoded, API_PREFIX};
 
 use super::plan::{check_secret_size, Payload};
+use super::secret_bytes::SecretBytes;
 use super::{collect_payload_union, Engine};
 
 impl Engine {
@@ -27,7 +28,7 @@ impl Engine {
 	/// secret carries the `podup.project=<proj>` label so the label-guarded
 	/// teardown on `down` still only removes secrets podup owns.
 	pub(in crate::engine) async fn create_project_secrets(&self, file: &ComposeFile) -> Result<()> {
-		let mut work: Vec<(String, Vec<u8>)> = Vec::new();
+		let mut work: Vec<(String, SecretBytes)> = Vec::new();
 		for (name, payload) in collect_payload_union(&self.project, file, &self.base_dir)? {
 			let bytes = match payload {
 				Payload::Inline(bytes) => bytes,
@@ -35,12 +36,14 @@ impl Engine {
 				// the compose→plan mapping remains unit-testable. The cap is the
 				// same bounded read the compose-adjacent files get; Podman's own
 				// 512 kB secret limit is enforced right after, in `create_secret`.
-				Payload::File(path) => crate::filesystem::read_capped(&path).map_err(|e| {
-					ComposeError::Unsupported(format!(
-						"secret/config source {} could not be read: {e}",
-						path.display()
-					))
-				})?,
+				Payload::File(path) => {
+					SecretBytes::new(crate::filesystem::read_capped(&path).map_err(|e| {
+						ComposeError::Unsupported(format!(
+							"secret/config source {} could not be read: {e}",
+							path.display()
+						))
+					})?)
+				}
 			};
 			work.push((name, bytes));
 		}
@@ -127,8 +130,8 @@ impl Engine {
 	/// recognises and rewraps into a legible "something else created a secret
 	/// of that name in between" message — the operator can act on it without
 	/// having to read the libpod error verbatim.
-	async fn create_secret(&self, name: &str, payload: &[u8]) -> Result<()> {
-		check_secret_size(name, payload.len())?;
+	async fn create_secret(&self, name: &str, payload: &SecretBytes) -> Result<()> {
+		check_secret_size(name, payload.byte_len())?;
 		// Guard the delete-then-create: if a secret of this name already exists and
 		// is not labelled as ours, refuse rather than clobber a foreign secret.
 		// Our own secret (or a 404) is replaced fresh, keeping re-`up` idempotent.
@@ -174,7 +177,7 @@ impl Engine {
 		self.client
 			.post_bytes_json::<serde_json::Value>(
 				&path,
-				bytes::Bytes::copy_from_slice(payload),
+				bytes::Bytes::copy_from_slice(payload.expose_secret()),
 				"application/octet-stream",
 			)
 			.await
@@ -374,6 +377,93 @@ mod tests {
 		assert!(
 			!seen.iter().any(|r| r.starts_with("DELETE")),
 			"a foreign secret must never be deleted, got {seen:?}"
+		);
+	}
+}
+
+/// The payload of a secret must never reach an error message.
+///
+/// CodeQL raised seven `rust/cleartext-logging` alerts against
+/// `tests/engine_integration/`, all with the same source:
+/// `self.create_project_secrets(...)` flowing into an `assert!` message. The
+/// claim is worth answering rather than dismissing, because the answer is a
+/// property of this file and nothing was checking it.
+///
+/// It holds today. `create_project_secrets` returns `Result<()>`, so the bytes
+/// are not in the type a caller can print, and the one error it builds itself
+/// carries `path.display()` and the underlying I/O error rather than the
+/// payload. What was missing is anything that keeps it true: every variant of
+/// `ComposeError` on this path carries a `String`, and a future edit that
+/// formats the payload into one would leak it into a public CI log, where the
+/// integration tests print the error on failure.
+///
+/// The marker is deliberately long and unlike anything else in the tree, so a
+/// substring match cannot pass by coincidence.
+#[cfg(test)]
+#[cfg(unix)]
+mod payload_never_reaches_an_error {
+	use crate::compose::types::ComposeFile;
+	use crate::engine::fake_podman;
+	use crate::engine::secrets::tests_support::engine_on;
+
+	const MARKER: &str = "podup-secret-payload-marker-must-never-be-logged";
+
+	fn file_with_marker() -> ComposeFile {
+		crate::compose::parse_str(&format!(
+			"services:\n  app:\n    image: alpine\n    secrets:\n      - s1\nsecrets:\n  s1: {{content: \"{MARKER}\"}}\n"
+		))
+		.expect("fixture compose file should parse")
+	}
+
+	/// The engine talks to a Podman that refuses every write. The error that
+	/// comes back is the one an integration test would print.
+	#[tokio::test]
+	async fn a_failing_secret_create_does_not_put_the_payload_in_the_error() {
+		let fake = fake_podman::start(|method, target| {
+			if method == "POST" && target.contains("/secrets/create") {
+				(
+					500,
+					r#"{"message":"secret store is unavailable"}"#.to_string(),
+				)
+			} else if method == "GET" && target.contains("/secrets/") {
+				(404, r#"{"message":"no such secret"}"#.to_string())
+			} else {
+				(201, r#"{"ID":"abc"}"#.to_string())
+			}
+		});
+		let e = engine_on(&fake);
+
+		let err = e
+			.create_project_secrets(&file_with_marker())
+			.await
+			.expect_err("a 500 from the secret store must surface as an error");
+
+		// Both renderings, because a test prints `{err:?}` and a user sees
+		// `{err}`, and only one of them being clean is not a guarantee.
+		let display = format!("{err}");
+		let debug = format!("{err:?}");
+		assert!(
+			!display.contains(MARKER),
+			"the secret payload reached the error's Display: {display}"
+		);
+		assert!(
+			!debug.contains(MARKER),
+			"the secret payload reached the error's Debug: {debug}"
+		);
+	}
+
+	/// The control that makes the assertion above mean something. A test that
+	/// searches for a marker proves nothing unless the marker was in play: if
+	/// the fixture stopped carrying it, both assertions above would pass over
+	/// a compose file with no secret in it at all.
+	#[test]
+	fn the_fixture_actually_carries_the_marker() {
+		let file = file_with_marker();
+		let rendered = format!("{file:?}");
+		assert!(
+			rendered.contains(MARKER),
+			"the fixture no longer carries the marker, so the assertions that \
+			 look for it are searching for something that was never there"
 		);
 	}
 }
