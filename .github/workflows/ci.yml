@@ -58,8 +58,10 @@ jobs:
       # require the stable gate `rust / MSRV` instead, which carries no
       # version. See #1552.
       msrv: "1.85"
-      package-check: true
-      semver-check: true
+      # `cargo publish --dry-run`, and podup is no longer published (#1606).
+      package-check: false
+      # A semver promise needs somebody to make it to. There is nobody.
+      semver-check: false
       doc-warnings: true
 
   # A cron that stops firing emits nothing, and "no alert" is indistinguishable

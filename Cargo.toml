@@ -3,6 +3,19 @@ name = "podup"
 version = "5.4.0"
 edition = "2021"
 rust-version = "1.85"
+# podup is a binary that happens to build a library, not a library that ships a
+# binary. The `[lib]` target stays -- the integration tests in `tests/` are
+# built against it -- but it is no longer published.
+#
+# The reason it was published was helmly-agent, and helmly-agent does not use
+# it: zero `use podup::`, zero entries in its `Cargo.lock`, and its own manifest
+# records "that dep is gone". When the dependency did exist it was a git dep, so
+# crates.io was never what carried it. crates.io reports zero reverse
+# dependencies. What publishing cost, meanwhile, was a semver commitment on
+# seventeen `pub` items that nobody consumes, plus two required status checks.
+#
+# 5.4.0 stays published, which is not a loose end: it keeps the name reserved.
+publish = false
 description = "Translate and run docker-compose files on rootless Podman"
 license = "MIT"
 repository = "https://github.com/Glyndor/podup"

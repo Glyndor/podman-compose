@@ -7,7 +7,7 @@ binary, with no daemon and no Python runtime.
 
 [![CI](https://github.com/Glyndor/podup/actions/workflows/ci.yml/badge.svg)](https://github.com/Glyndor/podup/actions/workflows/ci.yml)
 
-Package: [crates.io/crates/podup](https://crates.io/crates/podup) · MSRV 1.85 · License: MIT
+MSRV 1.85 · License: MIT
 
 <img src="docs/assets/podup-demo.gif" alt="podup running a compose stack on rootless Podman" width="760">
 
@@ -153,9 +153,10 @@ Full command reference: [docs/commands.md](docs/commands.md).
 ## Design
 
 Rootless-native libpod API, real compose-spec support (`extends`, profiles,
-`develop.watch`, inline secrets), and systemd Quadlet export. The Rust library
-crate is consumed by [helmly-agent](https://github.com/Glyndor/helmly-agent);
-API docs at [docs.rs/podup](https://docs.rs/podup).
+`develop.watch`, inline secrets), and systemd Quadlet export. There is a library
+target, and the integration tests are built against it, but podup is distributed
+as a binary: it is not published to crates.io and carries no semver promise about
+its Rust API.
 
 ```mermaid
 sequenceDiagram
