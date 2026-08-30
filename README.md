@@ -26,10 +26,21 @@ is anything it had to install just to check the key.
 
 podup needs **Podman ≥ 5.0** (rootless). The package depends on it, so apt
 installs it alongside podup, and refuses the install on a distribution whose
-Podman is older than that. It also depends on `unattended-upgrades`: an
-apt-installed podup updates through apt and nothing else, since `podup update`
-refuses to replace a dpkg-owned binary, and only the latest release is
-supported. Podman is daemonless, but podup speaks the libpod API, so the
+Podman is older than that. It also depends on `unattended-upgrades`, because an
+apt-installed podup updates through apt and nothing else: `podup update` refuses
+to replace a dpkg-owned binary, and only the latest release is supported.
+
+That dependency guarantees `unattended-upgrades` is installed, not that it is
+running. What switches it on is `/etc/apt/apt.conf.d/20auto-upgrades`, which is
+system-wide policy for every package on the machine rather than podup's to set,
+so no podup maintainer script writes it. The one-line installer above writes it
+when it is absent, and Ubuntu normally has it already. If you registered the
+archive yourself and then ran `apt install podup` on Debian, podup is installed
+and the Glyndor archive is allowlisted, but nothing upgrades it until you run
+`apt upgrade`. `systemctl status unattended-upgrades` says which of the two you
+have.
+
+Podman is daemonless, but podup speaks the libpod API, so the
 socket still has to be listening:
 
 ```sh
