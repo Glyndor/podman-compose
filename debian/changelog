@@ -1,3 +1,29 @@
+podup (5.6.0) unstable; urgency=medium
+
+  * `podup autostart` gains a third mode. `--mode start` writes a unit whose
+    ExecStart is `podman start`, so the boot resumes the container Podman
+    already holds instead of reconciling it against the compose file. Podman's
+    store survives a reboot, so nothing on that path needs the compose file,
+    the environment, a registry or a build. A container missing at boot means
+    a deploy went wrong, and this mode says so in the journal rather than
+    rebuilding it silently. Single-service projects only: `podman start` waits
+    for nothing, so anything with depends_on needs quadlet mode, and the
+    refusal says so.
+  * Both service mode and start mode now order their unit against
+    podman-user-wait-network-online.service. Quadlet mode already inherited
+    that from Podman's generator and service mode did not, so the two modes
+    differed in a guarantee and nothing said which. Rootless Podman builds the
+    container network at start time, so an early boot could land on a network
+    that was not ready.
+  * `podup autostart status` reports whether that ordering is real. The unit
+    ships in Podman 5.3.0 and podup supports 5.0, so below 5.3.0 systemd drops
+    the dependency silently: the unit file reads as though it waits for the
+    network while waiting for nothing. The status now says which of the two it
+    is.
+  * No change to any existing command's flags or output.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Sun, 30 Aug 2026 23:17:02 -0500
+
 podup (5.5.0) unstable; urgency=medium
 
   * `podup update` no longer overwrites a Homebrew or Scoop install. It
