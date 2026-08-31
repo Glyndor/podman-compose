@@ -89,6 +89,51 @@ pub(crate) async fn dispatch(
 				.with_dry_run(*dry_run);
 			podup::autostart::install(&podup::autostart::RealSystemCtl, &opts)
 		}
+		AutostartCommands::Install {
+			mode: AutostartMode::Start,
+			no_start,
+			dry_run,
+		} => {
+			// Start mode's whole point is that the boot path holds no compose
+			// file, so the container name has to be resolved here, once, and
+			// baked into the unit. `sole_container` is also the refusal: it is
+			// what rejects a multi-service or scaled project and names the mode
+			// to use instead.
+			let container = podup::autostart::sole_container(file, &project)
+				.map_err(|why| ComposeError::Autostart(why.to_string()))?;
+			// systemd resolves an exec line with no PATH of its own, so the unit
+			// needs podman by absolute path rather than by name.
+			let podman = resolve_podman()?;
+			let opts = podup::autostart::StartUnitOpts::new(podman, project.clone(), container)
+				.with_stop_grace_secs(podup::autostart::max_stop_grace_secs(file));
+
+			// The one check that needs a live Podman. Start mode restores what
+			// the store holds and deliberately does not reconcile, so a
+			// container that is absent, or present but no longer matching the
+			// file, must be refused HERE — at install, where a human is
+			// watching. At boot there is no podup to notice: that is the cost of
+			// keeping it off the boot path, not an oversight.
+			//
+			// Skipped under --dry-run, which exists to show the unit without
+			// touching anything, including the socket.
+			if !*dry_run {
+				let client = podup::podman::connect_with_pool_size(
+					env.socket.as_deref(),
+					env.connection_pool_size
+						.unwrap_or(podup::Client::DEFAULT_POOL_SIZE),
+				)?;
+				let engine =
+					podup::Engine::with_base_dir(client, project.clone(), base_dir.clone());
+				precheck_start_mode(&engine, file, &opts.container).await?;
+			}
+
+			podup::autostart::install_start(
+				&podup::autostart::RealSystemCtl,
+				&opts,
+				*dry_run,
+				*no_start,
+			)
+		}
 		AutostartCommands::Uninstall { purge } => {
 			// Remove whichever mode is installed — the two never coexist, and asking
 			// the user to name the mode only risks a no-op against the wrong one.
@@ -128,5 +173,63 @@ pub(crate) async fn dispatch(
 			&project,
 			service.as_deref(),
 		),
+	}
+}
+
+/// The absolute path to `podman`, looked up on `PATH`. A systemd exec line has
+/// no `PATH` of its own, so a bare name in the unit would fail at boot with
+/// nothing to point at.
+fn resolve_podman() -> podup::Result<PathBuf> {
+	let path = std::env::var_os("PATH").ok_or_else(|| {
+		ComposeError::Autostart("PATH is not set, so podman cannot be located".to_string())
+	})?;
+	for dir in std::env::split_paths(&path) {
+		let candidate = dir.join("podman");
+		if candidate.is_file() {
+			return Ok(std::fs::canonicalize(&candidate).unwrap_or(candidate));
+		}
+	}
+	Err(ComposeError::Autostart(
+		"cannot find `podman` on PATH; start mode's unit runs it directly, so it needs an \
+		 absolute path at install time"
+			.to_string(),
+	))
+}
+
+/// Refuse to install start mode over a container that is absent or has drifted
+/// from the compose file.
+///
+/// Both refusals are the mode stating its own contract. It restores what Podman
+/// holds rather than reconciling, so a missing container means a deploy that
+/// never completed, and a hash mismatch means the file has moved on since the
+/// container was created. Booting would silently resume the old configuration
+/// in the second case, which is the mirror of the `up -d` hazard and worse,
+/// because `up -d` at least converges.
+async fn precheck_start_mode(
+	engine: &podup::Engine,
+	file: &ComposeFile,
+	container: &str,
+) -> podup::Result<()> {
+	let (name, service) = file
+		.services
+		.iter()
+		.next()
+		.expect("sole_container already established exactly one service");
+	let expected = engine.expected_config_hash(service, file)?;
+	match engine.container_config_hash(container).await? {
+		None => Err(ComposeError::Autostart(format!(
+			"start mode needs the container to exist already: no container named \
+			 '{container}' for service '{name}'.\n\
+			 Start mode resumes what Podman holds and never creates anything, so run \
+			 `podup up -d` first, then install."
+		))),
+		Some(found) if found != expected => Err(ComposeError::Autostart(format!(
+			"container '{container}' no longer matches the compose file: it was created from \
+			 config {found}, the file now renders {expected}.\n\
+			 Start mode restores rather than reconciles, so installing now would boot the old \
+			 configuration silently. Run `podup up -d` to bring the container up to date, then \
+			 install."
+		))),
+		Some(_) => Ok(()),
 	}
 }

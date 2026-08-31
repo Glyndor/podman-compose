@@ -107,6 +107,10 @@ fn is_bare_safe(token: &str) -> bool {
 /// quoted path — but doubling it up front (rather than only inside the quoted
 /// branch) means the escape holds even if that allowed set ever changes, and a
 /// bare-looking token like `50%off` still comes out as `50%%off`.
+pub(super) fn quote_arg_for_exec(token: &str) -> String {
+	quote_arg(token)
+}
+
 fn quote_arg(token: &str) -> String {
 	let token = token.replace('%', "%%");
 	if is_bare_safe(&token) {

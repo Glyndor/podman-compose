@@ -175,3 +175,43 @@ fn project_label_filter_with_splices_project_once() {
 	);
 	assert_eq!(with, expected);
 }
+
+/// `sole_replica_name` is a second spelling of the rule in `replica_names_for`,
+/// extracted so autostart's start mode can name a container without an
+/// `Engine`. Two spellings of one rule drift silently, and the failure would be
+/// a boot unit naming a container that does not exist, so pin them together.
+#[test]
+fn naming_agrees_with_the_engine_at_one_replica() {
+	let eng = engine("app");
+	let cases: [(&str, Option<&str>); 3] =
+		[("web", None), ("db", None), ("web", Some("alanalarana"))];
+	for (svc, explicit) in cases {
+		let service = Service {
+			image: Some("x".to_string()),
+			container_name: explicit.map(str::to_string),
+			..Default::default()
+		};
+		assert_eq!(
+			super::sole_replica_name("app", svc, &service),
+			eng.replica_names_for(svc, &service, 1)[0],
+			"service {svc} with container_name {explicit:?}"
+		);
+	}
+}
+
+/// The other half of the same coupling: start mode refuses anything that is not
+/// one replica, and `declared_replicas` is what it asks. It must read the file
+/// the same way the engine does when no `--scale` is in play.
+#[test]
+fn declared_replicas_matches_the_engine_without_an_override() {
+	let eng = engine("app");
+	let mut service = Service {
+		image: Some("x".to_string()),
+		..Default::default()
+	};
+	assert_eq!(super::declared_replicas(&service), 1);
+	assert_eq!(eng.resolve_replicas("web", &service), 1);
+	service.scale = Some(4);
+	assert_eq!(super::declared_replicas(&service), 4);
+	assert_eq!(eng.resolve_replicas("web", &service), 4);
+}
