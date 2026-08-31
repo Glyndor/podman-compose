@@ -24,21 +24,57 @@ because the unit it writes will not start at boot until you enable it.
 
 ## Picking a mode
 
-`--mode` selects the backend. Both are rootless and user-scope; they differ in
-who owns the containers.
+`--mode` selects the backend. All three are rootless and user-scope; they differ
+in who owns the containers, and in whether the boot path reconciles.
 
 | Mode | What it installs | Choose it when |
 |---|---|---|
 | `service` (default) | One `Type=oneshot` unit that runs `podup up -d` at boot and `podup stop` on shutdown. | You want the whole stack managed as a unit, the simplest option — one thing to enable, one to remove. |
 | `quadlet` | One native Podman Quadlet unit per service (`.container`/`.build`/`.volume`/`.network`), which systemd owns directly. | You want per-container supervision — systemd restarts, ordering and status for each service independently. |
+| `start` | One `Type=oneshot` unit whose `ExecStart` is `podman start`. Single-service projects only. | You want the boot to resume the container that already exists, with nothing else on the path. |
 
-Service mode keeps the compose front-end (`.env`, interpolation, profiles) on the
-runtime path; systemd starts `podup`, and `podup` reads the compose file. Quadlet
-mode renders the stack to systemd units once, at install time, and hands them over
-— after that systemd runs the containers with no `podup` process in the loop.
+### Reconcile or restore
 
-The two cannot coexist for one project: each install refuses if the other is
-present, since both would bring the same stack up at boot.
+This is the axis that actually separates them, and it is worth being explicit
+because two of the three sit on the same side of it.
+
+`service` and `quadlet` both make the world match the file at boot. Service mode
+keeps the compose front-end (`.env`, interpolation, profiles) on the runtime path:
+systemd starts `podup`, and `podup` reads the compose file. Quadlet mode renders
+the stack to systemd units once, at install time, and hands them over, after which
+systemd runs the containers with no `podup` process in the loop, though Podman
+still reconciles each `.container` against its unit.
+
+`start` does neither. Podman is daemonless and its store survives a reboot, so
+every setting was baked into the container definition when it was created.
+`podman start` restores the lot with no compose file, no `.env`, no registry and
+no build on the path.
+
+The failure semantics are the reason to choose it rather than a side effect. A
+container missing at boot means a deploy went wrong, and booting cannot fix a
+broken deploy: `start` fails loudly in the journal, where `up -d` would rebuild it
+silently. Deploy reconciles; boot restores.
+
+### What `start` costs
+
+**Single-service projects only.** `podman start` waits for nothing, so a project
+with `depends_on` (and especially `condition: service_healthy`) needs ordering
+between units, which is exactly what quadlet mode derives from the compose file.
+Rather than reimplement that, `start` refuses a project with more than one service,
+or one scaled past a single replica, and the error names the mode to use instead.
+
+**Drift is caught at install, not at boot.** If `compose.yaml` changes after the
+container was created, a boot would resume the old configuration. `podup` compares
+the container's `podup.config-hash` label against what the file renders and refuses
+to install over a mismatch, or over a container that does not exist yet.
+
+That check runs when you install, because there is no `podup` at boot to run it —
+which is the point of the mode, and therefore also its limit. Editing the compose
+file after installing leaves the unit starting the old container silently. Run
+`podup up -d` after any change to the file, exactly as you would to deploy it.
+
+The three cannot coexist for one project: each install refuses if another is
+present, since they would all bring the same stack up at boot.
 
 ## Commands
 
@@ -67,10 +103,56 @@ builds at deploy time, whenever you run `podup up`.
 The unit is a `--user` unit wired into `default.target`, not the system
 `multi-user.target`. `multi-user.target` is a system-manager concept and is inert
 in the user instance, so ordering against it would imply a boot gate that never
-fires. Under lingering the user manager starts after the system network is already
-up, and `podup` reaches Podman over a socket on demand, so no explicit network
-ordering is needed. The generated units carry no `network-online.target` ordering
-for the same reason.
+fires. The same is true of `network-online.target`, which is why neither mode
+names it.
+
+Waiting for the network still has to happen somewhere, and Podman ships the piece
+that makes it possible from a user unit:
+`podman-user-wait-network-online.service`, a `Type=oneshot` unit that polls
+`systemctl is-active network-online.target` until the system target comes up.
+Both modes order against that shim. Quadlet mode gets it from Podman's generator
+(`man podman-systemd.unit`, under *Implicit network dependencies*), which adds
+`Wants=` and `After=` to every `.container` unit it converts. Service mode writes
+its final unit itself, so `podup` puts the same two lines in directly:
+
+```ini
+[Unit]
+Description=podup <project>
+Wants=podman-user-wait-network-online.service
+After=podman-user-wait-network-online.service
+```
+
+The wait earns its place in service mode more than it does under Quadlet, not
+less. Quadlet's `ExecStart` starts a container; this one is `podup up -d`, which
+may pull an image, and under rootless Podman pasta builds the container network
+at start time.
+
+Measured 2026-08-30: the shim first ships in Podman 5.3.0, while `podup`'s floor
+is 5.0. On 5.0 through 5.2 systemd finds no such unit, drops the `Wants=` and
+`After=` with `LoadState=not-found`, and starts the unit clean with
+`Result=success` and nothing in the journal. Nothing regresses on those versions;
+they simply get no ordering, which is what they had.
+
+That silence is the problem with leaving it there. The unit file *reads* as
+though it waits for the network, and on those versions it does not, with nothing
+anywhere to say so. `podup autostart status` therefore asks:
+
+```
+network wait  podman-user-wait-network-online.service is loaded
+```
+
+or, when it is not:
+
+```
+network wait  podman-user-wait-network-online.service is not loadable, so the
+              unit's network ordering is dropped silently (Podman ships it from 5.3.0)
+```
+
+Note for anyone changing that check: `systemctl show <unit> -p LoadState` exits
+**0 whether or not the unit exists**, and reports the answer only in the
+`LoadState=` string. That is the opposite of `is-active` and `is-enabled`, which
+both exit 4 for an unknown unit. A guard written against the exit code reports
+the shim as present in exactly the case it is missing.
 
 ## Running `systemctl --user` for a login-less account
 

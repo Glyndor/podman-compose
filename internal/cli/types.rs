@@ -77,6 +77,11 @@ pub(crate) enum AutostartMode {
 	/// `.container`/`.build`/`.volume`/`.network` units, so systemd owns boot,
 	/// restart and dependency ordering directly.
 	Quadlet,
+	/// A single `Type=oneshot` `systemctl --user` service whose `ExecStart` is
+	/// `podman start`, so the boot path resumes the container Podman already
+	/// holds instead of reconciling it against the compose file. Single-service
+	/// projects only.
+	Start,
 }
 
 /// Subcommands of `autostart`.
@@ -85,8 +90,9 @@ pub(crate) enum AutostartCommands {
 	/// Install (and, by default, enable + start) the autostart unit for this
 	/// project. User-scope only: writes under `${XDG_CONFIG_HOME:-~/.config}`.
 	Install {
-		/// Autostart backend: `service` (one unit that runs `podup up`) or
-		/// `quadlet` (native systemd units, one per service).
+		/// Autostart backend: `service` (one unit that runs `podup up`),
+		/// `quadlet` (native systemd units, one per service), or `start`
+		/// (resume the existing container; single-service projects only).
 		#[arg(long, value_enum, default_value_t)]
 		mode: AutostartMode,
 		/// Install the unit but do not enable or start it immediately.

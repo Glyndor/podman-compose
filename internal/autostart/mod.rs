@@ -9,9 +9,17 @@
 
 mod quadlet;
 mod service;
+mod start;
+
+#[cfg(test)]
+#[path = "start_tests.rs"]
+mod start_tests;
 
 pub use quadlet::{install_quadlet, rebuild_quadlet, uninstall_quadlet};
 pub use service::{render_service_unit, ServiceUnitOpts};
+pub use start::{
+	render_start_unit, sole_container, validate_start_unit_opts, StartModeRefusal, StartUnitOpts,
+};
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -229,39 +237,73 @@ fn checked(res: io::Result<Output>, what: &str) -> crate::Result<()> {
 	)))
 }
 
+/// Refuse to stack a single-unit mode on top of an existing Quadlet autostart
+/// install for the same project: both would start the stack at boot.
+fn refuse_if_quadlet_present(project: &str) -> crate::Result<()> {
+	let quadlet = quadlet_units_present(project);
+	if quadlet.is_empty() {
+		return Ok(());
+	}
+	let names: Vec<String> = quadlet.iter().map(|p| p.display().to_string()).collect();
+	Err(ComposeError::Autostart(format!(
+		"quadlet autostart units for project '{project}' already exist:\n    {}\n\
+		 remove them before installing another mode (quadlet autostart is tracked by #993).",
+		names.join("\n    ")
+	)))
+}
+
 /// Install (and, unless `no_start`, enable + start) the service-mode autostart
 /// unit. Writes only under `${XDG_CONFIG_HOME:-~/.config}/systemd/user/`.
 pub fn install<S: SystemCtl>(sc: &S, opts: &InstallOptions) -> crate::Result<()> {
 	let project = &opts.unit.project;
-	let path = unit_path(project);
-
-	// Refuse to stack service mode on top of an existing Quadlet autostart install
-	// for the same project — both would start the stack at boot.
-	let quadlet = quadlet_units_present(project);
-	if !quadlet.is_empty() {
-		let names: Vec<String> = quadlet.iter().map(|p| p.display().to_string()).collect();
-		return Err(ComposeError::Autostart(format!(
-			"quadlet autostart units for project '{project}' already exist:\n    {}\n\
-			 remove them before installing service mode (quadlet autostart is tracked by #993).",
-			names.join("\n    ")
-		)));
-	}
+	refuse_if_quadlet_present(project)?;
 
 	// Fail closed on values a unit line cannot represent (control characters
 	// would inject directives via the literal `WorkingDirectory=` line).
 	service::validate_unit_opts(&opts.unit).map_err(ComposeError::Autostart)?;
 
 	let unit_text = render_service_unit(&opts.unit);
+	place_unit(sc, project, &unit_text, opts.dry_run, opts.no_start)
+}
+
+/// Install the start-mode unit: `ExecStart=podman start <container>`, so the
+/// boot path resumes what Podman already holds instead of reconciling it
+/// against the compose file. Single-service projects only; `sole_container`
+/// is what refuses the rest, and its refusal names the mode to use instead.
+pub fn install_start<S: SystemCtl>(
+	sc: &S,
+	opts: &StartUnitOpts,
+	dry_run: bool,
+	no_start: bool,
+) -> crate::Result<()> {
+	let project = &opts.project;
+	refuse_if_quadlet_present(project)?;
+	validate_start_unit_opts(opts).map_err(ComposeError::Autostart)?;
+	let unit_text = render_start_unit(opts);
+	place_unit(sc, project, &unit_text, dry_run, no_start)
+}
+
+/// Write the unit, reload systemd and (unless `no_start`) enable it. Shared by
+/// every mode that writes one final `.service` file, so the two do not drift on
+/// where the file lands or which systemctl calls follow it.
+fn place_unit<S: SystemCtl>(
+	sc: &S,
+	project: &str,
+	unit_text: &str,
+	dry_run: bool,
+	no_start: bool,
+) -> crate::Result<()> {
+	let path = unit_path(project);
 	let unit_name = unit_file_name(project);
 
 	// Surface the linger / session guards before acting (or previewing).
 	emit_guards(sc);
 
-	if opts.dry_run {
+	if dry_run {
 		print!("{unit_text}");
 		println!("\n# would write {}", path.display());
 		println!("# would run: systemctl --user daemon-reload");
-		if opts.no_start {
+		if no_start {
 			println!("# (--no-start) would not enable or start the unit");
 		} else {
 			println!("# would run: systemctl --user enable --now {unit_name}");
@@ -277,7 +319,7 @@ pub fn install<S: SystemCtl>(sc: &S, opts: &InstallOptions) -> crate::Result<()>
 	eprintln!("podup: wrote {}", path.display());
 
 	checked(sc.systemctl(&["daemon-reload"]), "daemon-reload")?;
-	if opts.no_start {
+	if no_start {
 		eprintln!("podup: installed {unit_name} (not enabled; --no-start)");
 	} else {
 		checked(
@@ -371,6 +413,25 @@ pub fn installed_mode(project: &str) -> InstalledMode {
 	}
 }
 
+/// Whether the network-ordering the generated units declare is real.
+///
+/// `Wants=`/`After=` naming a unit systemd cannot load is dropped silently:
+/// `LoadState` reads `not-found`, the dependent starts clean, and nothing
+/// reaches the journal. So a unit file can say it waits for the network while
+/// waiting for nothing, and the only way to tell is to ask.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NetworkWait {
+	/// systemd loaded the shim, so the ordering the unit declares takes effect.
+	Loaded,
+	/// No such unit. Podman ships it from 5.3.0; below that the ordering in
+	/// every autostart unit is inert.
+	NotFound,
+	/// `systemctl` could not be asked, or answered something unrecognised.
+	/// Carried rather than collapsed into `NotFound`: "we could not tell" and
+	/// "it is not there" are different answers and only one is a problem.
+	Unknown(String),
+}
+
 /// A snapshot of the autostart unit's state, gathered for `status`.
 pub struct StatusReport {
 	/// Absolute path to where the unit file would live.
@@ -387,6 +448,8 @@ pub struct StatusReport {
 	pub linger: bool,
 	/// Whether `XDG_RUNTIME_DIR` is set (a user session is present).
 	pub runtime_dir: bool,
+	/// Whether the network shim the generated units order against is loadable.
+	pub network_wait: NetworkWait,
 }
 
 /// Read the unit file's permission bits, on Unix. Other platforms have no POSIX
@@ -419,6 +482,41 @@ fn query<S: SystemCtl>(sc: &S, arg: &str, unit_name: &str) -> String {
 	}
 }
 
+/// The unit every autostart mode orders against, so the name lives in one place.
+pub(crate) const NETWORK_SHIM: &str = "podman-user-wait-network-online.service";
+
+/// Ask systemd whether the network shim is loadable.
+///
+/// **The exit code is not the signal, and must not be used as one.** Measured
+/// 2026-08-30 on Podman 5.7.0, rootless: `systemctl --user show <unit> -p
+/// LoadState` exits **0 for a unit that does not exist** just as it does for one
+/// that does, printing `LoadState=not-found` in the first case and
+/// `LoadState=loaded` in the second. A guard branching on the status would
+/// report the shim as fine while it is missing, which is the same vacuous check
+/// this function exists to replace.
+///
+/// That differs from the two verbs the rest of this status uses: `is-active`
+/// and `is-enabled` both exit **4** for an unknown unit. Two conventions, one
+/// module, so the difference is stated here rather than left to be rediscovered.
+fn network_wait_state<S: SystemCtl>(sc: &S) -> NetworkWait {
+	let out = match sc.systemctl(&["show", NETWORK_SHIM, "-p", "LoadState"]) {
+		Ok(out) => out,
+		Err(e) => return NetworkWait::Unknown(format!("systemctl show failed: {e}")),
+	};
+	let text = String::from_utf8_lossy(&out.stdout);
+	let Some(state) = text
+		.lines()
+		.find_map(|l| l.trim().strip_prefix("LoadState="))
+	else {
+		return NetworkWait::Unknown("systemctl show printed no LoadState".to_string());
+	};
+	match state.trim() {
+		"loaded" => NetworkWait::Loaded,
+		"not-found" => NetworkWait::NotFound,
+		other => NetworkWait::Unknown(other.to_string()),
+	}
+}
+
 /// Gather the autostart status for a project, going through the [`SystemCtl`] seam
 /// so it is testable without a live systemd.
 pub fn collect_status<S: SystemCtl>(sc: &S, project: &str) -> StatusReport {
@@ -433,6 +531,7 @@ pub fn collect_status<S: SystemCtl>(sc: &S, project: &str) -> StatusReport {
 		is_enabled: query(sc, "is-enabled", &unit_name),
 		linger: current_user().is_some_and(|u| linger_enabled(sc, &u)),
 		runtime_dir: std::env::var_os("XDG_RUNTIME_DIR").is_some_and(|s| !s.is_empty()),
+		network_wait: network_wait_state(sc),
 	}
 }
 
@@ -467,6 +566,27 @@ pub fn status<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<()> {
 		crate::ui::print_labelled_neutral("enabled", &r.is_enabled);
 	}
 	row("linger", if r.linger { "enabled" } else { "disabled" });
+	// Prose for the same reason the session line is prose: "not-found" alone
+	// would read as a broken install rather than as the ordering being inert,
+	// and the operator needs to be told what it costs and what fixes it.
+	match &r.network_wait {
+		NetworkWait::Loaded => crate::ui::print_labelled_with(
+			"network wait",
+			&format!("{NETWORK_SHIM} is loaded"),
+			Some(true),
+		),
+		NetworkWait::NotFound => crate::ui::print_labelled_with(
+			"network wait",
+			&format!(
+				"{NETWORK_SHIM} is not loadable, so the unit's network ordering \
+				 is dropped silently (Podman ships it from 5.3.0)"
+			),
+			Some(false),
+		),
+		NetworkWait::Unknown(why) => {
+			crate::ui::print_labelled_neutral("network wait", &format!("unknown ({why})"))
+		}
+	}
 	// Prose, not a state word, so the meaning is stated rather than inferred.
 	crate::ui::print_labelled_with(
 		"session",
