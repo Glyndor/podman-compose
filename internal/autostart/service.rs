@@ -209,11 +209,29 @@ pub fn render_service_unit(opts: &ServiceUnitOpts) -> String {
 	// leaves them on disk, which is exactly what ExecStart expects to find, and
 	// honours each container's own stop_signal / stop_grace_period.
 	let stop = exec_line(opts, &["stop"]);
-	// No `network-online.target` ordering: that target is a system-manager
-	// concept and stays inert in the `--user` instance, so depending on it would
-	// imply a network-readiness gate that never fires. Under linger the user
-	// manager starts after the system network is already up, and podup reaches
-	// Podman over a socket on demand, so no explicit network ordering is needed.
+	// Network ordering goes through Podman's user-scope shim, never through
+	// `network-online.target` directly. That target is a system-manager concept
+	// and stays inert in the `--user` instance, so naming it here would read as a
+	// readiness gate and fire as nothing. Podman ships
+	// `podman-user-wait-network-online.service` for exactly that gap
+	// (containers/podman#22197): a `Type=oneshot` unit that polls
+	// `systemctl is-active network-online.target` until the system target comes
+	// up, which is the one thing a user unit can actually wait on.
+	//
+	// Quadlet mode gets this for free. `man podman-systemd.unit`, under *Implicit
+	// network dependencies*, says the generator adds `Wants=`/`After=` on the
+	// same shim to every `.container` unit it converts, so the files
+	// `autostart/quadlet.rs` emits pick it up at boot. Service mode writes the
+	// final unit itself and inherits nothing, and the reason applies here with
+	// more force rather than less: Quadlet's `ExecStart` starts a container,
+	// ours is `podup up -d`, which may pull an image, and rootless pasta builds
+	// the container network at start time.
+	//
+	// Measured 2026-08-30: the shim first ships in Podman 5.3.0, and podup's
+	// floor is 5.0. On 5.0 through 5.2 systemd finds no such unit, drops the
+	// `Wants=`/`After=` with `LoadState=not-found`, and starts this unit clean
+	// with `Result=success` and nothing in the journal, which is the behaviour
+	// those versions already had.
 	//
 	// `WorkingDirectory=` takes the rest of its line literally — unlike an
 	// exec-line token, it understands none of the C-style backslash escapes
@@ -247,6 +265,8 @@ pub fn render_service_unit(opts: &ServiceUnitOpts) -> String {
 	format!(
 		"[Unit]\n\
 		 Description=podup {project}\n\
+		 Wants=podman-user-wait-network-online.service\n\
+		 After=podman-user-wait-network-online.service\n\
 		 \n\
 		 [Service]\n\
 		 Type=oneshot\n\
@@ -287,9 +307,6 @@ mod tests {
 	fn renders_single_file_unit() {
 		let s = render_service_unit(&opts_single());
 		assert!(s.contains("Description=podup app"));
-		// A `--user` unit must NOT order against the system `network-online.target`
-		// (it is inert in the user manager); assert it is absent.
-		assert!(!s.contains("network-online.target"));
 		assert!(s.contains("Type=oneshot"));
 		assert!(s.contains("RemainAfterExit=yes"));
 		assert!(s.contains("WorkingDirectory=/srv/app"));
@@ -349,6 +366,37 @@ mod tests {
 			!s.contains(" down"),
 			"ExecStop must stop, not remove the containers:\n{s}"
 		);
+	}
+
+	/// #1616: service mode writes the final unit, so it inherits none of the
+	/// ordering Quadlet's generator adds on its own. What has to hold is that the
+	/// unit waits for the network, and that it waits through Podman's user-scope
+	/// shim rather than through `network-online.target`, which is inert in the
+	/// `--user` instance.
+	///
+	/// The assertion this replaced only forbade the string `network-online.target`,
+	/// which a unit carrying no ordering at all also satisfies. That is the state
+	/// this test exists to rule out, so it asserts the keys that must be present
+	/// first and the spelling that must not appear second.
+	#[test]
+	fn orders_against_the_user_scope_network_shim() {
+		let s = render_service_unit(&opts_single());
+		assert!(
+			s.contains("Wants=podman-user-wait-network-online.service"),
+			"the unit must pull in the network shim:\n{s}"
+		);
+		assert!(
+			s.contains("After=podman-user-wait-network-online.service"),
+			"wanting the shim without ordering after it starts both at once, \
+			 which is the same as not waiting:\n{s}"
+		);
+		for key in ["Wants=", "After=", "Requires=", "BindsTo=", "PartOf="] {
+			assert!(
+				!s.contains(&format!("{key}network-online.target")),
+				"a `--user` unit must not depend on the system target directly, \
+				 since it never activates there:\n{s}"
+			);
+		}
 	}
 
 	#[test]

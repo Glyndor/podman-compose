@@ -67,10 +67,36 @@ builds at deploy time, whenever you run `podup up`.
 The unit is a `--user` unit wired into `default.target`, not the system
 `multi-user.target`. `multi-user.target` is a system-manager concept and is inert
 in the user instance, so ordering against it would imply a boot gate that never
-fires. Under lingering the user manager starts after the system network is already
-up, and `podup` reaches Podman over a socket on demand, so no explicit network
-ordering is needed. The generated units carry no `network-online.target` ordering
-for the same reason.
+fires. The same is true of `network-online.target`, which is why neither mode
+names it.
+
+Waiting for the network still has to happen somewhere, and Podman ships the piece
+that makes it possible from a user unit:
+`podman-user-wait-network-online.service`, a `Type=oneshot` unit that polls
+`systemctl is-active network-online.target` until the system target comes up.
+Both modes order against that shim. Quadlet mode gets it from Podman's generator
+(`man podman-systemd.unit`, under *Implicit network dependencies*), which adds
+`Wants=` and `After=` to every `.container` unit it converts. Service mode writes
+its final unit itself, so `podup` puts the same two lines in directly:
+
+```ini
+[Unit]
+Description=podup <project>
+Wants=podman-user-wait-network-online.service
+After=podman-user-wait-network-online.service
+```
+
+The wait earns its place in service mode more than it does under Quadlet, not
+less. Quadlet's `ExecStart` starts a container; this one is `podup up -d`, which
+may pull an image, and under rootless Podman pasta builds the container network
+at start time.
+
+Measured 2026-08-30: the shim first ships in Podman 5.3.0, while `podup`'s floor
+is 5.0. On 5.0 through 5.2 systemd finds no such unit, drops the `Wants=` and
+`After=` with `LoadState=not-found`, and starts the unit clean with
+`Result=success` and nothing in the journal. Those versions behave exactly as they
+did before, so nothing regresses on them; they simply get no ordering, which is
+what they had.
 
 ## Running `systemctl --user` for a login-less account
 
