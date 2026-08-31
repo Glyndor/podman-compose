@@ -413,6 +413,25 @@ pub fn installed_mode(project: &str) -> InstalledMode {
 	}
 }
 
+/// Whether the network-ordering the generated units declare is real.
+///
+/// `Wants=`/`After=` naming a unit systemd cannot load is dropped silently:
+/// `LoadState` reads `not-found`, the dependent starts clean, and nothing
+/// reaches the journal. So a unit file can say it waits for the network while
+/// waiting for nothing, and the only way to tell is to ask.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NetworkWait {
+	/// systemd loaded the shim, so the ordering the unit declares takes effect.
+	Loaded,
+	/// No such unit. Podman ships it from 5.3.0; below that the ordering in
+	/// every autostart unit is inert.
+	NotFound,
+	/// `systemctl` could not be asked, or answered something unrecognised.
+	/// Carried rather than collapsed into `NotFound`: "we could not tell" and
+	/// "it is not there" are different answers and only one is a problem.
+	Unknown(String),
+}
+
 /// A snapshot of the autostart unit's state, gathered for `status`.
 pub struct StatusReport {
 	/// Absolute path to where the unit file would live.
@@ -429,6 +448,8 @@ pub struct StatusReport {
 	pub linger: bool,
 	/// Whether `XDG_RUNTIME_DIR` is set (a user session is present).
 	pub runtime_dir: bool,
+	/// Whether the network shim the generated units order against is loadable.
+	pub network_wait: NetworkWait,
 }
 
 /// Read the unit file's permission bits, on Unix. Other platforms have no POSIX
@@ -461,6 +482,41 @@ fn query<S: SystemCtl>(sc: &S, arg: &str, unit_name: &str) -> String {
 	}
 }
 
+/// The unit every autostart mode orders against, so the name lives in one place.
+pub(crate) const NETWORK_SHIM: &str = "podman-user-wait-network-online.service";
+
+/// Ask systemd whether the network shim is loadable.
+///
+/// **The exit code is not the signal, and must not be used as one.** Measured
+/// 2026-08-30 on Podman 5.7.0, rootless: `systemctl --user show <unit> -p
+/// LoadState` exits **0 for a unit that does not exist** just as it does for one
+/// that does, printing `LoadState=not-found` in the first case and
+/// `LoadState=loaded` in the second. A guard branching on the status would
+/// report the shim as fine while it is missing, which is the same vacuous check
+/// this function exists to replace.
+///
+/// That differs from the two verbs the rest of this status uses: `is-active`
+/// and `is-enabled` both exit **4** for an unknown unit. Two conventions, one
+/// module, so the difference is stated here rather than left to be rediscovered.
+fn network_wait_state<S: SystemCtl>(sc: &S) -> NetworkWait {
+	let out = match sc.systemctl(&["show", NETWORK_SHIM, "-p", "LoadState"]) {
+		Ok(out) => out,
+		Err(e) => return NetworkWait::Unknown(format!("systemctl show failed: {e}")),
+	};
+	let text = String::from_utf8_lossy(&out.stdout);
+	let Some(state) = text
+		.lines()
+		.find_map(|l| l.trim().strip_prefix("LoadState="))
+	else {
+		return NetworkWait::Unknown("systemctl show printed no LoadState".to_string());
+	};
+	match state.trim() {
+		"loaded" => NetworkWait::Loaded,
+		"not-found" => NetworkWait::NotFound,
+		other => NetworkWait::Unknown(other.to_string()),
+	}
+}
+
 /// Gather the autostart status for a project, going through the [`SystemCtl`] seam
 /// so it is testable without a live systemd.
 pub fn collect_status<S: SystemCtl>(sc: &S, project: &str) -> StatusReport {
@@ -475,6 +531,7 @@ pub fn collect_status<S: SystemCtl>(sc: &S, project: &str) -> StatusReport {
 		is_enabled: query(sc, "is-enabled", &unit_name),
 		linger: current_user().is_some_and(|u| linger_enabled(sc, &u)),
 		runtime_dir: std::env::var_os("XDG_RUNTIME_DIR").is_some_and(|s| !s.is_empty()),
+		network_wait: network_wait_state(sc),
 	}
 }
 
@@ -509,6 +566,27 @@ pub fn status<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<()> {
 		crate::ui::print_labelled_neutral("enabled", &r.is_enabled);
 	}
 	row("linger", if r.linger { "enabled" } else { "disabled" });
+	// Prose for the same reason the session line is prose: "not-found" alone
+	// would read as a broken install rather than as the ordering being inert,
+	// and the operator needs to be told what it costs and what fixes it.
+	match &r.network_wait {
+		NetworkWait::Loaded => crate::ui::print_labelled_with(
+			"network wait",
+			&format!("{NETWORK_SHIM} is loaded"),
+			Some(true),
+		),
+		NetworkWait::NotFound => crate::ui::print_labelled_with(
+			"network wait",
+			&format!(
+				"{NETWORK_SHIM} is not loadable, so the unit's network ordering \
+				 is dropped silently (Podman ships it from 5.3.0)"
+			),
+			Some(false),
+		),
+		NetworkWait::Unknown(why) => {
+			crate::ui::print_labelled_neutral("network wait", &format!("unknown ({why})"))
+		}
+	}
 	// Prose, not a state word, so the meaning is stated rather than inferred.
 	crate::ui::print_labelled_with(
 		"session",
