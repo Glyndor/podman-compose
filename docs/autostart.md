@@ -130,9 +130,29 @@ at start time.
 Measured 2026-08-30: the shim first ships in Podman 5.3.0, while `podup`'s floor
 is 5.0. On 5.0 through 5.2 systemd finds no such unit, drops the `Wants=` and
 `After=` with `LoadState=not-found`, and starts the unit clean with
-`Result=success` and nothing in the journal. Those versions behave exactly as they
-did before, so nothing regresses on them; they simply get no ordering, which is
-what they had.
+`Result=success` and nothing in the journal. Nothing regresses on those versions;
+they simply get no ordering, which is what they had.
+
+That silence is the problem with leaving it there. The unit file *reads* as
+though it waits for the network, and on those versions it does not, with nothing
+anywhere to say so. `podup autostart status` therefore asks:
+
+```
+network wait  podman-user-wait-network-online.service is loaded
+```
+
+or, when it is not:
+
+```
+network wait  podman-user-wait-network-online.service is not loadable, so the
+              unit's network ordering is dropped silently (Podman ships it from 5.3.0)
+```
+
+Note for anyone changing that check: `systemctl show <unit> -p LoadState` exits
+**0 whether or not the unit exists**, and reports the answer only in the
+`LoadState=` string. That is the opposite of `is-active` and `is-enabled`, which
+both exit 4 for an unknown unit. A guard written against the exit code reports
+the shim as present in exactly the case it is missing.
 
 ## Running `systemctl --user` for a login-less account
 

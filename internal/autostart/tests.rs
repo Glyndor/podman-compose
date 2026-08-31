@@ -20,6 +20,11 @@ struct FakeCtl {
 	/// default; `4 << 8` is systemd's "no such unit", the only value
 	/// `unit_is_known` treats as "there is nothing here".
 	is_active_code: i32,
+	/// What `systemctl --user show <shim> -p LoadState` prints. Real systemd
+	/// exits 0 whether or not the unit exists, so this fake always does too:
+	/// a fake that signalled absence through the exit code would let a guard
+	/// that reads the code pass here and fail in production.
+	show_load_state: String,
 	fail: bool,
 }
 
@@ -32,6 +37,7 @@ impl FakeCtl {
 			is_active: "active".to_string(),
 			is_enabled: "enabled".to_string(),
 			is_active_code: 0,
+			show_load_state: "LoadState=loaded\n".to_string(),
 			fail: false,
 		}
 	}
@@ -58,6 +64,7 @@ impl SystemCtl for FakeCtl {
 		let stdout = match args.first().copied() {
 			Some("is-active") => self.is_active.as_str(),
 			Some("is-enabled") => self.is_enabled.as_str(),
+			Some("show") => self.show_load_state.as_str(),
 			_ => "",
 		};
 		// `is-enabled` is read through stdout only, so its status stays
@@ -66,7 +73,10 @@ impl SystemCtl for FakeCtl {
 		// blanket `fail` flag.
 		let code = match args.first().copied() {
 			Some("is-active") => self.is_active_code,
-			Some("is-enabled") => 0,
+			// Both 0, deliberately. Measured on real systemd: `show` reports a
+			// missing unit through `LoadState=not-found` in stdout and still
+			// exits 0, unlike `is-enabled`, which exits 4 for the same unit.
+			Some("is-enabled") | Some("show") => 0,
 			_ => code,
 		};
 		Ok(out(code, stdout))
@@ -339,4 +349,89 @@ fn max_stop_grace_skips_an_unparseable_value() {
 	)
 	.unwrap();
 	assert_eq!(super::max_stop_grace_secs(&file), Some(30));
+}
+
+// --- the network shim (#1616's ordering is only real if the unit loads) ---
+
+/// The trap, pinned. Real `systemctl show` exits **0** for a unit that does not
+/// exist, printing `LoadState=not-found`. A guard reading the exit code would
+/// call the shim present here and be wrong in exactly the case it exists to
+/// catch, which is the same vacuous shape as the assertion #1616 replaced.
+#[test]
+fn a_missing_shim_is_read_from_load_state_not_from_the_exit_code() {
+	let mut sc = FakeCtl::new();
+	sc.show_load_state = "LoadState=not-found\n".to_string();
+	let r = collect_status(&sc, "app");
+	assert_eq!(r.network_wait, NetworkWait::NotFound);
+	// The call really did succeed, so nothing about the status distinguished
+	// these two cases except the string.
+	assert_eq!(
+		sc.systemctl(&["show", NETWORK_SHIM, "-p", "LoadState"])
+			.unwrap()
+			.status
+			.code(),
+		Some(0)
+	);
+}
+
+#[test]
+fn a_loaded_shim_reads_as_loaded() {
+	let sc = FakeCtl::new();
+	assert_eq!(collect_status(&sc, "app").network_wait, NetworkWait::Loaded);
+}
+
+/// "We could not tell" is not "it is not there". Collapsing the two would report
+/// a broken ordering on every machine whose systemctl answered oddly.
+#[test]
+fn an_unrecognised_answer_is_unknown_rather_than_missing() {
+	let mut sc = FakeCtl::new();
+	sc.show_load_state = "LoadState=masked\n".to_string();
+	assert!(matches!(
+		collect_status(&sc, "app").network_wait,
+		NetworkWait::Unknown(s) if s == "masked"
+	));
+
+	let mut sc = FakeCtl::new();
+	sc.show_load_state = String::new();
+	assert!(matches!(
+		collect_status(&sc, "app").network_wait,
+		NetworkWait::Unknown(_)
+	));
+}
+
+/// The status asks about the shim by the same name the units order against, so
+/// a rename cannot leave the guard checking a unit nothing depends on.
+#[test]
+fn the_status_asks_about_the_unit_the_units_actually_name() {
+	let sc = FakeCtl::new();
+	let _ = collect_status(&sc, "app");
+	assert!(
+		sc.systemctl_log()
+			.iter()
+			.any(|c| c.first().map(String::as_str) == Some("show")
+				&& c.contains(&NETWORK_SHIM.to_string())),
+		"{:?}",
+		sc.systemctl_log()
+	);
+	// Every renderer that emits the ordering, not just the one that had it
+	// first. Checking only service mode would leave start mode free to name a
+	// different unit than the status reports on, which is the same silent
+	// mismatch this whole check exists to surface.
+	let service = super::render_service_unit(&super::ServiceUnitOpts::new(
+		std::path::PathBuf::from("/usr/bin/podup"),
+		vec![std::path::PathBuf::from("/srv/app/compose.yml")],
+		"app".to_string(),
+		std::path::PathBuf::from("/srv/app"),
+	));
+	let start = super::render_start_unit(&super::StartUnitOpts::new(
+		std::path::PathBuf::from("/usr/bin/podman"),
+		"app".to_string(),
+		"app-web-1".to_string(),
+	));
+	for (mode, unit) in [("service", &service), ("start", &start)] {
+		assert!(
+			unit.contains(NETWORK_SHIM),
+			"{mode} mode must order against the same name the status checks:\n{unit}"
+		);
+	}
 }
