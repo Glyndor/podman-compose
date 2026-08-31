@@ -233,5 +233,7 @@ fn free_port() -> u16 {
 mod push_registry;
 #[path = "engine_integration/scale.rs"]
 mod scale;
+#[path = "engine_integration/start_restores_config.rs"]
+mod start_restores_config;
 #[path = "engine_integration/stats_flags.rs"]
 mod stats_flags;

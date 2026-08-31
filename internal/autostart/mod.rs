@@ -9,9 +9,17 @@
 
 mod quadlet;
 mod service;
+mod start;
+
+#[cfg(test)]
+#[path = "start_tests.rs"]
+mod start_tests;
 
 pub use quadlet::{install_quadlet, rebuild_quadlet, uninstall_quadlet};
 pub use service::{render_service_unit, ServiceUnitOpts};
+pub use start::{
+	render_start_unit, sole_container, validate_start_unit_opts, StartModeRefusal, StartUnitOpts,
+};
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -229,39 +237,73 @@ fn checked(res: io::Result<Output>, what: &str) -> crate::Result<()> {
 	)))
 }
 
+/// Refuse to stack a single-unit mode on top of an existing Quadlet autostart
+/// install for the same project: both would start the stack at boot.
+fn refuse_if_quadlet_present(project: &str) -> crate::Result<()> {
+	let quadlet = quadlet_units_present(project);
+	if quadlet.is_empty() {
+		return Ok(());
+	}
+	let names: Vec<String> = quadlet.iter().map(|p| p.display().to_string()).collect();
+	Err(ComposeError::Autostart(format!(
+		"quadlet autostart units for project '{project}' already exist:\n    {}\n\
+		 remove them before installing another mode (quadlet autostart is tracked by #993).",
+		names.join("\n    ")
+	)))
+}
+
 /// Install (and, unless `no_start`, enable + start) the service-mode autostart
 /// unit. Writes only under `${XDG_CONFIG_HOME:-~/.config}/systemd/user/`.
 pub fn install<S: SystemCtl>(sc: &S, opts: &InstallOptions) -> crate::Result<()> {
 	let project = &opts.unit.project;
-	let path = unit_path(project);
-
-	// Refuse to stack service mode on top of an existing Quadlet autostart install
-	// for the same project — both would start the stack at boot.
-	let quadlet = quadlet_units_present(project);
-	if !quadlet.is_empty() {
-		let names: Vec<String> = quadlet.iter().map(|p| p.display().to_string()).collect();
-		return Err(ComposeError::Autostart(format!(
-			"quadlet autostart units for project '{project}' already exist:\n    {}\n\
-			 remove them before installing service mode (quadlet autostart is tracked by #993).",
-			names.join("\n    ")
-		)));
-	}
+	refuse_if_quadlet_present(project)?;
 
 	// Fail closed on values a unit line cannot represent (control characters
 	// would inject directives via the literal `WorkingDirectory=` line).
 	service::validate_unit_opts(&opts.unit).map_err(ComposeError::Autostart)?;
 
 	let unit_text = render_service_unit(&opts.unit);
+	place_unit(sc, project, &unit_text, opts.dry_run, opts.no_start)
+}
+
+/// Install the start-mode unit: `ExecStart=podman start <container>`, so the
+/// boot path resumes what Podman already holds instead of reconciling it
+/// against the compose file. Single-service projects only; `sole_container`
+/// is what refuses the rest, and its refusal names the mode to use instead.
+pub fn install_start<S: SystemCtl>(
+	sc: &S,
+	opts: &StartUnitOpts,
+	dry_run: bool,
+	no_start: bool,
+) -> crate::Result<()> {
+	let project = &opts.project;
+	refuse_if_quadlet_present(project)?;
+	validate_start_unit_opts(opts).map_err(ComposeError::Autostart)?;
+	let unit_text = render_start_unit(opts);
+	place_unit(sc, project, &unit_text, dry_run, no_start)
+}
+
+/// Write the unit, reload systemd and (unless `no_start`) enable it. Shared by
+/// every mode that writes one final `.service` file, so the two do not drift on
+/// where the file lands or which systemctl calls follow it.
+fn place_unit<S: SystemCtl>(
+	sc: &S,
+	project: &str,
+	unit_text: &str,
+	dry_run: bool,
+	no_start: bool,
+) -> crate::Result<()> {
+	let path = unit_path(project);
 	let unit_name = unit_file_name(project);
 
 	// Surface the linger / session guards before acting (or previewing).
 	emit_guards(sc);
 
-	if opts.dry_run {
+	if dry_run {
 		print!("{unit_text}");
 		println!("\n# would write {}", path.display());
 		println!("# would run: systemctl --user daemon-reload");
-		if opts.no_start {
+		if no_start {
 			println!("# (--no-start) would not enable or start the unit");
 		} else {
 			println!("# would run: systemctl --user enable --now {unit_name}");
@@ -277,7 +319,7 @@ pub fn install<S: SystemCtl>(sc: &S, opts: &InstallOptions) -> crate::Result<()>
 	eprintln!("podup: wrote {}", path.display());
 
 	checked(sc.systemctl(&["daemon-reload"]), "daemon-reload")?;
-	if opts.no_start {
+	if no_start {
 		eprintln!("podup: installed {unit_name} (not enabled; --no-start)");
 	} else {
 		checked(

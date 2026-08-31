@@ -24,21 +24,57 @@ because the unit it writes will not start at boot until you enable it.
 
 ## Picking a mode
 
-`--mode` selects the backend. Both are rootless and user-scope; they differ in
-who owns the containers.
+`--mode` selects the backend. All three are rootless and user-scope; they differ
+in who owns the containers, and in whether the boot path reconciles.
 
 | Mode | What it installs | Choose it when |
 |---|---|---|
 | `service` (default) | One `Type=oneshot` unit that runs `podup up -d` at boot and `podup stop` on shutdown. | You want the whole stack managed as a unit, the simplest option — one thing to enable, one to remove. |
 | `quadlet` | One native Podman Quadlet unit per service (`.container`/`.build`/`.volume`/`.network`), which systemd owns directly. | You want per-container supervision — systemd restarts, ordering and status for each service independently. |
+| `start` | One `Type=oneshot` unit whose `ExecStart` is `podman start`. Single-service projects only. | You want the boot to resume the container that already exists, with nothing else on the path. |
 
-Service mode keeps the compose front-end (`.env`, interpolation, profiles) on the
-runtime path; systemd starts `podup`, and `podup` reads the compose file. Quadlet
-mode renders the stack to systemd units once, at install time, and hands them over
-— after that systemd runs the containers with no `podup` process in the loop.
+### Reconcile or restore
 
-The two cannot coexist for one project: each install refuses if the other is
-present, since both would bring the same stack up at boot.
+This is the axis that actually separates them, and it is worth being explicit
+because two of the three sit on the same side of it.
+
+`service` and `quadlet` both make the world match the file at boot. Service mode
+keeps the compose front-end (`.env`, interpolation, profiles) on the runtime path:
+systemd starts `podup`, and `podup` reads the compose file. Quadlet mode renders
+the stack to systemd units once, at install time, and hands them over, after which
+systemd runs the containers with no `podup` process in the loop, though Podman
+still reconciles each `.container` against its unit.
+
+`start` does neither. Podman is daemonless and its store survives a reboot, so
+every setting was baked into the container definition when it was created.
+`podman start` restores the lot with no compose file, no `.env`, no registry and
+no build on the path.
+
+The failure semantics are the reason to choose it rather than a side effect. A
+container missing at boot means a deploy went wrong, and booting cannot fix a
+broken deploy: `start` fails loudly in the journal, where `up -d` would rebuild it
+silently. Deploy reconciles; boot restores.
+
+### What `start` costs
+
+**Single-service projects only.** `podman start` waits for nothing, so a project
+with `depends_on` (and especially `condition: service_healthy`) needs ordering
+between units, which is exactly what quadlet mode derives from the compose file.
+Rather than reimplement that, `start` refuses a project with more than one service,
+or one scaled past a single replica, and the error names the mode to use instead.
+
+**Drift is caught at install, not at boot.** If `compose.yaml` changes after the
+container was created, a boot would resume the old configuration. `podup` compares
+the container's `podup.config-hash` label against what the file renders and refuses
+to install over a mismatch, or over a container that does not exist yet.
+
+That check runs when you install, because there is no `podup` at boot to run it —
+which is the point of the mode, and therefore also its limit. Editing the compose
+file after installing leaves the unit starting the old container silently. Run
+`podup up -d` after any change to the file, exactly as you would to deploy it.
+
+The three cannot coexist for one project: each install refuses if another is
+present, since they would all bring the same stack up at boot.
 
 ## Commands
 
