@@ -413,14 +413,25 @@ fn the_status_asks_about_the_unit_the_units_actually_name() {
 		"{:?}",
 		sc.systemctl_log()
 	);
-	assert!(
-		super::render_service_unit(&super::ServiceUnitOpts::new(
-			std::path::PathBuf::from("/usr/bin/podup"),
-			vec![std::path::PathBuf::from("/srv/app/compose.yml")],
-			"app".to_string(),
-			std::path::PathBuf::from("/srv/app"),
-		))
-		.contains(NETWORK_SHIM),
-		"the unit must order against the same name the status checks"
-	);
+	// Every renderer that emits the ordering, not just the one that had it
+	// first. Checking only service mode would leave start mode free to name a
+	// different unit than the status reports on, which is the same silent
+	// mismatch this whole check exists to surface.
+	let service = super::render_service_unit(&super::ServiceUnitOpts::new(
+		std::path::PathBuf::from("/usr/bin/podup"),
+		vec![std::path::PathBuf::from("/srv/app/compose.yml")],
+		"app".to_string(),
+		std::path::PathBuf::from("/srv/app"),
+	));
+	let start = super::render_start_unit(&super::StartUnitOpts::new(
+		std::path::PathBuf::from("/usr/bin/podman"),
+		"app".to_string(),
+		"app-web-1".to_string(),
+	));
+	for (mode, unit) in [("service", &service), ("start", &start)] {
+		assert!(
+			unit.contains(NETWORK_SHIM),
+			"{mode} mode must order against the same name the status checks:\n{unit}"
+		);
+	}
 }
