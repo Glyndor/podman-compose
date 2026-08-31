@@ -55,7 +55,7 @@ impl StartUnitOpts {
 }
 
 /// Reject any unit-embedded value carrying ASCII control characters, for the
-/// same reason [`super::service::validate_unit_opts`] does: a value with an
+/// same reason `service::validate_unit_opts` does: a value with an
 /// embedded newline would terminate its directive and inject arbitrary unit
 /// lines. No legitimate path or container name contains control bytes.
 pub fn validate_start_unit_opts(opts: &StartUnitOpts) -> Result<(), String> {
@@ -120,7 +120,7 @@ impl std::fmt::Display for StartModeRefusal {
 /// The one container a project resolves to, or why it does not resolve to one.
 ///
 /// The name must agree with what the engine created, so it comes from
-/// [`crate::engine::sole_replica_name`] rather than being spelled out again
+/// `engine::sole_replica_name` rather than being spelled out again
 /// here: a second copy of the naming rule would drift from the first one
 /// silently, and the unit would name a container that does not exist.
 pub fn sole_container(file: &ComposeFile, project: &str) -> Result<String, StartModeRefusal> {
