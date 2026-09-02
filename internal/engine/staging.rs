@@ -161,188 +161,21 @@ fn verify_private_dir(dir: &Path, euid: u32) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod name_tests {
-	use super::is_safe_project_name;
-
-	#[test]
-	fn safe_project_names_accepted() {
-		// Matches docker-compose `^[a-z0-9][a-z0-9_-]*$`: lowercase letters/digits,
-		// `-`/`_`, first char a letter or digit.
-		for name in ["web", "my-app", "my_app", "appv2", "a1", "1app", "x"] {
-			assert!(is_safe_project_name(name), "{name:?} must be accepted");
-		}
-	}
-
-	#[test]
-	fn unsafe_project_names_rejected() {
-		let long = "a".repeat(129);
-		for name in [
-			"",
-			".",
-			"..",
-			".hidden",
-			"a/b",
-			"../x",
-			"a b",
-			"a\0b",
-			// docker-compose rejects these too; previously accepted by podup.
-			"-rf",    // leading dash (flag-injection vector)
-			"--all",  // leading dash
-			"---",    // all-dash
-			"_x",     // leading underscore
-			"App",    // uppercase
-			"MYAPP",  // uppercase
-			"app.v2", // dot
-			"bad.",   // trailing dot
-			long.as_str(),
-		] {
-			assert!(!is_safe_project_name(name), "{name:?} must be rejected");
-		}
-	}
-}
+#[path = "staging_name_tests.rs"]
+mod name_tests;
 
 #[cfg(all(test, unix))]
-mod staging_tests {
-	use super::verify_private_dir;
-	use std::os::unix::fs::PermissionsExt;
-
-	#[test]
-	fn private_dir_accepted() {
-		let dir = tempfile::tempdir().expect("tempdir");
-		std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))
-			.expect("chmod");
-		// SAFETY: geteuid takes no arguments, touches no memory and cannot fail.
-		let euid = unsafe { libc::geteuid() };
-		assert!(verify_private_dir(dir.path(), euid).is_ok());
-	}
-
-	#[test]
-	fn group_accessible_dir_rejected() {
-		let dir = tempfile::tempdir().expect("tempdir");
-		std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o750))
-			.expect("chmod");
-		// SAFETY: geteuid takes no arguments, touches no memory and cannot fail.
-		let euid = unsafe { libc::geteuid() };
-		assert!(verify_private_dir(dir.path(), euid).is_err());
-	}
-
-	#[test]
-	fn foreign_owner_rejected() {
-		let dir = tempfile::tempdir().expect("tempdir");
-		std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))
-			.expect("chmod");
-		// SAFETY: geteuid takes no arguments, touches no memory and cannot fail.
-		let other = unsafe { libc::geteuid() } + 1;
-		assert!(verify_private_dir(dir.path(), other).is_err());
-	}
-
-	#[test]
-	fn symlink_rejected() {
-		let dir = tempfile::tempdir().expect("tempdir");
-		let target = dir.path().join("real");
-		let link = dir.path().join("link");
-		std::fs::create_dir(&target).expect("mkdir");
-		std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).expect("chmod");
-		std::os::unix::fs::symlink(&target, &link).expect("symlink");
-		// SAFETY: geteuid takes no arguments, touches no memory and cannot fail.
-		let euid = unsafe { libc::geteuid() };
-		assert!(verify_private_dir(&link, euid).is_err());
-	}
-
-	#[test]
-	fn regular_file_rejected() {
-		let dir = tempfile::tempdir().expect("tempdir");
-		let file = dir.path().join("file");
-		std::fs::write(&file, b"x").expect("write");
-		// SAFETY: geteuid takes no arguments, touches no memory and cannot fail.
-		let euid = unsafe { libc::geteuid() };
-		assert!(verify_private_dir(&file, euid).is_err());
-	}
-}
+#[path = "staging_tests.rs"]
+mod staging_tests;
 
 #[cfg(all(test, unix))]
-mod ensure_dir_tests {
-	use super::ensure_private_dir;
-	use std::os::unix::fs::{MetadataExt, PermissionsExt};
-
-	#[test]
-	fn creates_fresh_private_dir() {
-		let root = tempfile::tempdir().expect("tempdir");
-		let dir = root.path().join("base");
-		// SAFETY: geteuid takes no arguments, touches no memory and cannot fail.
-		let euid = unsafe { libc::geteuid() };
-		ensure_private_dir(&dir, euid).expect("fresh dir");
-		let meta = std::fs::metadata(&dir).expect("metadata");
-		assert_eq!(meta.mode() & 0o777, 0o700);
-	}
-
-	#[test]
-	fn drifted_permissions_on_existing_dir_fail_closed() {
-		// A pre-existing directory with looser-than-0700 permissions is rejected
-		// rather than chmod-healed: healing through the path would be a TOCTOU
-		// window, and failing closed never writes secrets under a dir another
-		// user may currently access.
-		let root = tempfile::tempdir().expect("tempdir");
-		let dir = root.path().join("base");
-		std::fs::create_dir(&dir).expect("mkdir");
-		std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-		// SAFETY: geteuid takes no arguments, touches no memory and cannot fail.
-		let euid = unsafe { libc::geteuid() };
-		assert!(ensure_private_dir(&dir, euid).is_err());
-		// Permissions are left untouched (no chmod attempted).
-		let meta = std::fs::metadata(&dir).expect("metadata");
-		assert_eq!(meta.mode() & 0o777, 0o755);
-	}
-
-	#[test]
-	fn symlinked_dir_is_rejected_not_healed() {
-		let root = tempfile::tempdir().expect("tempdir");
-		let target = root.path().join("real");
-		let link = root.path().join("link");
-		std::fs::create_dir(&target).expect("mkdir");
-		std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-		std::os::unix::fs::symlink(&target, &link).expect("symlink");
-		// SAFETY: geteuid takes no arguments, touches no memory and cannot fail.
-		let euid = unsafe { libc::geteuid() };
-		assert!(ensure_private_dir(&link, euid).is_err());
-		// Target permissions stay untouched — no chmod through the link.
-		let meta = std::fs::metadata(&target).expect("metadata");
-		assert_eq!(meta.mode() & 0o777, 0o755);
-	}
-}
+#[path = "staging_ensure_dir_tests.rs"]
+mod ensure_dir_tests;
 
 #[cfg(test)]
-mod reject_mode_tests {
-	use super::reject_dangerous_secret_mode;
-
-	#[test]
-	fn data_modes_accepted() {
-		// A secret holds data: read/write owner bits and the world-readable
-		// default are all fine for a native secret.
-		assert!(reject_dangerous_secret_mode(0o400, "s").is_ok());
-		assert!(reject_dangerous_secret_mode(0o600, "s").is_ok());
-		assert!(reject_dangerous_secret_mode(0o444, "s").is_ok());
-	}
-
-	#[test]
-	fn execute_setuid_setgid_sticky_rejected() {
-		for mode in [0o100, 0o500, 0o700, 0o4000, 0o2000, 0o1000] {
-			assert!(
-				reject_dangerous_secret_mode(mode, "s").is_err(),
-				"{mode:#o} must be rejected"
-			);
-		}
-	}
-}
+#[path = "staging_reject_mode_tests.rs"]
+mod reject_mode_tests;
 
 #[cfg(all(test, windows))]
-mod windows_staging_tests {
-	use super::staging_base;
-
-	#[test]
-	fn staging_base_is_a_directory() {
-		let base = staging_base().expect("staging base");
-		assert!(base.is_dir());
-		assert!(base.ends_with("podup"));
-	}
-}
+#[path = "staging_windows_staging_tests.rs"]
+mod windows_staging_tests;

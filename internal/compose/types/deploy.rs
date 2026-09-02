@@ -130,19 +130,8 @@ impl CountOrAll {
 }
 
 #[cfg(test)]
-mod tests {
-	use super::CountOrAll;
-
-	#[test]
-	fn count_or_all_named_returns_minus_one() {
-		assert_eq!(CountOrAll::Named("all".into()).to_i64(), -1);
-	}
-
-	#[test]
-	fn count_or_all_n_returns_value() {
-		assert_eq!(CountOrAll::N(4).to_i64(), 4);
-	}
-}
+#[path = "deploy_tests.rs"]
+mod tests;
 
 /// Restart policy under `deploy.restart_policy:` — distinct from the service-level `restart:` string.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]

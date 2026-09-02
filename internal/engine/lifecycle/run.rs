@@ -358,70 +358,8 @@ fn merge_run_environment(
 }
 
 #[cfg(test)]
-mod tests {
-	use super::{merge_run_environment, write_frame};
-	use std::collections::HashMap;
-
-	fn lookup<'a>(list: &'a [String], key: &str) -> Option<&'a str> {
-		// Mirror downstream "later duplicate wins" semantics.
-		list.iter().rev().find_map(|e| match e.split_once('=') {
-			Some((k, v)) if k == key => Some(v),
-			_ => None,
-		})
-	}
-
-	#[test]
-	fn env_file_seeds_environment() {
-		let file: HashMap<String, String> = [("FOO".to_string(), "from-file".to_string())].into();
-		let list = merge_run_environment(file, HashMap::new(), Vec::new());
-		assert_eq!(lookup(&list, "FOO"), Some("from-file"));
-	}
-
-	#[test]
-	fn service_environment_overrides_env_file() {
-		let file: HashMap<String, String> = [("FOO".to_string(), "from-file".to_string())].into();
-		let service: HashMap<String, Option<String>> =
-			[("FOO".to_string(), Some("from-service".to_string()))].into();
-		let list = merge_run_environment(file, service, Vec::new());
-		assert_eq!(lookup(&list, "FOO"), Some("from-service"));
-	}
-
-	#[test]
-	fn dash_e_override_wins_over_all() {
-		let file: HashMap<String, String> = [("FOO".to_string(), "from-file".to_string())].into();
-		let service: HashMap<String, Option<String>> =
-			[("FOO".to_string(), Some("from-service".to_string()))].into();
-		let list = merge_run_environment(file, service, vec!["FOO=from-cli".to_string()]);
-		assert_eq!(lookup(&list, "FOO"), Some("from-cli"));
-	}
-
-	#[test]
-	fn distinct_keys_from_each_layer_are_kept() {
-		let file: HashMap<String, String> = [("A".to_string(), "a".to_string())].into();
-		let service: HashMap<String, Option<String>> =
-			[("B".to_string(), Some("b".to_string()))].into();
-		let list = merge_run_environment(file, service, vec!["C=c".to_string()]);
-		assert_eq!(lookup(&list, "A"), Some("a"));
-		assert_eq!(lookup(&list, "B"), Some("b"));
-		assert_eq!(lookup(&list, "C"), Some("c"));
-	}
-
-	// `write_frame` (#1364)
-
-	#[test]
-	fn write_frame_valid_utf8_writes_bytes_verbatim() {
-		let mut buf = Vec::new();
-		write_frame(&mut buf, b"hello\nworld\n").unwrap();
-		assert_eq!(buf, b"hello\nworld\n");
-	}
-
-	#[test]
-	fn write_frame_invalid_utf8_substitutes_replacement() {
-		let mut buf = Vec::new();
-		write_frame(&mut buf, b"ok\xFF!\n").unwrap();
-		assert_eq!(buf, "ok�!\n".as_bytes());
-	}
-}
+#[path = "run_tests.rs"]
+mod tests;
 
 /// What a non-interactive `run` does when its log stream dies under it.
 ///
@@ -431,68 +369,5 @@ mod tests {
 /// out-of-band answer, and `wait` then reports the real exit code.
 #[cfg(test)]
 #[cfg(unix)]
-mod stream_end_tests {
-	use crate::engine::fake_podman::{self, FakeReply};
-	use crate::engine::Engine;
-
-	fn compose() -> crate::compose::types::ComposeFile {
-		crate::parse_str("services:\n  app:\n    image: img\n").unwrap()
-	}
-
-	/// A fake whose log stream is cut with no terminating chunk, whose container
-	/// listing reports `state`, and whose `wait` reports `code`.
-	fn fake(state: &'static str, code: i64) -> fake_podman::FakePodman {
-		fake_podman::start_replying(move |method, target| {
-			if target.contains("/logs") {
-				FakeReply::ChunkedTruncated(vec!["output\n".to_string()])
-			} else if target.contains("/wait") {
-				FakeReply::Body(200, code.to_string())
-			} else if target.contains("/containers/json") {
-				FakeReply::Body(
-					200,
-					format!(r#"[{{"Names":["/proj-app-run-1"],"State":"{state}"}}]"#),
-				)
-			} else if method == "POST" {
-				FakeReply::Body(200, r#"{"Id":"cafe"}"#.to_string())
-			} else {
-				FakeReply::Body(404, r#"{"message":"not found"}"#.to_string())
-			}
-		})
-	}
-
-	fn options() -> crate::engine::RunOptions {
-		crate::engine::RunOptions {
-			cmd: vec![],
-			rm: false,
-			detach: false,
-			env_overrides: vec![],
-			name_override: Some("proj-app-run-1".to_string()),
-			service_ports: false,
-		}
-	}
-
-	#[tokio::test]
-	async fn a_cut_stream_after_the_container_stopped_reports_the_real_exit_code() {
-		let fake = fake("exited", 0);
-		let e = Engine::with_base_dir(fake.client(), "proj".into(), std::env::temp_dir());
-
-		e.run(&compose(), "app", options())
-			.await
-			.expect("the command finished; only the terminator went missing");
-	}
-
-	#[tokio::test]
-	async fn a_cut_stream_while_the_container_runs_is_a_failure() {
-		let fake = fake("running", 0);
-		let e = Engine::with_base_dir(fake.client(), "proj".into(), std::env::temp_dir());
-
-		let err = e
-			.run(&compose(), "app", options())
-			.await
-			.expect_err("output was truncated with the container still up: that is a failed read");
-		assert!(
-			matches!(err, crate::error::ComposeError::Podman(_)),
-			"expected the transport error to survive, got {err:?}"
-		);
-	}
-}
+#[path = "run_stream_end_tests.rs"]
+mod stream_end_tests;
