@@ -94,6 +94,9 @@ jobs:
   build:
     name: dpkg-buildpackage
     runs-on: ${{ inputs.runner }}
+    # Bound: worst of the last three successful runs on 2026-09-02 was 432s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 60
     container:
       image: ${{ inputs.debian-image }}
     defaults:
@@ -222,6 +225,9 @@ jobs:
     name: build (vendored / offline)
     if: ${{ inputs.check-vendored }}
     runs-on: ${{ inputs.runner }}
+    # Bound: worst of the last three successful runs on 2026-09-02 was 171s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 30
     container:
       image: ${{ inputs.debian-image }}
     defaults:
