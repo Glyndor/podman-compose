@@ -1,13 +1,11 @@
-# The x86_64 musl target links a static PIE by itself: rustc knows that
-# target supports it and passes -static-pie. The aarch64 musl target does
-# not carry that flag in rustc 1.98, so the same build there is a plain
-# static executable at a fixed address, with no ASLR: podup-linux-arm64 and
-# the arm64 .deb shipped that way through 5.7.0. Linking the aarch64 leg
-# with rust-lld and asking for -pie yields a static PIE with BIND_NOW, the
-# same shape the x86_64 binary has. This applies to every cargo invocation
-# in the tree, so the release build, the Debian build and the CI job that
-# checks the result all link the same way. The release verifies the
-# outcome with .github/scripts/check-hardening.sh before signing.
+# The x86_64 musl target links a static PIE by itself. The aarch64 musl
+# target does not (rustc 1.98 lacks the flag for it), and the plain static
+# executable it produces has no ASLR: podup-linux-arm64 and the arm64 .deb
+# shipped that way through 5.7.0. For that target the link goes to rust-lld
+# without rustc's own CRT objects, and build.rs supplies the static-PIE set
+# and flags; see the comment there. This applies to every cargo invocation
+# in the tree: the release build, the Debian build, tests and the CI job
+# that runs the result on an arm64 runner.
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"
-rustflags = ["-C", "link-self-contained=yes", "-C", "link-arg=-pie"]
+rustflags = ["-C", "link-self-contained=no"]
