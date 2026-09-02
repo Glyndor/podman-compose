@@ -572,3 +572,42 @@ async fn engine_attach_logs_timestamps_returns_when_container_exits() {
 	);
 	res.unwrap().unwrap();
 }
+
+/// The container-to-host archive is buffered in memory under a cap of one
+/// gibibyte. A file of two mebibytes is far under it and must arrive whole;
+/// a cap that shrank by an arithmetic slip (a mutation sweep on 2026-09-02
+/// turned the `*` in the constant into `+` and nothing noticed, because every
+/// copy in the suite was a few bytes) refuses this one.
+#[tokio::test]
+async fn engine_cp_from_container_carries_a_file_of_two_mebibytes() {
+	let client = match podman().await {
+		Some(d) => d,
+		None => return,
+	};
+	let proj = proj("cpbig");
+	let engine = Engine::new(client, proj.clone());
+	let file = parse_str(
+		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n",
+	)
+	.unwrap();
+	engine.up(&file).await.unwrap();
+	engine
+		.test_exec_capture(
+			&format!("{proj}-web-1"),
+			vec![
+				"sh".into(),
+				"-c".into(),
+				"head -c 2097152 /dev/zero > /tmp/big.bin".into(),
+			],
+		)
+		.await
+		.unwrap();
+
+	let dir = tempfile::tempdir().unwrap();
+	let dst = dir.path().to_str().unwrap().to_string();
+	let result = engine.cp(&file, "web:/tmp/big.bin", &dst).await;
+	engine.down(&file).await.unwrap();
+	result.unwrap();
+	let size = fs::metadata(dir.path().join("big.bin")).unwrap().len();
+	assert_eq!(size, 2 * 1024 * 1024, "the whole file must arrive");
+}

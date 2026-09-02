@@ -32,7 +32,7 @@ const MAX_CP_ARCHIVE_BYTES: usize = 1024 * 1024 * 1024;
 /// a literal. Construct it via [`CpOptions::new`] or the `with_*` builders
 /// below; a struct literal is refused outside this crate, which is what buys
 /// the room to grow.
-#[derive(Default)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CpOptions {
 	/// 1-based replica index for a scaled service, `--index` (default: first).
