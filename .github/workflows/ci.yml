@@ -51,7 +51,23 @@ jobs:
       #
       # The 90 gate belongs where the tests can actually run — the `podman-vm`
       # lane — and that is tracked separately rather than papered over here.
-      coverage-threshold: 79
+      # 68 is lower than 79 and the gate got stricter, not looser. Measured
+      # 2026-09-02 with the CI command (cargo llvm-cov --workspace
+      # --all-features, no Podman reachable) on the same commit before and
+      # after the 124 inline test modules moved to sibling files: 82.08%
+      # (24402 of 29728 lines) became 73.12% (14309 of 19570). The 10158
+      # lines that left the denominator were test bodies that cargo-llvm-cov
+      # had counted as covered production lines of the files they sat in, so
+      # the old number measured test volume as well as reach. CI reads about
+      # three points below this machine (79.39 against 82.08 on the old tree,
+      # the integration tests that need more than a socket skip there), which
+      # puts the honest CI figure near 70; 68 leaves two points for the
+      # variance of a single sample rather than betting a required check on
+      # it. It is a ratchet, not a target: raise it to what CI measures once a
+      # few runs agree, never lower it to make a red build green. See
+      # standards/testing, "An inline test module is counted as covered
+      # production code".
+      coverage-threshold: 68
       # This number is inside the check name `rust / MSRV (1.85)`. Bumping it
       # emits `rust / MSRV (<new>)` while the ruleset still requires the old
       # string, so the PR carrying the bump blocks itself. A ruleset should
