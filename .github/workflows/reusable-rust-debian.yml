@@ -276,8 +276,11 @@ jobs:
       - name: Vendor dependencies (the only step allowed network access)
         run: |
           cargo vendor vendor
+          # Appended, not written: .cargo/config.toml is tracked and carries
+          # the per-target link flags the release relies on. cargo merges the
+          # sections, and this job never commits.
           mkdir -p .cargo
-          printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
+          printf '\n[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' >> .cargo/config.toml
 
       - name: Build offline from the vendored tree
         env:

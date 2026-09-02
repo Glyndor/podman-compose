@@ -1,0 +1,11 @@
+# The x86_64 musl target links a static PIE by itself. The aarch64 musl
+# target does not (rustc 1.98 lacks the flag for it), and the plain static
+# executable it produces has no ASLR: podup-linux-arm64 and the arm64 .deb
+# shipped that way through 5.7.0. For that target the link goes to rust-lld
+# without rustc's own CRT objects, and build.rs supplies the static-PIE set
+# and flags; see the comment there. This applies to every cargo invocation
+# in the tree: the release build, the Debian build, tests and the CI job
+# that runs the result on an arm64 runner.
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "link-self-contained=no"]
