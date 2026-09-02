@@ -208,6 +208,7 @@ Full tables and methodology: [docs/benchmarks.md](docs/benchmarks.md).
 - [Benchmarks](docs/benchmarks.md)
 - [Self-update](docs/self-update.md)
 - [Security model](docs/security-model.md)
+- [Threat model](docs/threat-model.md)
 - [Debian packaging](docs/debian-packaging.md)
 
 ## License
