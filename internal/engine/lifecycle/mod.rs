@@ -158,9 +158,14 @@ impl Engine {
 			// Prefetch the project's containers once (instead of one API call per
 			// replica): which names already exist, and each one's config-hash
 			// label so we can decide whether a container needs recreation.
+			//
+			// Fetched on the `--force-recreate` path too. The hash is unused
+			// there, but `present` is what tells the progress stream that a
+			// container was replaced rather than created (#1619), and a forced
+			// recreate is exactly the case where that word matters.
 			let mut present: HashSet<String> = HashSet::new();
 			let mut existing_hash: HashMap<String, String> = HashMap::new();
-			if !force_recreate {
+			{
 				let path = format!(
 					"{API_PREFIX}/containers/json?all=true&filters={}",
 					self.project_label_filter_encoded(),
@@ -483,18 +488,24 @@ impl Engine {
 				return Ok(());
 			}
 		}
-		crate::ui::progress::start(
-			"Container",
-			&container_name,
-			if start { "Starting" } else { "Creating" },
-		);
+		// Replacing a container destroys its writable layer, and creating one
+		// does not, so the two get different words. Before #1619 both printed
+		// `Starting`/`Started`, and the only way to learn that a container had
+		// been removed was to compare IDs by hand; `--force-recreate` and
+		// `--no-recreate` were unverifiable from the output for the same reason.
+		// `Recreating`/`Recreated` is docker compose's word for it too
+		// (`Recreate`/`Recreated`, measured on v5.3.1), so a reader of either
+		// tool's log reads the same event the same way.
+		let existed = present.contains(&container_name);
+		let (doing, done) = match (existed, start) {
+			(true, _) => ("Recreating", "Recreated"),
+			(false, true) => ("Starting", "Started"),
+			(false, false) => ("Creating", "Created"),
+		};
+		crate::ui::progress::start("Container", &container_name, doing);
 		self.create_and_start(&container_name, name, service, file, start)
 			.await?;
-		crate::ui::progress_line(
-			"Container",
-			&container_name,
-			if start { "Started" } else { "Created" },
-		);
+		crate::ui::progress_line("Container", &container_name, done);
 
 		// `post_start` hooks run inside a running container, so only on `up`.
 		if start {
