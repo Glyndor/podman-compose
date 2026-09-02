@@ -87,6 +87,22 @@ fn the_error_lists_the_modes_for_that_slot() {
 	let pid = allowed_namespace_modes(PID_FIELD);
 	assert!(!pid.contains("keep-id"), "{pid}");
 	assert!(!pid.contains("shareable"), "{pid}");
+
+	// The list reads as a list: a separator between items and none before
+	// the first. A separator emitted on the wrong side survived every
+	// `contains` above, since the words were all still there.
+	for list in [&userns, &ipc, &pid] {
+		assert!(list.starts_with("one of "), "{list}");
+		assert!(
+			!list.starts_with("one of ,"),
+			"separator before the first item: {list}"
+		);
+		assert!(
+			!list.contains(",,") && !list.contains(", ,"),
+			"doubled separator: {list}"
+		);
+		assert!(list.contains(", "), "no separator between items: {list}");
+	}
 }
 
 #[test]

@@ -169,6 +169,10 @@ mod name_tests;
 mod staging_tests;
 
 #[cfg(all(test, unix))]
+#[path = "staging_base_tests.rs"]
+mod base_tests;
+
+#[cfg(all(test, unix))]
 #[path = "staging_ensure_dir_tests.rs"]
 mod ensure_dir_tests;
 
