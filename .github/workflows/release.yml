@@ -211,6 +211,14 @@ jobs:
       - name: Stage artifact
         run: cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "${{ matrix.asset }}"
 
+      - name: Run the binary once
+        # Every leg builds on the architecture it ships for, so the binary can
+        # be executed where it was made. A link that produced something the
+        # loader refuses would otherwise be signed, attested and published;
+        # the static-PIE link the aarch64 musl target gets from
+        # .cargo/config.toml is the case this was written for.
+        run: ./"${{ matrix.asset }}" --version
+
       - name: Sign binary
         env:
           GLYNDOR_RELEASE_ED25519_KEY: ${{ secrets.GLYNDOR_RELEASE_ED25519_KEY }}
@@ -499,6 +507,27 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Verify the Linux binaries carry the hardening they are documented with
+        run: |
+          set -euo pipefail
+          # Static PIE, full RELRO, non-executable stack, stripped: measured by
+          # hand on 5.7.0 and documented in docs/threat-model.md, and until this
+          # step nothing in the release asked for them. They come from rustc's
+          # musl defaults and [profile.release], not from anything named here,
+          # so a toolchain bump or a stray RUSTFLAGS in a build step would drop
+          # one and the release would sign and publish it. Checked over the
+          # two raw binaries and the binary inside each .deb, before signing,
+          # so a failure burns nothing: the release is not immutable yet.
+          # The script's own tests build one control per property.
+          for arch in amd64 arm64; do
+            dpkg-deb -x podup_*_"${arch}".deb "$RUNNER_TEMP/deb-${arch}"
+          done
+          bash .github/scripts/check-hardening.sh \
+            podup-linux-x86_64 \
+            podup-linux-arm64 \
+            "$RUNNER_TEMP/deb-amd64/usr/bin/podup" \
+            "$RUNNER_TEMP/deb-arm64/usr/bin/podup"
 
       - name: Generate checksums
         run: |
