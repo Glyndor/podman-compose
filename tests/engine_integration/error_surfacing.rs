@@ -276,3 +276,47 @@ fn parse_compose_passes_with_bogus_fields_unchanged() {
 		vec!["db:127.0.0.1,github.com:127.0.0.1".to_string()]
 	);
 }
+
+/// `up` validates every object name client-side before it issues a single
+/// create, so a name Podman's regex would refuse surfaces as podup's own
+/// error and nothing is created. The validator is unit-tested; this is the
+/// wiring. A mutation sweep on 2026-09-02 replaced the `Engine` wrapper that
+/// calls it with `Ok(())` and every test stayed green: nothing had asked
+/// whether `up` calls it. A volume is the object to use here, since a
+/// container name is checked a second time at create and would pass with the
+/// preflight gone.
+#[tokio::test]
+async fn up_refuses_an_invalid_volume_name_before_creating_anything() {
+	if podman().await.is_none() {
+		return;
+	}
+	let dir = tempfile::tempdir().unwrap();
+	let proj = proj("badvol");
+	let yaml = "services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    volumes:\n      - data:/data\nvolumes:\n  data:\n    name: \"bad name\"\n";
+	let path = dir.path().join("docker-compose.yml");
+	fs::write(&path, yaml).unwrap();
+	let c = path.to_str().unwrap();
+
+	let out = Command::new(bin())
+		.args(["-f", c, "-p", &proj, "up", "-d"])
+		.output()
+		.unwrap();
+	let stderr = String::from_utf8_lossy(&out.stderr);
+	// Whatever was created is removed before asserting, so a failure here
+	// leaves nothing behind.
+	let _ = Command::new(bin())
+		.args(["-f", c, "-p", &proj, "down", "-v"])
+		.output();
+	assert!(
+		!out.status.success(),
+		"a volume name with a space must be refused"
+	);
+	assert!(
+		stderr.contains("invalid volume name \"bad name\""),
+		"refused by podup's own preflight, not by libpod; got:\n{stderr}"
+	);
+	assert!(
+		!stderr.contains("500") && !stderr.contains("Internal Server Error"),
+		"the refusal must happen before any libpod call; got:\n{stderr}"
+	);
+}
