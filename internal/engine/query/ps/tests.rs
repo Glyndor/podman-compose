@@ -11,6 +11,7 @@ fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
 
 fn entry(status: &str, state: &str) -> ContainerListEntry {
 	ContainerListEntry {
+		image_id: String::new(),
 		id: "abc123".into(),
 		names: vec!["/web".into()],
 		image: "alpine".into(),
@@ -76,6 +77,7 @@ fn display_status_prefers_status_when_present() {
 
 fn entry_exit(state: &str, code: Option<i32>) -> ContainerListEntry {
 	ContainerListEntry {
+		image_id: String::new(),
 		exit_code: code,
 		..entry("", state)
 	}
@@ -111,6 +113,7 @@ fn table_status_keeps_running_and_rich_status_text() {
 	assert_eq!(table_status(&entry("", "running"), NOW), "running");
 	// A Docker-style status that already carries the code is left untouched.
 	let c = ContainerListEntry {
+		image_id: String::new(),
 		exit_code: Some(7),
 		..entry("Exited (7) 4 seconds ago", "exited")
 	};
@@ -240,6 +243,7 @@ fn health_is_derived_from_status_text() {
 #[test]
 fn a_running_container_reports_how_long_it_has_been_up() {
 	let c = ContainerListEntry {
+		image_id: String::new(),
 		started_at: NOW - (2 * 3600 + 5 * 60 + 3),
 		..entry("", "running")
 	};
@@ -253,14 +257,17 @@ fn a_running_container_reports_how_long_it_has_been_up() {
 fn the_health_suffix_appears_only_when_there_is_a_healthcheck() {
 	let started = NOW - 13 * 3600;
 	let healthy = ContainerListEntry {
+		image_id: String::new(),
 		started_at: started,
 		..entry("healthy", "running")
 	};
 	let unhealthy = ContainerListEntry {
+		image_id: String::new(),
 		started_at: started,
 		..entry("unhealthy", "running")
 	};
 	let plain = ContainerListEntry {
+		image_id: String::new(),
 		started_at: started,
 		..entry("", "running")
 	};
@@ -275,6 +282,7 @@ fn the_health_suffix_appears_only_when_there_is_a_healthcheck() {
 #[test]
 fn an_absent_start_time_does_not_become_an_age() {
 	let c = ContainerListEntry {
+		image_id: String::new(),
 		started_at: 0,
 		..entry("", "running")
 	};
@@ -287,6 +295,7 @@ fn an_absent_start_time_does_not_become_an_age() {
 #[test]
 fn a_start_time_in_the_future_clamps_to_zero() {
 	let c = ContainerListEntry {
+		image_id: String::new(),
 		started_at: NOW + 3,
 		..entry("", "running")
 	};
@@ -305,18 +314,21 @@ fn a_start_time_in_the_future_clamps_to_zero() {
 #[test]
 fn only_a_running_container_reports_an_age() {
 	let exited = ContainerListEntry {
+		image_id: String::new(),
 		started_at: NOW - 3600,
 		..entry_exit("exited", Some(7))
 	};
 	assert_eq!(table_status(&exited, NOW), "Exited (7)");
 
 	let paused = ContainerListEntry {
+		image_id: String::new(),
 		started_at: NOW - 3600,
 		..entry("paused", "paused")
 	};
 	assert_eq!(table_status(&paused, NOW), "paused");
 
 	let created = ContainerListEntry {
+		image_id: String::new(),
 		started_at: NOW - 3600,
 		..entry("", "created")
 	};
@@ -328,6 +340,7 @@ fn only_a_running_container_reports_an_age() {
 #[test]
 fn the_created_cell_reports_the_age_of_the_container() {
 	let c = ContainerListEntry {
+		image_id: String::new(),
 		// 2026-08-02 22:34:41 at -05:00 is 2026-08-03 03:34:41Z, which is two
 		// hours and change after NOW... so use a value comfortably before it.
 		created: "2026-08-01T00:58:45Z".into(),
@@ -342,6 +355,7 @@ fn the_created_cell_reports_the_age_of_the_container() {
 fn an_unparseable_created_leaves_the_cell_blank() {
 	for bad in ["", "not a timestamp", "2026-13-01T00:00:00Z"] {
 		let c = ContainerListEntry {
+			image_id: String::new(),
 			created: bad.into(),
 			..entry("", "running")
 		};
@@ -387,6 +401,7 @@ fn the_size_cell_matches_what_podman_prints() {
 	];
 	for (rw, root_fs, expected) in cases {
 		let c = ContainerListEntry {
+			image_id: String::new(),
 			size: Some(crate::libpod::types::container::ContainerSize { rw, root_fs }),
 			..entry("", "running")
 		};
@@ -404,6 +419,7 @@ fn virtual_is_the_image_size_and_not_the_total() {
 	let rw = 577_461_099;
 	let root_fs = 2_082_961_972;
 	let c = ContainerListEntry {
+		image_id: String::new(),
 		size: Some(crate::libpod::types::container::ContainerSize { rw, root_fs }),
 		..entry("", "running")
 	};
@@ -431,6 +447,7 @@ fn a_size_that_was_not_requested_leaves_the_cell_empty() {
 #[test]
 fn a_zero_byte_writable_layer_still_renders() {
 	let c = ContainerListEntry {
+		image_id: String::new(),
 		size: Some(crate::libpod::types::container::ContainerSize {
 			rw: 0,
 			root_fs: 1_000_000,
@@ -449,6 +466,7 @@ fn the_json_row_distinguishes_an_absent_size_from_a_zero() {
 	assert!(absent["Size"].is_null(), "{}", absent["Size"]);
 
 	let c = ContainerListEntry {
+		image_id: String::new(),
 		size: Some(crate::libpod::types::container::ContainerSize {
 			rw: 143_362,
 			root_fs: 224_997_461,
@@ -466,6 +484,7 @@ fn the_json_row_distinguishes_an_absent_size_from_a_zero() {
 #[test]
 fn the_json_row_carries_the_raw_instants() {
 	let c = ContainerListEntry {
+		image_id: String::new(),
 		started_at: 1_785_728_082,
 		created: "2026-08-02T22:34:41.982670-05:00".into(),
 		..entry("", "running")
@@ -484,6 +503,7 @@ fn ps_json_row_surfaces_state_exitcode_and_publishers() {
 	labels.insert("podup.project".to_string(), "demo".to_string());
 	labels.insert("podup.service".to_string(), "web".to_string());
 	let c = ContainerListEntry {
+		image_id: String::new(),
 		id: "deadbeef".into(),
 		names: vec!["/demo-web-1".into()],
 		image: "nginx:1.25".into(),
