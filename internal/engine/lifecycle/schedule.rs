@@ -11,7 +11,7 @@ use crate::compose::types::ComposeFile;
 use crate::error::Result;
 
 use super::readiness::SharedReady;
-use super::Engine;
+use super::{Engine, ExistingContainer};
 
 impl Engine {
 	/// Start every scheduled service, each as soon as its own dependencies are
@@ -24,8 +24,7 @@ impl Engine {
 		file: &ComposeFile,
 		enabled: &HashSet<String>,
 		target_set: &Option<HashSet<String>>,
-		present: &HashSet<String>,
-		existing_hash: &HashMap<String, String>,
+		existing: &HashMap<String, ExistingContainer>,
 		no_recreate: bool,
 		force_recreate: bool,
 		start: bool,
@@ -71,8 +70,7 @@ impl Engine {
 		// rather than trying to move them per service.
 		let enabled = &enabled;
 		let target_set = &target_set;
-		let present = &present;
-		let existing_hash = &existing_hash;
+		let existing = &existing;
 		let readiness = &readiness;
 		let started = scheduled.iter().map(|name| {
 			let permits = permits.clone();
@@ -108,8 +106,7 @@ impl Engine {
 						file,
 						enabled,
 						target_set,
-						present,
-						existing_hash,
+						existing,
 						no_recreate,
 						force_recreate,
 						start,

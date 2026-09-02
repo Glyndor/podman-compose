@@ -32,6 +32,16 @@ pub struct ContainerListEntry {
 	#[serde(rename = "Image", default)]
 	pub image: String,
 
+	/// Full 64-hex ID of the image the container is bound to. This is the
+	/// image's identity; `image` above is the name it was asked for, which a
+	/// later pull, build or `podman tag` can point at a different image without
+	/// touching the container. `up` compares it against what the service's tag
+	/// resolves to now, which is how a container built from an older image gets
+	/// recreated (#1620). Measured on Podman 5.7.0: `ImageID` on the list
+	/// endpoint equals `Id` on `GET /libpod/images/{name}/json`.
+	#[serde(rename = "ImageID", default)]
+	pub image_id: String,
+
 	/// Human-readable status string for `ps` display (e.g. `Up 3 minutes`,
 	/// `Exited (0) 5 seconds ago`). Empty on libpod, which reports `State`.
 	#[serde(rename = "Status", default)]
