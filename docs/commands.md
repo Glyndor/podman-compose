@@ -717,6 +717,14 @@ were never created reports no removal. A command that acted on nothing says so â
 `no containers to stop`, `no containers to start (project not created)` â€” rather
 than exiting silently, which is indistinguishable from success.
 
+A container that is replaced reads differently from one that is created:
+`Recreating`/`Recreated` for a container `up` or `create` removed and built
+again (a changed config, `--force-recreate`), `Starting`/`Started` or
+`Creating`/`Created` for one that did not exist, and `Running` or `Exists` for
+one left alone. Recreation destroys the container's writable layer, so the word
+is the operator's only signal at the moment it happens, and it is what makes
+`--force-recreate` and `--no-recreate` verifiable from the output.
+
 The live region needs stderr to be a terminal, colour to be on, and the terminal
 size to be readable. If any of those is missing it falls back to the plain
 lines, which is also what `--ansi never` and `NO_COLOR` select.
