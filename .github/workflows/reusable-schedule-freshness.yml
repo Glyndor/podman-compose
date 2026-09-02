@@ -52,6 +52,9 @@ jobs:
   freshness:
     name: schedule freshness
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 10s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     permissions:
       actions: read # reading this repository's workflow-run history
     steps:

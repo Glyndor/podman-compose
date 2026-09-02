@@ -20,6 +20,9 @@ jobs:
   verify:
     name: Verify tag matches crate version
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 189s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -128,6 +131,9 @@ jobs:
     name: Build ${{ matrix.asset }}
     needs: verify
     runs-on: ${{ matrix.runner }}
+    # Bound: worst of the last three successful runs on 2026-09-02 was 347s; the slowest leg is Windows arm64. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 60
     permissions:
       contents: read
       id-token: write
@@ -250,6 +256,9 @@ jobs:
     name: Build Debian package (${{ matrix.arch }})
     needs: verify
     runs-on: ${{ matrix.runner }}
+    # Bound: worst of the last three successful runs on 2026-09-02 was 438s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 60
     # debian:trixie, digest-pinned. Sid was a moving tag:
     # two releases built from identical source could land in different
     # environments with nothing in history recording which, and Dependabot's
@@ -368,6 +377,9 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 216s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -454,6 +466,9 @@ jobs:
     name: Publish release
     needs: [build, build-deb, sbom]
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 33s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     permissions:
       contents: write
 

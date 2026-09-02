@@ -58,6 +58,9 @@ jobs:
   decide:
     name: Decide whether the VM has anything to look at
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 8s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     outputs:
       engine: ${{ steps.files.outputs.engine }}
     steps:
@@ -554,6 +557,9 @@ jobs:
     # check does not block a merge — the exact failure this job exists to prevent.
     if: always()
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 4s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     steps:
       - name: Reflect the matrix result
         env:
