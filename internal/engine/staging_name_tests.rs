@@ -9,6 +9,22 @@ fn safe_project_names_accepted() {
 	}
 }
 
+/// The acceptance half of the length bound. `unsafe_project_names_rejected`
+/// refuses 129; without this case a bound that slipped to `>= 128` would
+/// still pass every test, because nothing asked for the longest legal name.
+#[test]
+fn a_name_of_exactly_128_characters_is_accepted() {
+	let longest = "a".repeat(128);
+	assert!(
+		is_safe_project_name(&longest),
+		"128 is the bound, inclusive"
+	);
+	assert!(
+		!is_safe_project_name(&format!("{longest}a")),
+		"129 is over it"
+	);
+}
+
 #[test]
 fn unsafe_project_names_rejected() {
 	let long = "a".repeat(129);
