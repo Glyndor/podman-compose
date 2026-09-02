@@ -25,6 +25,19 @@ name: Dependabot freshness (reusable)
 #    catches a dead Dependabot (template-repository went the lifetime of the
 #    repo without one before this gate landed).
 #
+# 3. Silence is only an alarm when there was something to say. Measured
+#    2026-09-01 across the three channels: the newest Dependabot pull request
+#    was twelve days old, and every pinned action was already at its newest
+#    upstream tag, so the silence was the correct output of a live Dependabot
+#    with nothing to bump, and three days later this gate would have gone red
+#    in three repositories for it. So when the newest pull request is over
+#    the limit, the step reads every `uses: owner/repo@<sha> # vX.Y.Z` pin in
+#    the caller's workflows and asks upstream (plain `git ls-remote`, no API)
+#    for the newest exact-semver tag. Over the limit AND a pin behind, or a
+#    pin whose tag cannot be read, is the failure; over the limit with every
+#    pin current passes and says why. A pin nobody could read is never a pass:
+#    "cannot read it" is a failure, not a skip.
+#
 # The caller is responsible for granting `contents: read`; a called workflow
 # cannot elevate beyond the permissions of the workflow that calls it, and
 # reading public PR history through the API needs that scope.
@@ -70,13 +83,40 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check the newest Dependabot pull request
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           MAX_AGE_DAYS: ${{ inputs.max-age-days }}
+          WORKFLOWS_DIR: .github/workflows
         run: |
           set -euo pipefail
+          # Every third-party pin in the caller's workflows, as "owner/repo vX.Y.Z",
+          # and for each the newest exact-semver tag upstream serves. Prints one
+          # line per pin that is behind, or whose upstream could not be read;
+          # prints nothing when every pin is current.
+          pins_behind_upstream() {
+            grep -rhoE 'uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}[[:space:]]*#[[:space:]]*v[0-9][0-9A-Za-z.+-]*' "${WORKFLOWS_DIR:-.github/workflows}" 2>/dev/null \
+              | sed -E 's/uses:[[:space:]]*//; s/@[0-9a-f]{40}[[:space:]]*#[[:space:]]*/ /' | sort -u \
+              | while read -r action tag; do
+                  if ! printf '%s' "$tag" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+                    echo "$action pinned as $tag: not an exact version, cannot tell whether it is behind"
+                    continue
+                  fi
+                  newest="$(git ls-remote --tags --refs "https://github.com/$action" 'refs/tags/v*' 2>/dev/null \
+                    | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
+                  if [ -z "$newest" ]; then
+                    echo "$action pinned as $tag: could not read upstream tags"
+                    continue
+                  fi
+                  if [ "$(printf '%s\n%s\n' "$tag" "$newest" | sort -V | tail -n 1)" != "$tag" ]; then
+                    echo "$action pinned as $tag, upstream has $newest"
+                  fi
+                done
+          }
 
           # List recent PRs (any state), filter client-side for
           # dependabot[bot], and pick the newest. Doing the filter and sort in
@@ -121,7 +161,16 @@ jobs:
           echo "Newest Dependabot pull request in ${REPO}: ${latest} (${age_days}d ago)."
 
           if [ "$age_days" -gt "$MAX_AGE_DAYS" ]; then
-            echo "::error::Dependabot last opened a pull request ${age_days} days ago in ${REPO}, over the ${MAX_AGE_DAYS}-day limit."
+            # Silence is only an alarm when there was something to say.
+            behind="$(pins_behind_upstream)"
+            pins="$(grep -rhoE 'uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}' "${WORKFLOWS_DIR:-.github/workflows}" 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+            if [ -z "$behind" ]; then
+              echo "::notice::Dependabot last opened a pull request ${age_days} days ago in ${REPO}, over the ${MAX_AGE_DAYS}-day limit, and every one of the ${pins} pinned action(s) is at its newest upstream tag; the silence has nothing to say."
+              echo "Passing: silent because there is nothing to bump."
+              exit 0
+            fi
+            echo "::error::Dependabot last opened a pull request ${age_days} days ago in ${REPO}, over the ${MAX_AGE_DAYS}-day limit, and it is not because there was nothing to bump:"
+            printf '%s\n' "$behind" | sed 's/^/  /'
             echo "A silent Dependabot reports nothing, so treat this as the alert it never sent." >&2
             echo "GitHub runs Dependabot on its own schedule, hours late; a small overrun right at the boundary" >&2
             echo "is not the problem — a multiple of the period is. Check dependabot.yml is still on the default" >&2

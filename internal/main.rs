@@ -618,40 +618,8 @@ async fn run() -> podup::Result<()> {
 }
 
 #[cfg(test)]
-mod down_by_label_tests {
-	use super::down_by_label_path;
-	use crate::cli::Commands;
-
-	fn down() -> Commands {
-		Commands::Down {
-			volumes: false,
-			remove_orphans: false,
-			rmi: None,
-			timeout: None,
-		}
-	}
-
-	#[test]
-	fn down_with_project_and_no_file_takes_label_path() {
-		// `down -p NAME` with no compose file present is the label-only teardown.
-		assert!(down_by_label_path(&down(), Some("proj"), false));
-	}
-
-	#[test]
-	fn down_without_project_or_with_file_does_not() {
-		// Without an explicit project name there is nothing to scope the teardown to,
-		// and when a file is present the normal compose-parse path handles `down`.
-		assert!(!down_by_label_path(&down(), None, false));
-		assert!(!down_by_label_path(&down(), Some("proj"), true));
-	}
-
-	#[test]
-	fn other_commands_never_take_the_down_label_path() {
-		// Only `down` is routed by label here; another command with `-p` and no file
-		// must not be diverted.
-		assert!(!down_by_label_path(&Commands::Watch, Some("proj"), false));
-	}
-}
+#[path = "main_down_by_label_tests.rs"]
+mod down_by_label_tests;
 
 /// Compose-only global value-flags that `update` parses (they are declared
 /// `global` on [`Cli`]) but cannot act on, since self-update rewrites the binary
@@ -693,46 +661,5 @@ fn first_misused_global(matches: &clap::ArgMatches) -> Option<&'static str> {
 }
 
 #[cfg(all(test, feature = "update"))]
-mod tests {
-
-	/// 130 is 128 + SIGINT, and it is what `docker compose up` returns for
-	/// SIGTERM too — measured against v5.1.3 rather than derived from the signal
-	/// number, which would have said 143. podup returned 0 for both, so a
-	/// cancelled CI job reported success.
-	#[test]
-	fn an_interrupt_maps_onto_the_shell_convention() {
-		assert_eq!(interrupt_exit_code(), 130);
-	}
-	use super::*;
-	use clap::CommandFactory;
-
-	fn matches_for(args: &[&str]) -> clap::ArgMatches {
-		Cli::command()
-			.try_get_matches_from(args)
-			.expect("args parse")
-	}
-
-	#[test]
-	fn update_flags_compose_globals_before_subcommand_are_rejected() {
-		let m = matches_for(&[
-			"podup",
-			"--socket",
-			"unix:///tmp/x.sock",
-			"update",
-			"--check",
-		]);
-		assert_eq!(first_misused_global(&m), Some("--socket"));
-	}
-
-	#[test]
-	fn update_flags_compose_globals_after_subcommand_are_rejected() {
-		let m = matches_for(&["podup", "update", "--project-directory", "/tmp"]);
-		assert_eq!(first_misused_global(&m), Some("--project-directory"));
-	}
-
-	#[test]
-	fn update_without_compose_globals_is_accepted() {
-		let m = matches_for(&["podup", "update", "--check", "--force"]);
-		assert_eq!(first_misused_global(&m), None);
-	}
-}
+#[path = "main_tests.rs"]
+mod tests;

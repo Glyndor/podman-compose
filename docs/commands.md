@@ -80,6 +80,16 @@ each with the compose-spec field shown.
 Create and start all services (or only the named ones, plus their transitive
 `depends_on`). Accepts a trailing service list.
 
+A container that already exists is left in place when two facts both hold:
+its recorded config hash equals what the compose file renders now, and the
+image it is bound to is still the image its service resolves to. Either
+changing replaces it: an edited service definition, a rebuilt or re-pulled
+image, or a tag moved by `podman tag`. The image comparison is what a
+`build:` service relies on, since the config hash does not cover the build
+context, and it is the same rule docker compose applies. `--no-recreate`
+keeps an existing container regardless; `--force-recreate` replaces it
+regardless.
+
 | Flag | Description | Default |
 |---|---|---|
 | `-d, --detach` | Run containers in the background. | off |
@@ -716,6 +726,14 @@ resources reports no creation, and `down` on a project whose networks or volumes
 were never created reports no removal. A command that acted on nothing says so —
 `no containers to stop`, `no containers to start (project not created)` — rather
 than exiting silently, which is indistinguishable from success.
+
+A container that is replaced reads differently from one that is created:
+`Recreating`/`Recreated` for a container `up` or `create` removed and built
+again (a changed config or image, `--force-recreate`), `Starting`/`Started` or
+`Creating`/`Created` for one that did not exist, and `Running` or `Exists` for
+one left alone. Recreation destroys the container's writable layer, so the word
+is the operator's only signal at the moment it happens, and it is what makes
+`--force-recreate` and `--no-recreate` verifiable from the output.
 
 The live region needs stderr to be a terminal, colour to be on, and the terminal
 size to be readable. If any of those is missing it falls back to the plain

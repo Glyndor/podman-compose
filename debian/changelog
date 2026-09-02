@@ -1,3 +1,22 @@
+podup (5.7.0) unstable; urgency=medium
+
+  * `up` reports a container it replaced as `Recreating`/`Recreated`, and
+    keeps `Starting`/`Started` for one that did not exist and `Running` for
+    one it left alone. Recreation destroys the writable layer, so the word is
+    the operator's signal at the moment it happens, and `--force-recreate` and
+    `--no-recreate` can be read off the output.
+  * `up` keeps an existing container when its config hash and the image it is
+    bound to both still match, and replaces it when either changed. A `build:`
+    service used to be replaced on every run whether or not its image had
+    changed, which cost a stop, remove, create and start for nothing and the
+    writable layer each time, including on every reboot under
+    `autostart --mode service`. A rebuilt or re-pulled image, or a tag moved by
+    `podman tag`, still replaces the container, for every service.
+  * The README names the Podman floor before the install one-liner for readers
+    on Debian 12 or Ubuntu 24.04.
+
+ -- Jose <75870284+Jaro-c@users.noreply.github.com>  Tue, 02 Sep 2026 07:20:00 -0500
+
 podup (5.6.0) unstable; urgency=medium
 
   * `podup autostart` gains a third mode. `--mode start` writes a unit whose

@@ -3,7 +3,10 @@
 This document describes podup's privilege posture, trust boundaries, and attack
 surface so operators can reason about it during a security review (for example
 an ATO/SSP assessment). The self-update and release trust chain is covered
-separately in [self-update.md](self-update.md).
+separately in [self-update.md](self-update.md), and
+[threat-model.md](threat-model.md) lays the same system out per threat, with the
+control that answers each one, the evidence that the control works, and the
+residual risks.
 
 ## Privilege posture
 

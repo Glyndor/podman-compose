@@ -188,6 +188,8 @@ mod lifecycle;
 mod lifecycle_query;
 #[path = "engine_integration/niche.rs"]
 mod niche;
+#[path = "engine_integration/recreate_on_image.rs"]
+mod recreate_on_image;
 #[path = "engine_integration/resources_health.rs"]
 mod resources_health;
 #[path = "engine_integration/run_flags.rs"]

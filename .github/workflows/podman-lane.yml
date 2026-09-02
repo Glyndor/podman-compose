@@ -30,8 +30,79 @@ on:
   pull_request:
 permissions:
   contents: read
+
+# One run per ref. A force-push used to leave the superseded run booting its
+# two VMs to completion beside the new one: measured 2026-09-02, two runs of
+# this workflow for one pull request, four VM legs, one pair answering a
+# question about a commit that no longer existed. Cancelling applies to pull
+# requests only; the nightly and a manual dispatch are never superseded.
+concurrency:
+  group: podman-lane-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  # Whether anything in this pull request can reach the VM. #1628 changed one
+  # paragraph of README.md and paid 17 and 32 minutes of VM time for it, plus
+  # the queue; measured the same day on three more pull requests. The lane
+  # cannot take a `paths:` filter, because `Supported Podman majors` is a
+  # required check and a filtered workflow leaves it unreported, which blocks
+  # the merge with nothing saying why. So the job below always runs, and this
+  # one tells it whether to boot anything.
+  #
+  # The allowlist is short on purpose. Only files the VM provably never reads:
+  # prose (every *.md, which is the pull request template and CONTRIBUTING
+  # too), docs/, the issue templates, the licence, the editor config. Anything
+  # else, including
+  # every workflow file and everything under .github/scripts, keeps the lane
+  # on. Widening it to tests/** is how a broken develop went unnoticed for
+  # twenty pull requests once (#1295); do not.
+  decide:
+    name: Decide whether the VM has anything to look at
+    runs-on: ubuntu-latest
+    outputs:
+      engine: ${{ steps.files.outputs.engine }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: List the changed files against the base
+        id: files
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "engine=true" >> "$GITHUB_OUTPUT"
+            echo "not a pull request: the VM always boots on $EVENT"
+            exit 0
+          fi
+          # Fail closed: a diff that cannot be read boots the VM.
+          if ! changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"; then
+            echo "engine=true" >> "$GITHUB_OUTPUT"
+            echo "could not diff $BASE_SHA..$HEAD_SHA; booting the VM rather than guessing"
+            exit 0
+          fi
+          if [ -z "$changed" ]; then
+            echo "engine=true" >> "$GITHUB_OUTPUT"
+            echo "empty diff; booting the VM rather than guessing"
+            exit 0
+          fi
+          engine=false
+          while IFS= read -r f; do
+            case "$f" in
+              *.md | docs/* | .github/ISSUE_TEMPLATE/* | LICENSE | .editorconfig) ;;
+              *) engine=true; echo "reaches the VM: $f" ;;
+            esac
+          done <<< "$changed"
+          echo "engine=$engine" >> "$GITHUB_OUTPUT"
+          if [ "$engine" = false ]; then
+            echo "nothing in this pull request can reach the VM ($(printf '%s\n' "$changed" | wc -l | tr -d ' ') file(s), all prose or templates); the legs below run and boot nothing"
+          fi
+
   podman-vm:
+    needs: decide
     runs-on: ubuntu-24.04
     # Raised for the one-thread experiment: serialising the suite costs wall
     # clock, and a run that dies on the timeout answers nothing (#1039).
@@ -56,9 +127,16 @@ jobs:
         podman: ["5", "6"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Nothing to boot
+        if: needs.decide.outputs.engine != 'true'
+        run: echo "this pull request changes nothing the VM can observe (see the decide job); reporting success without booting"
       - name: Install qemu + cloud tools
+        if: needs.decide.outputs.engine == 'true'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-x86 qemu-utils cloud-image-utils
       - name: Fetch Fedora cloud image (Podman 6 = rawhide, 5 = Fedora 44)
+        if: needs.decide.outputs.engine == 'true'
         run: |
           SEL="${{ matrix.podman }}"
           echo "PODMAN_MAJOR=$SEL"
@@ -84,6 +162,7 @@ jobs:
           curl -fSL --retry 5 --retry-delay 5 --retry-all-errors -C - -o "$RUNNER_TEMP/vm.qcow2" "${base}${img}"
           qemu-img resize "$RUNNER_TEMP/vm.qcow2" 40G
       - name: Build cloud-init seed (script-file for clean RC)
+        if: needs.decide.outputs.engine == 'true'
         run: |
           cat > "$RUNNER_TEMP/user-data" <<'EOF'
           #cloud-config
@@ -298,6 +377,7 @@ jobs:
           sed -i "s/__COVERAGE__/$COVERAGE/" "$RUNNER_TEMP/user-data"
           cloud-localds "$RUNNER_TEMP/seed.iso" "$RUNNER_TEMP/user-data"
       - name: Boot VM (9p = repo only) + capture
+        if: needs.decide.outputs.engine == 'true'
         run: |
           # Raised with the job timeout for the one-thread experiment (#1039): qemu
           # has its own cap, and leaving it at 45m would kill the VM before the job
@@ -309,6 +389,7 @@ jobs:
             -virtfs local,path=${{ github.workspace }},mount_tag=repo,security_model=none,id=repo \
             -display none -serial stdio 2>&1 | tee "$RUNNER_TEMP/vm.log" || true
       - name: Verify podup core suite passed on the target Podman
+        if: needs.decide.outputs.engine == 'true'
         run: |
           L="$RUNNER_TEMP/vm.log"
           echo "=== key lines ==="; grep -E 'DISK_BEGIN|PODMAN_BEGIN|test result:|PODUP_TESTS_RC_BEGIN|No space' "$L" | tail -10 || true

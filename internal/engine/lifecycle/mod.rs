@@ -38,6 +38,29 @@ use super::container::config_hash;
 use super::profiles::{active_profiles_set, enabled_profile_services};
 use super::Engine;
 
+/// What `up` knows about a container the project already has, read once from
+/// the container list before any work starts.
+///
+/// Two facts decide whether the container is left alone or replaced, and they
+/// answer different questions. The config hash says whether the compose
+/// definition changed. The image ID says whether the image the container is
+/// bound to is still the one its service resolves to, which the hash cannot:
+/// a rebuild, a `pull`, or a `podman tag` moves the name and leaves the hash
+/// untouched. docker compose recreates on either (measured on v5.3.1: an
+/// unchanged `build:` service stays `Running`; retagging its image, or
+/// rebuilding it out of band, gets `Recreate`). Before #1620 podup approximated
+/// the second question with "does the service have a `build:` key", which
+/// recreated every build service on every `up` and never noticed a retagged
+/// `image:` one.
+pub(super) struct ExistingContainer {
+	/// The `podup.config-hash` label, absent on a container podup did not
+	/// create or one from before the label existed. Absent never matches, so
+	/// such a container is recreated.
+	config_hash: Option<String>,
+	/// The 64-hex ID of the image the container was created from.
+	image_id: String,
+}
+
 impl Engine {
 	/// Start all services defined in the compose file, creating containers that do not exist.
 	pub async fn up(&self, file: &ComposeFile) -> Result<()> {
@@ -63,6 +86,43 @@ impl Engine {
 			}
 			Err(e) => Err(crate::error::ComposeError::Podman(e)),
 		}
+	}
+
+	/// Whether the existing container named `container_name` can be left in
+	/// place: its recorded config hash equals `new_hash`, and the image it is
+	/// bound to is still the one `service` resolves to now.
+	///
+	/// The second half is what the hash cannot see, and it applies to every
+	/// service rather than only to `build:` ones. A `build:` service is the
+	/// common case (a rebuild moves the tag), but `up --pull always` and a
+	/// `podman tag` move an `image:` service's tag exactly the same way, and
+	/// docker compose recreates on both (measured on v5.3.1). One image inspect
+	/// per unchanged replica is the cost; the alternative was the pre-#1620
+	/// rule of recreating every `build:` service on every `up`, which destroyed
+	/// the writable layer for nothing.
+	///
+	/// A tag that resolves to nothing, or a container without a recorded image,
+	/// counts as changed: the fail-closed answer is the recreate, which is what
+	/// the old rule did unconditionally.
+	async fn unchanged(
+		&self,
+		container_name: &str,
+		name: &str,
+		service: &Service,
+		existing: &HashMap<String, ExistingContainer>,
+		new_hash: &str,
+	) -> Result<bool> {
+		let Some(container) = existing.get(container_name) else {
+			return Ok(false);
+		};
+		if container.config_hash.as_deref() != Some(new_hash) {
+			return Ok(false);
+		}
+		if container.image_id.is_empty() {
+			return Ok(false);
+		}
+		let tag = self.service_image_tag(name, service);
+		Ok(self.image_id(&tag).await?.as_deref() == Some(container.image_id.as_str()))
 	}
 
 	/// Start services with explicit options. When `no_recreate` is true, running containers are left untouched. On partial failure, staging directories are cleaned up.
@@ -156,11 +216,16 @@ impl Engine {
 			let target_set = expand_targets(file, target_services, no_deps);
 
 			// Prefetch the project's containers once (instead of one API call per
-			// replica): which names already exist, and each one's config-hash
-			// label so we can decide whether a container needs recreation.
-			let mut present: HashSet<String> = HashSet::new();
-			let mut existing_hash: HashMap<String, String> = HashMap::new();
-			if !force_recreate {
+			// replica): which names already exist, and for each the two facts
+			// that decide whether it is kept or replaced (see
+			// [`ExistingContainer`]).
+			//
+			// Fetched on the `--force-recreate` path too. Neither fact is
+			// consulted there, but membership is what tells the progress stream
+			// that a container was replaced rather than created (#1619), and a
+			// forced recreate is exactly the case where that word matters.
+			let mut existing: HashMap<String, ExistingContainer> = HashMap::new();
+			{
 				let path = format!(
 					"{API_PREFIX}/containers/json?all=true&filters={}",
 					self.project_label_filter_encoded(),
@@ -171,14 +236,15 @@ impl Engine {
 					.await
 					.map_err(crate::error::ComposeError::Podman)?;
 				for entry in entries {
-					if let Some(hash) = entry.labels.get("podup.config-hash") {
-						for raw in &entry.names {
-							existing_hash
-								.insert(raw.trim_start_matches('/').to_string(), hash.clone());
-						}
-					}
+					let config_hash = entry.labels.get("podup.config-hash").cloned();
 					for raw in entry.names {
-						present.insert(raw.trim_start_matches('/').to_string());
+						existing.insert(
+							raw.trim_start_matches('/').to_string(),
+							ExistingContainer {
+								config_hash: config_hash.clone(),
+								image_id: entry.image_id.clone(),
+							},
+						);
 					}
 				}
 			}
@@ -222,8 +288,7 @@ impl Engine {
 				file,
 				&enabled,
 				&target_set,
-				&present,
-				&existing_hash,
+				&existing,
 				no_recreate,
 				force_recreate,
 				start,
@@ -277,8 +342,7 @@ impl Engine {
 		file: &ComposeFile,
 		enabled: &HashSet<String>,
 		target_set: &Option<HashSet<String>>,
-		present: &HashSet<String>,
-		existing_hash: &HashMap<String, String>,
+		existing: &HashMap<String, ExistingContainer>,
 		no_recreate: bool,
 		force_recreate: bool,
 		start: bool,
@@ -408,8 +472,7 @@ impl Engine {
 					name,
 					service,
 					file,
-					present,
-					existing_hash,
+					existing,
 					&new_hash,
 					no_recreate,
 					force_recreate,
@@ -437,15 +500,15 @@ impl Engine {
 		name: &str,
 		service: &Service,
 		file: &ComposeFile,
-		present: &HashSet<String>,
-		existing_hash: &HashMap<String, String>,
+		existing: &HashMap<String, ExistingContainer>,
 		new_hash: &str,
 		no_recreate: bool,
 		force_recreate: bool,
 		start: bool,
 	) -> Result<()> {
+		let present = existing.contains_key(&container_name);
 		if !force_recreate {
-			if no_recreate && present.contains(&container_name) {
+			if no_recreate && present {
 				tracing::debug!("{container_name} already exists — skipping recreate");
 				// `create` leaves an existing container as-is; `up` ensures it runs.
 				if start {
@@ -458,18 +521,9 @@ impl Engine {
 				);
 				return Ok(());
 			}
-			// A service with a `build:` section is recreated even when its hash
-			// matches: the compose-config hash compared below does not cover
-			// the build context's source files, so the existing container may
-			// still hold an image built from an older tree. Recreating forces
-			// the new container to bind whatever image is current.
-			//
-			// `up` stopped rebuilding these unconditionally in #1094 — it now
-			// builds only when the image is missing — so the fresh-image
-			// guarantee this recreate used to inherit from that rebuild no
-			// longer comes for free.
-			if service.build.is_none()
-				&& existing_hash.get(&container_name).map(String::as_str) == Some(new_hash)
+			if self
+				.unchanged(&container_name, name, service, existing, new_hash)
+				.await?
 			{
 				tracing::debug!("{container_name} is up to date — skipping recreate");
 				if start {
@@ -483,18 +537,23 @@ impl Engine {
 				return Ok(());
 			}
 		}
-		crate::ui::progress::start(
-			"Container",
-			&container_name,
-			if start { "Starting" } else { "Creating" },
-		);
+		// Replacing a container destroys its writable layer, and creating one
+		// does not, so the two get different words. Before #1619 both printed
+		// `Starting`/`Started`, and the only way to learn that a container had
+		// been removed was to compare IDs by hand; `--force-recreate` and
+		// `--no-recreate` were unverifiable from the output for the same reason.
+		// `Recreating`/`Recreated` is docker compose's word for it too
+		// (`Recreate`/`Recreated`, measured on v5.3.1), so a reader of either
+		// tool's log reads the same event the same way.
+		let (doing, done) = match (present, start) {
+			(true, _) => ("Recreating", "Recreated"),
+			(false, true) => ("Starting", "Started"),
+			(false, false) => ("Creating", "Created"),
+		};
+		crate::ui::progress::start("Container", &container_name, doing);
 		self.create_and_start(&container_name, name, service, file, start)
 			.await?;
-		crate::ui::progress_line(
-			"Container",
-			&container_name,
-			if start { "Started" } else { "Created" },
-		);
+		crate::ui::progress_line("Container", &container_name, done);
 
 		// `post_start` hooks run inside a running container, so only on `up`.
 		if start {

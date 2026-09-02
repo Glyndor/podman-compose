@@ -13,6 +13,10 @@ MSRV 1.85 · License: MIT
 
 ## Install
 
+On Debian 12 or Ubuntu 24.04, read [Podman version](#podman-version) first:
+both ship Podman 4.x, below the floor podup needs, and the line below refuses
+to install there rather than leaving a podup that cannot reach an engine.
+
 ```sh
 curl -fsSL https://apt.glyndor.net/install/podup | sudo sh
 ```
@@ -204,6 +208,7 @@ Full tables and methodology: [docs/benchmarks.md](docs/benchmarks.md).
 - [Benchmarks](docs/benchmarks.md)
 - [Self-update](docs/self-update.md)
 - [Security model](docs/security-model.md)
+- [Threat model](docs/threat-model.md)
 - [Debian packaging](docs/debian-packaging.md)
 
 ## License
