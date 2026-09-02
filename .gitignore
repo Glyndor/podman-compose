@@ -29,7 +29,6 @@ debian/debhelper-build-stamp
 debian/files
 debian/*.substvars
 debian/*.log
-.cargo/config.toml
 
 # Host-specific benchmark output (published numbers live in README)
 bench/results/
