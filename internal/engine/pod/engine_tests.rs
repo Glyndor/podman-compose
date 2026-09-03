@@ -502,3 +502,62 @@ async fn the_infra_container_is_not_an_orphan() {
 		"the infra container must never be removed as an orphan; requests: {requests:?}"
 	);
 }
+
+/// Only a 404 on the pod inspect means "no pod yet". Any other failure must
+/// surface, not be read as absence and answered with a create.
+#[tokio::test]
+#[cfg(unix)]
+async fn a_failing_pod_inspect_is_an_error_not_an_absence() {
+	let fake = fake_podman::start(|method, target| {
+		if method == "GET" && target.contains("/pods/") && target.contains("/json") {
+			return (500, r#"{"message":"boom"}"#.to_string());
+		}
+		route(method, target, None)
+	});
+	let engine = engine_for(&fake, "proj");
+	let file = parse_str("x-podman-pod: true\nservices:\n  web:\n    image: nginx\n").unwrap();
+	let err = engine
+		.up(&file)
+		.await
+		.expect_err("a 500 on inspect must fail up");
+	assert!(
+		format!("{err}").contains("boom"),
+		"the engine's message must reach the user: {err}"
+	);
+	let requests = fake.requests.lock().unwrap().clone();
+	assert!(
+		!requests.iter().any(|r| r.contains("/pods/create")),
+		"no pod may be created on top of an unreadable one; requests: {requests:?}"
+	);
+}
+
+/// `down --remove-orphans` sweeps pods under the project's label that are
+/// not the project's own pod, and leaves that one to `remove_pod`.
+#[tokio::test]
+#[cfg(unix)]
+async fn the_label_sweep_removes_stale_pods_and_keeps_the_projects_own() {
+	let fake = fake_podman::start(|method, target| {
+		if method == "GET" && target.contains("/pods/json") {
+			return (200, r#"[{"Name":"proj"},{"Name":"proj-old"}]"#.to_string());
+		}
+		if method == "DELETE" && target.contains("/pods/") {
+			return (200, r#"{"Id":"x"}"#.to_string());
+		}
+		route(method, target, None)
+	});
+	let engine = engine_for(&fake, "proj");
+	engine.remove_project_pods_by_label().await;
+	let requests = fake.requests.lock().unwrap().clone();
+	assert!(
+		requests
+			.iter()
+			.any(|r| r.starts_with("DELETE") && r.contains("/pods/proj-old")),
+		"the stale pod under the label must be removed; requests: {requests:?}"
+	);
+	assert!(
+		!requests
+			.iter()
+			.any(|r| r.starts_with("DELETE") && r.contains("/pods/proj?")),
+		"the project's own pod is not the sweep's to remove; requests: {requests:?}"
+	);
+}

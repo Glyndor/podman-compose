@@ -91,3 +91,71 @@ services:
 "#;
 	check(yaml).expect("a plain two-service project must pass");
 }
+
+/// Two services on the same declared set are fine; only a differing set is
+/// refused. A sweep that refused every explicit set stayed green without this.
+#[test]
+fn pod_accepts_two_services_on_the_same_declared_networks() {
+	let yaml = r#"
+services:
+  web:
+    image: nginx
+    networks: [backend, front]
+  db:
+    image: postgres
+    networks: [front, backend]
+networks:
+  backend:
+  front:
+"#;
+	check(yaml).expect("identical network sets must be accepted");
+}
+
+/// Host port 0 asks Podman for an ephemeral port; two services asking for
+/// one each do not collide.
+#[test]
+fn pod_accepts_two_ephemeral_host_ports() {
+	let yaml = r#"
+services:
+  web:
+    image: nginx
+    ports: ["0:80"]
+  api:
+    image: nginx
+    ports: ["0:8080"]
+"#;
+	check(yaml).expect("two ephemeral host ports must be accepted");
+}
+
+/// The same host port on two host IPs would be two bindings on a network,
+/// and one binding on the pod; refused, naming both services.
+#[test]
+fn pod_refuses_the_same_host_port_on_different_host_ips() {
+	let yaml = r#"
+services:
+  web:
+    image: nginx
+    ports: ["127.0.0.1:8080:80"]
+  api:
+    image: nginx
+    ports: ["10.0.0.1:8080:8080"]
+"#;
+	let err = check(yaml).expect_err("one host port on two IPs must be refused");
+	assert!(
+		err.contains("8080") && err.contains("web") && err.contains("api"),
+		"the message must name the port and both services: {err}"
+	);
+}
+
+/// One service may bind the same host port twice on the same IP (tcp and
+/// udp, say); the IP check only fires when the IPs differ.
+#[test]
+fn pod_accepts_the_same_host_port_and_ip_for_two_protocols() {
+	let yaml = r#"
+services:
+  dns:
+    image: coredns
+    ports: ["127.0.0.1:5353:53/tcp", "127.0.0.1:5353:53/udp"]
+"#;
+	check(yaml).expect("the same port on the same IP for two protocols must be accepted");
+}
