@@ -90,8 +90,12 @@ against 0.50 ms here.
 ## Running it
 
 ```sh
-# build the release binary first; point the harness at it
-PODUP_BIN=target/release/podup bash bench/run.sh --iters 12 --warmup 2 --cores 2-9
+# Measure the binary people install: the published musl asset, or a build of
+# the same target. A plain `cargo build --release` on a glibc host links
+# dynamically and reports about twice the memory of the static binary.
+cargo build --release --locked --target x86_64-unknown-linux-musl
+PODUP_BIN=target/x86_64-unknown-linux-musl/release/podup \
+  bash bench/run.sh --iters 12 --warmup 2 --cores 2-9
 python3 bench/aggregate.py
 # -> bench/results/report.md and bench/results/summary.json
 ```

@@ -42,64 +42,74 @@ Each row carries **one unit**, picked from the largest value in that row and
 applied to every tool in it, so the tools in a row stay directly comparable.
 `bench/results/raw.csv` and `summary.json` keep every figure in seconds.
 
-Measured on podup **3.4.1** built from the release tag, against
-podman-compose 1.5.0 and docker-compose 5.1.3 on rootless Podman 5.7.0, 16
-cores, CPU governor pinned to `performance`, tools pinned to cores 2-9, host
-otherwise idle with no virtual machines running. 1044 timed runs, none failed.
+Measured on podup **5.7.1**, the published `podup-linux-x86_64` asset (static
+musl, the binary the installers fetch), against podman-compose 1.5.0 and
+docker-compose 5.1.3 on rootless Podman 5.7.0, 16 cores, CPU governor pinned to
+`performance`, tools pinned to cores 2-9, no virtual machines running. Podman's
+storage held 15 containers, 23 networks, 83 volumes and 73 images at the start,
+all of them the host's own projects. 1044 timed runs in ten minutes, none failed.
 
-**Do not read this table against the 3.2.1 one as a release comparison.** Three
-things changed between the two runs, not one: podup 3.2.1 to 3.4.1, Podman 5.4.2
-to 5.7.0, and podman-compose 1.3.0 to 1.5.0. A difference cannot be attributed to
-any one of them.
+**This table can be read against the 3.4.1 one, with one caveat.** Podman,
+podman-compose and docker-compose are the same versions in both runs; only podup
+changed, 3.4.1 to 5.7.1. The caveat is the host: the reference that did not
+change, `docker-compose`, moved **-6.5%** (median over the 28 comparable rows),
+so the environment was that much faster this time. Against that reference podup
+moved **-5.7%**, flat: nine releases on the hot path of `up` cost nothing
+measurable. podman-compose moved -17.2% with no change of its own, and the
+storage explains it: it shells out to the `podman` binary per call, and a
+`podman ps` on this host went from 56 ms to 28 ms once a few hundred networks
+and images left over from integration tests were removed before the run. That
+cleanup is now part of the method, and the counts above are what "otherwise
+idle" means for the engine.
 
-What can be said is bounded by the component that did **not** change.
-`docker-compose` is 5.1.3 in both runs, and its median moved **+1.0%** across the
-29 comparable rows, so the environment is comparable between them. Against that
-reference podup moved **+0.8%** — flat, which is the useful result: 3.4.1 landed
-two concurrency changes on the hot path of `up`, and a reader is entitled to ask
-whether they cost anything. podman-compose moved +10.4%, but its own version
-changed too, so that figure is confounded and is not evidence about the engine.
+Three rows moved for reasons that are podup's own. `running-ops logs` and
+`wide-running-ops logs` fell **-66%** and **-55%** (22.5 ms to 7.5 ms, 22.5 ms
+to 10.2 ms), and the two `ps` rows **-28%** and **-22%**: the read path stopped
+paying for work it did not need. Peak memory fell in every row, from a median of
+8.0 MiB to **5.6 MiB** per command and a worst case of 6.5 MiB against 8.6; the
+run's own budget gate (`bench/memory-budget-mib`, 9.0) reads that figure and
+would have failed the aggregation above it.
 
-Two rows deserve a caveat rather than a reading. `multi-healthcheck up` moved
-about +55% for podup and +68% for podman-compose; it is gated on a
-`depends_on: service_healthy` poll, so it measures healthcheck interval
-granularity more than tool speed. And `running-ops ps` at 8.7 ms sits close
-enough to process-spawn cost that a few tenths of a millisecond read as double
-digits in percent.
+One row reads as a regression and is not. `config-heavy config` prints 13.0 ms
+here against 9.4 ms in the 3.4.1 table, +38%. Run head-to-head on this machine,
+alternating binaries, 3.4.1 takes 11.7 ms and 5.7.1 11.6 ms. That row sits close
+enough to process start that between-run noise reads as double digits, which is
+the warning the 3.4.1 table already carried for `running-ops ps`; the number is
+published because it was measured, and the head-to-head is what it means.
 
 ## Wall-clock (lower is better)
 
 | scenario | op | podman-compose | podup | docker-compose |
 |---|---|---|---|---|
-| single | up | 477.5 ms (p95 540.2, sd 24.8) | 99.5 ms (p95 109.9, sd 5.6) | 125.6 ms (p95 132.2, sd 5.6) |
-| single | down | 453.3 ms (p95 483.6, sd 15.5) | 138.7 ms (p95 164.9, sd 11.1) | 157.9 ms (p95 170.8, sd 7.7) |
-| multi-healthcheck | up | 1.023 s (p95 1.076, sd 0.024) | 0.359 s (p95 0.388, sd 0.070) | 0.716 s (p95 0.733, sd 0.010) |
-| multi-healthcheck | down | 594.1 ms (p95 668.2, sd 43.3) | 254.0 ms (p95 309.4, sd 25.8) | 279.7 ms (p95 309.0, sd 16.0) |
-| deep-chain | up | 1.839 s (p95 1.963, sd 0.077) | 0.334 s (p95 0.360, sd 0.014) | 0.870 s (p95 0.887, sd 0.014) |
-| deep-chain | down | 0.847 s (p95 1.056, sd 0.094) | 0.390 s (p95 0.418, sd 0.009) | 0.404 s (p95 0.429, sd 0.017) |
-| wide-level | up | 9.672 s (p95 9.967, sd 0.125) | 1.130 s (p95 1.253, sd 0.048) | 1.571 s (p95 1.746, sd 0.065) |
-| wide-level | down | 4.771 s (p95 5.319, sd 0.194) | 1.636 s (p95 1.899, sd 0.144) | 2.169 s (p95 2.874, sd 0.293) |
-| scale | up | 470.6 ms (p95 513.4, sd 21.1) | 194.5 ms (p95 212.7, sd 10.1) | 402.2 ms (p95 424.9, sd 13.9) |
-| scale | down | 382.6 ms (p95 403.9, sd 11.7) | 270.9 ms (p95 319.1, sd 22.3) | 285.1 ms (p95 348.7, sd 22.0) |
-| network-ipam | up | 716.5 ms (p95 747.6, sd 24.2) | 114.9 ms (p95 135.9, sd 6.9) | 150.7 ms (p95 154.4, sd 3.2) |
-| network-ipam | down | 569.6 ms (p95 602.8, sd 32.3) | 172.8 ms (p95 203.2, sd 15.0) | 202.6 ms (p95 226.1, sd 13.0) |
-| volume-heavy | up | 0.993 s (p95 1.087, sd 0.034) | 0.107 s (p95 0.111, sd 0.004) | 0.139 s (p95 0.183, sd 0.014) |
-| volume-heavy | down | 624.8 ms (p95 647.1, sd 12.8) | 144.3 ms (p95 169.3, sd 13.5) | 197.0 ms (p95 227.8, sd 9.8) |
-| secrets | up | 542.2 ms (p95 576.6, sd 19.6) | 104.8 ms (p95 113.3, sd 5.4) | 132.2 ms (p95 164.8, sd 11.1) |
-| secrets | down | 463.5 ms (p95 514.2, sd 20.9) | 144.2 ms (p95 167.0, sd 14.6) | 164.7 ms (p95 178.0, sd 8.5) |
-| warm-restart | warm up | 226.9 ms (p95 254.4, sd 13.2) | 37.9 ms (p95 47.4, sd 4.6) | 63.1 ms (p95 99.9, sd 14.0) |
-| many-services | up | 2.925 s (p95 3.090, sd 0.091) | 0.390 s (p95 0.416, sd 0.017) | 0.511 s (p95 0.577, sd 0.023) |
-| many-services | down | 1.511 s (p95 1.616, sd 0.040) | 0.552 s (p95 0.693, sd 0.068) | 0.559 s (p95 0.655, sd 0.060) |
-| running-ops | ps | 122.6 ms (p95 134.7, sd 5.1) | 8.7 ms (p95 9.3, sd 0.5) | 24.8 ms (p95 49.6, sd 7.6) |
-| running-ops | logs | 139.9 ms (p95 147.9, sd 3.5) | 22.4 ms (p95 28.3, sd 2.8) | 37.7 ms (p95 53.7, sd 5.1) |
-| running-ops | exec | 184.9 ms (p95 192.9, sd 3.4) | 60.0 ms (p95 69.0, sd 3.8) | 72.6 ms (p95 84.1, sd 4.5) |
-| running-ops | restart | 273.7 ms (p95 309.3, sd 15.7) | 147.2 ms (p95 165.5, sd 8.0) | 181.7 ms (p95 198.9, sd 10.6) |
-| wide-running-ops | ps | 131.8 ms (p95 139.1, sd 4.1) | 12.3 ms (p95 13.8, sd 0.8) | 42.9 ms (p95 85.8, sd 13.1) |
-| wide-running-ops | logs | 142.4 ms (p95 156.9, sd 5.4) | 22.5 ms (p95 27.7, sd 2.0) | 41.9 ms (p95 74.2, sd 10.9) |
-| wide-running-ops | exec | 191.2 ms (p95 199.6, sd 3.8) | 63.3 ms (p95 75.1, sd 5.1) | 71.9 ms (p95 81.4, sd 4.2) |
-| wide-running-ops | restart | 242.5 ms (p95 258.7, sd 10.9) | 114.8 ms (p95 133.8, sd 8.4) | 147.9 ms (p95 165.0, sd 9.7) |
-| config-heavy | config | 108.1 ms (p95 114.0, sd 2.4) | 9.4 ms (p95 9.8, sd 0.2) | 48.8 ms (p95 53.8, sd 3.3) |
-| build | build | 377.9 ms (p95 407.1, sd 16.6) | 239.2 ms (p95 260.2, sd 9.6) | 318.1 ms (p95 441.6, sd 45.0) |
+| single | up | 343.9 ms (p95 353.5, sd 6.0) | 81.7 ms (p95 93.3, sd 5.2) | 102.6 ms (p95 112.9, sd 4.6) |
+| single | down | 350.7 ms (p95 360.7, sd 5.1) | 128.6 ms (p95 149.4, sd 8.9) | 144.5 ms (p95 164.6, sd 8.6) |
+| multi-healthcheck | up | 0.856 s (p95 1.804, sd 0.293) | 0.298 s (p95 0.390, sd 0.089) | 0.700 s (p95 0.714, sd 0.009) |
+| multi-healthcheck | down | 485.5 ms (p95 646.4, sd 66.5) | 264.4 ms (p95 283.2, sd 14.8) | 277.9 ms (p95 322.9, sd 19.4) |
+| deep-chain | up | 1.485 s (p95 1.665, sd 0.122) | 0.344 s (p95 0.376, sd 0.016) | 0.856 s (p95 0.892, sd 0.017) |
+| deep-chain | down | 743.7 ms (p95 892.6, sd 64.2) | 378.6 ms (p95 462.7, sd 28.5) | 380.1 ms (p95 411.5, sd 18.2) |
+| wide-level | up | 6.649 s (p95 7.069, sd 0.217) | 1.105 s (p95 1.171, sd 0.028) | 1.581 s (p95 1.743, sd 0.063) |
+| wide-level | down | 3.917 s (p95 4.493, sd 0.309) | 1.696 s (p95 1.983, sd 0.154) | 2.010 s (p95 2.375, sd 0.248) |
+| scale | up | 373.1 ms (p95 395.8, sd 9.7) | 182.1 ms (p95 201.4, sd 9.8) | 378.7 ms (p95 389.0, sd 15.0) |
+| scale | down | 306.8 ms (p95 311.6, sd 4.4) | 255.6 ms (p95 271.1, sd 13.1) | 278.7 ms (p95 323.8, sd 18.6) |
+| network-ipam | up | 598.7 ms (p95 801.6, sd 93.7) | 103.0 ms (p95 108.3, sd 4.6) | 127.3 ms (p95 141.0, sd 5.9) |
+| network-ipam | down | 565.8 ms (p95 653.7, sd 80.5) | 160.2 ms (p95 181.4, sd 19.1) | 194.5 ms (p95 206.4, sd 8.4) |
+| volume-heavy | up | 728.2 ms (p95 741.3, sd 6.7) | 99.6 ms (p95 104.1, sd 5.3) | 124.6 ms (p95 132.1, sd 4.3) |
+| volume-heavy | down | 490.2 ms (p95 528.8, sd 17.4) | 143.9 ms (p95 153.9, sd 7.2) | 182.9 ms (p95 216.5, sd 15.1) |
+| secrets | up | 346.7 ms (p95 378.5, sd 11.9) | 98.8 ms (p95 114.1, sd 6.4) | 111.0 ms (p95 119.7, sd 4.6) |
+| secrets | down | 353.2 ms (p95 387.5, sd 14.9) | 139.3 ms (p95 159.4, sd 8.7) | 150.3 ms (p95 172.6, sd 8.6) |
+| warm-restart | warm up | 186.8 ms (p95 243.2, sd 17.6) | 32.3 ms (p95 37.6, sd 4.2) | 44.2 ms (p95 50.5, sd 3.5) |
+| many-services | up | 1.888 s (p95 1.948, sd 0.023) | 0.366 s (p95 0.394, sd 0.018) | 0.472 s (p95 0.520, sd 0.016) |
+| many-services | down | 1.163 s (p95 1.192, sd 0.023) | 0.506 s (p95 0.790, sd 0.099) | 0.508 s (p95 0.637, sd 0.046) |
+| running-ops | ps | 114.3 ms (p95 118.5, sd 2.1) | 6.3 ms (p95 7.7, sd 0.7) | 21.6 ms (p95 23.2, sd 0.8) |
+| running-ops | logs | 147.0 ms (p95 156.5, sd 5.7) | 7.5 ms (p95 9.4, sd 1.0) | 43.4 ms (p95 46.1, sd 2.2) |
+| running-ops | exec | 181.1 ms (p95 194.8, sd 5.5) | 61.8 ms (p95 67.1, sd 2.6) | 72.4 ms (p95 80.9, sd 5.1) |
+| running-ops | restart | 272.9 ms (p95 298.7, sd 12.2) | 161.3 ms (p95 187.5, sd 9.2) | 191.0 ms (p95 201.5, sd 9.9) |
+| wide-running-ops | ps | 121.8 ms (p95 124.8, sd 1.9) | 9.6 ms (p95 11.5, sd 0.7) | 38.4 ms (p95 43.5, sd 2.1) |
+| wide-running-ops | logs | 150.1 ms (p95 159.3, sd 4.7) | 10.2 ms (p95 11.5, sd 0.8) | 45.9 ms (p95 50.4, sd 2.9) |
+| wide-running-ops | exec | 185.8 ms (p95 194.2, sd 3.8) | 62.9 ms (p95 70.2, sd 3.3) | 73.6 ms (p95 84.5, sd 4.3) |
+| wide-running-ops | restart | 228.7 ms (p95 249.4, sd 10.6) | 123.9 ms (p95 135.1, sd 6.2) | 150.5 ms (p95 165.7, sd 10.5) |
+| config-heavy | config | 112.7 ms (p95 117.8, sd 2.6) | 13.0 ms (p95 15.2, sd 0.8) | 38.3 ms (p95 41.3, sd 1.4) |
+| build | build | 351.5 ms (p95 373.5, sd 10.2) | 226.1 ms (p95 233.2, sd 6.3) | 277.2 ms (p95 284.0, sd 6.1) |
 
 ## Memory + CPU per command (peak RSS / CPU time, median)
 
@@ -111,35 +121,35 @@ Go binary talking to a socket, like podup.
 
 | scenario | op | podman-compose | podup | docker-compose |
 |---|---|---|---|---|
-| single | up | 52.9 MiB / 469.7 ms | 8.1 MiB / 6.0 ms | 29.8 MiB / 30.4 ms |
-| single | down | 51.4 MiB / 393.1 ms | 7.9 MiB / 5.9 ms | 29.3 MiB / 26.5 ms |
-| multi-healthcheck | up | 52.8 MiB / 698.0 ms | 8.2 MiB / 6.9 ms | 30.1 MiB / 32.5 ms |
-| multi-healthcheck | down | 51.7 MiB / 509.5 ms | 7.9 MiB / 6.2 ms | 29.4 MiB / 27.7 ms |
-| deep-chain | up | 53.1 MiB / 1.386 s | 8.2 MiB / 0.008 s | 30.0 MiB / 0.037 s |
-| deep-chain | down | 51.8 MiB / 866.4 ms | 7.9 MiB / 7.5 ms | 29.5 MiB / 31.4 ms |
-| wide-level | up | 53.9 MiB / 7.659 s | 8.6 MiB / 0.025 s | 34.5 MiB / 0.092 s |
-| wide-level | down | 52.0 MiB / 5.541 s | 8.1 MiB / 0.020 s | 31.2 MiB / 0.067 s |
-| scale | up | 52.6 MiB / 503.4 ms | 8.1 MiB / 7.5 ms | 29.7 MiB / 36.7 ms |
-| scale | down | 51.4 MiB / 384.5 ms | 7.7 MiB / 6.8 ms | 29.7 MiB / 31.8 ms |
-| network-ipam | up | 53.0 MiB / 648.5 ms | 8.2 MiB / 6.2 ms | 30.0 MiB / 31.7 ms |
-| network-ipam | down | 51.5 MiB / 506.3 ms | 7.9 MiB / 6.2 ms | 29.6 MiB / 28.4 ms |
-| volume-heavy | up | 52.8 MiB / 1.155 s | 8.2 MiB / 0.006 s | 29.9 MiB / 0.033 s |
-| volume-heavy | down | 51.6 MiB / 617.8 ms | 8.0 MiB / 6.6 ms | 30.2 MiB / 31.6 ms |
-| secrets | up | 52.6 MiB / 477.6 ms | 8.2 MiB / 7.3 ms | 29.6 MiB / 32.8 ms |
-| secrets | down | 51.6 MiB / 394.1 ms | 7.9 MiB / 6.3 ms | 29.4 MiB / 28.2 ms |
-| warm-restart | warm up | 50.0 MiB / 261.9 ms | 8.1 MiB / 5.8 ms | 30.0 MiB / 33.8 ms |
-| many-services | up | 53.7 MiB / 2.368 s | 8.3 MiB / 0.011 s | 31.0 MiB / 0.049 s |
-| many-services | down | 51.9 MiB / 1.705 s | 7.9 MiB / 0.009 s | 29.9 MiB / 0.039 s |
-| running-ops | ps | 50.4 MiB / 140.4 ms | 7.8 MiB / 4.1 ms | 29.8 MiB / 24.9 ms |
-| running-ops | logs | 68.6 MiB / 140.1 ms | 7.9 MiB / 4.3 ms | 29.3 MiB / 25.6 ms |
-| running-ops | exec | 48.7 MiB / 139.2 ms | 7.9 MiB / 4.9 ms | 27.8 MiB / 17.8 ms |
-| running-ops | restart | 49.4 MiB / 181.7 ms | 8.0 MiB / 4.6 ms | 29.5 MiB / 25.8 ms |
-| wide-running-ops | ps | 51.3 MiB / 150.1 ms | 7.7 MiB / 4.6 ms | 30.3 MiB / 39.7 ms |
-| wide-running-ops | logs | 68.5 MiB / 144.3 ms | 8.0 MiB / 4.6 ms | 29.6 MiB / 30.6 ms |
-| wide-running-ops | exec | 48.8 MiB / 145.1 ms | 8.0 MiB / 5.2 ms | 27.9 MiB / 18.0 ms |
-| wide-running-ops | restart | 49.6 MiB / 182.0 ms | 8.0 MiB / 5.0 ms | 29.6 MiB / 30.9 ms |
-| config-heavy | config | 34.9 MiB / 110.3 ms | 7.9 MiB / 7.6 ms | 30.4 MiB / 61.3 ms |
-| build | build | 65.5 MiB / 410.5 ms | 8.1 MiB / 6.0 ms | 30.5 MiB / 29.3 ms |
+| single | up | 45.9 MiB / 376.6 ms | 5.7 MiB / 6.2 ms | 29.0 MiB / 29.3 ms |
+| single | down | 44.2 MiB / 315.6 ms | 5.6 MiB / 6.6 ms | 28.5 MiB / 27.1 ms |
+| multi-healthcheck | up | 46.2 MiB / 560.0 ms | 5.6 MiB / 8.2 ms | 29.3 MiB / 32.9 ms |
+| multi-healthcheck | down | 44.8 MiB / 419.1 ms | 5.5 MiB / 7.4 ms | 28.5 MiB / 27.7 ms |
+| deep-chain | up | 46.7 MiB / 1.187 s | 5.7 MiB / 0.010 s | 29.2 MiB / 0.037 s |
+| deep-chain | down | 45.4 MiB / 799.9 ms | 5.6 MiB / 9.3 ms | 28.9 MiB / 31.4 ms |
+| wide-level | up | 47.2 MiB / 6.411 s | 6.5 MiB / 0.032 s | 33.8 MiB / 0.090 s |
+| wide-level | down | 45.7 MiB / 4.898 s | 6.0 MiB / 0.024 s | 30.3 MiB / 0.066 s |
+| scale | up | 46.0 MiB / 417.0 ms | 5.7 MiB / 8.6 ms | 29.4 MiB / 34.6 ms |
+| scale | down | 44.8 MiB / 322.0 ms | 5.5 MiB / 8.4 ms | 29.0 MiB / 29.9 ms |
+| network-ipam | up | 46.2 MiB / 529.4 ms | 5.6 MiB / 7.0 ms | 29.1 MiB / 31.8 ms |
+| network-ipam | down | 45.0 MiB / 429.4 ms | 5.6 MiB / 7.3 ms | 29.0 MiB / 28.0 ms |
+| volume-heavy | up | 46.0 MiB / 875.9 ms | 5.5 MiB / 7.4 ms | 29.3 MiB / 32.2 ms |
+| volume-heavy | down | 44.7 MiB / 489.1 ms | 5.6 MiB / 7.6 ms | 29.4 MiB / 32.1 ms |
+| secrets | up | 46.0 MiB / 383.0 ms | 5.6 MiB / 8.3 ms | 29.0 MiB / 31.4 ms |
+| secrets | down | 45.0 MiB / 320.3 ms | 5.6 MiB / 8.2 ms | 28.4 MiB / 27.4 ms |
+| warm-restart | warm up | 44.2 MiB / 219.5 ms | 5.6 MiB / 7.3 ms | 29.7 MiB / 29.9 ms |
+| many-services | up | 46.9 MiB / 1.858 s | 6.1 MiB / 0.013 s | 30.4 MiB / 0.048 s |
+| many-services | down | 45.3 MiB / 1.395 s | 5.7 MiB / 0.012 s | 28.9 MiB / 0.039 s |
+| running-ops | ps | 43.9 MiB / 128.8 ms | 5.0 MiB / 4.4 ms | 28.5 MiB / 23.9 ms |
+| running-ops | logs | 63.9 MiB / 137.4 ms | 5.3 MiB / 4.8 ms | 28.6 MiB / 25.6 ms |
+| running-ops | exec | 43.7 MiB / 137.5 ms | 5.3 MiB / 5.4 ms | 26.8 MiB / 17.8 ms |
+| running-ops | restart | 44.5 MiB / 177.4 ms | 5.4 MiB / 5.2 ms | 28.8 MiB / 25.4 ms |
+| wide-running-ops | ps | 45.6 MiB / 137.9 ms | 5.0 MiB / 5.2 ms | 29.1 MiB / 38.3 ms |
+| wide-running-ops | logs | 64.5 MiB / 142.3 ms | 5.3 MiB / 5.7 ms | 29.4 MiB / 31.0 ms |
+| wide-running-ops | exec | 43.8 MiB / 141.2 ms | 5.3 MiB / 6.4 ms | 27.0 MiB / 18.4 ms |
+| wide-running-ops | restart | 44.5 MiB / 176.5 ms | 5.4 MiB / 6.2 ms | 29.5 MiB / 31.5 ms |
+| config-heavy | config | 34.4 MiB / 115.4 ms | 5.6 MiB / 13.3 ms | 29.4 MiB / 56.0 ms |
+| build | build | 51.8 MiB / 378.0 ms | 5.3 MiB / 5.5 ms | 29.7 MiB / 28.7 ms |
 
 ## Reading these numbers honestly
 
@@ -148,51 +158,40 @@ are not real**, and they are worth naming rather than counting:
 
 | row | podup | best of the others | gap | podup's own sd |
 |---|---|---|---|---|
-| deep-chain down | 395 ms | 400 ms | 5 ms | 9 ms |
-| network-ipam down | 182 ms | 195 ms | 12 ms | 97 ms |
-| many-services down | 551 ms | 593 ms | 42 ms | 49 ms |
+| deep-chain down | 379 ms | 380 ms | 1.5 ms | 29 ms |
+| many-services down | 506 ms | 508 ms | 2 ms | 99 ms |
+| multi-healthcheck down | 264 ms | 278 ms | 13.5 ms | 15 ms |
 
 Each gap is inside podup's own standard deviation on that row, so those three are
-coin tosses that happened to land this way. `many-services down` landed the other
-way in the 3.0.1 run — docker-compose ahead by 15 ms, also inside the noise — and
-nothing about either tool changed in between. Teardown is where this benchmark is
-noisiest, and a row that flips between runs is telling you the spread, not the
-winner. `network-ipam down` is the extreme case: podup's spread on it is eight
-times the gap it won by.
+coin tosses that happened to land this way. `many-services down` has now landed
+on podup's side in two runs and on docker-compose's in one, always inside the
+noise, and nothing about either tool's teardown changed in between. Teardown is
+where this benchmark is noisiest: the spread on `many-services down` is 99 ms
+against a 2 ms gap.
 
-Two more are close enough to name: `scale down` (25 ms gap, sd 17 ms) and
-`running-ops restart` (11 ms gap, sd 7 ms) clear the bar by less than two standard
-deviations. Read them as "about the same", not as wins.
+Five more clear the bar by less than two standard deviations and should be read
+as "about the same", not as wins: `network-ipam down` (34 ms gap, sd 19),
+`scale down` (23 ms, sd 13), `secrets up` (12 ms, sd 6), `secrets down` (11 ms,
+sd 9) and `single down` (16 ms, sd 9).
 
-`running-ops ps` and `config-heavy config` used to publish as **0.000 s** here.
-That was the floor of `/usr/bin/time -v`, which resolves to 10 ms, and this table
-had to explain that separately-timed runs put them at 7.7 ms and 8.3 ms. The
-current instrument reads them directly, at **7.1 ms** and **9.0 ms** — close
-enough to those hand-timed figures to be a useful check on the new timer. About
-2.0 ms of each is process start: the binary spawning, building its command tree
-and its async runtime, before any work.
+`running-ops ps` and `config-heavy config` used to publish as **0.000 s** here,
+the floor of `/usr/bin/time -v`. The current timer reads them directly, at
+**6.3 ms** and **13.0 ms**; about 1.7 ms of each is process start, measured on
+`--version`. Rows at that scale move by tens of percent between runs for no
+reason of the tool's, which is why the `config` row above got a head-to-head
+rather than a reading.
 
-The same floor sat under the whole CPU column, which reported podup at `0.000 s`
-in all 29 rows. It now reads between 4.2 ms and 33 ms.
+`multi-healthcheck up` is the noisiest row in the suite (sd 89 ms here, 70 ms in
+the 3.4.1 run, p95 390 ms against a 298 ms median) and the one most likely to be
+misread across releases. It is gated on a `depends_on: service_healthy` poll, so
+it measures healthcheck interval granularity more than tool speed. Compare
+releases by running them against each other on one machine, never by subtracting
+two published tables; the -6.5% the unchanged `docker-compose` moved between
+these two is the size of the error that subtraction would carry.
 
-`multi-healthcheck up` is the noisiest row in the suite (sd 84 ms here, 87 ms in
-the 3.0.1 run, and its p95 is 411 ms against a 231 ms median) and the one most
-likely to be misread across releases. Run head-to-head on the same machine,
-alternating binaries per iteration, 3.2.0 came out at 295 ms against 3.0.1's
-350 ms, while the published tables for those two releases sat 75 ms apart in the
-opposite direction. Compare releases by running them against each other, never by
-subtracting two published tables.
-
-What that row does show, against 2.0.0's 1.275 s, is a bug fix rather than a
-scheduling trick: podup used to read a container's health status once per
-healthcheck `interval` and now reads it every 150 ms between runs, so a container
-that turns healthy just after a probe is noticed at once instead of at the end of
-the window.
-
-The `secrets` scenario is new here, and it is the one place where a correctness
-fix cost measurable time. Six `file:` secrets used to be six read-only bind
-mounts; since 3.1.0 each is read and created as a Podman-native secret, because a
-bind mount is denied outright on an SELinux host while `up` still reports the
-container as started. That is three API calls per secret at `up` and two at
-`down`, and it puts about 10 ms on each direction of this scenario. The fix is
-worth the 10 ms.
+The `secrets` scenario is the one place where a correctness fix costs measurable
+time. Six `file:` secrets used to be six read-only bind mounts; since 3.1.0 each
+is read and created as a Podman-native secret, because a bind mount is denied
+outright on an SELinux host while `up` still reports the container as started.
+That is three API calls per secret at `up` and two at `down`, and it puts about
+10 ms on each direction of this scenario. The fix is worth the 10 ms.
