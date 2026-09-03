@@ -83,6 +83,7 @@ podup autostart install                  # service mode (default)
 podup autostart install --mode quadlet   # quadlet mode
 podup autostart install --no-start       # write the unit(s) but don't start yet
 podup autostart install --dry-run        # print what would be written/run, change nothing
+podup autostart install --mode service --auto-update daily   # service mode + a sibling timer
 
 podup autostart status                   # this project's unit and session state
 podup autostart uninstall                # remove whichever mode is installed
@@ -91,6 +92,30 @@ podup autostart uninstall --purge        # also tear the stack down and drop its
 podup autostart rebuild                   # quadlet only: rebuild every built image + restart
 podup autostart rebuild web               # rebuild just one service
 ```
+
+## Auto-update
+
+`x-podman-autoupdate` on a service asks Podman's auto-update to keep the
+image fresh. The three autostart modes pick a different executor, and which
+executor runs where is the part that matters:
+
+| Mode | Executor | How it is installed |
+|---|---|---|
+| `quadlet` | `podman-auto-update.timer` (ships with Podman) | nothing to do: Quadlet sets `AutoUpdate=<value>` on each `.container` and the bundled timer fires it. |
+| `service` | a per-project `<unit>-update.timer` (`hourly`/`daily`/`weekly`) | `podup autostart install --mode service --auto-update <hourly\|daily\|weekly>`. Adds `<unit>-update.service` (oneshot that runs `podup up -d`) and the timer that fires it; uninstall removes both. |
+| `start` | none | the boot path runs `podman start`, not `podup up`. `--auto-update` is rejected with `--mode start`. |
+
+For stacks that are not under autostart at all (no `podup autostart
+install` was run), the schedule is the same `podup up -d` line as the
+service-mode timer, dropped in cron:
+
+```
+0 3 * * *  cd /srv/app && podup up -d
+```
+
+Without `--auto-update`, the install path produces exactly what it did before
+the feature existed. The timer pair only appears when the flag is given, and
+`autostart uninstall` removes all three units together.
 
 `uninstall` detects which mode is installed and removes that one; you never pass
 `--mode` to it. `rebuild` applies to quadlet mode: a Quadlet `.build` unit is

@@ -128,6 +128,31 @@ image writes files with UID 0 (root inside the container), those files appear
 owned by your user on the host. Bind-mount permissions reflect your host user's
 access.
 
+### `userns_mode: auto` gives each container its own UID range
+
+Rootless Podman maps the container's root onto your user, so two containers of
+one project share that mapping: a file one of them writes as UID 0 on a shared
+volume is readable by the other, and a process that escaped either lands in the
+same user. Podman's `--userns=auto` allocates each container a private range of
+subordinate UIDs and GIDs instead. podup forwards the compose key as it is:
+
+```yaml
+services:
+  web:
+    image: registry.example.com/web:1.4.2
+    userns_mode: auto
+```
+
+Two consequences to know before switching a service. It needs a range in
+`/etc/subuid` and `/etc/subgid` for your user (`usermod --add-subuids
+100000-165535 --add-subgids 100000-165535 <user>` on a host that has none;
+most installs already have one, 65536 wide). And files a container writes to a
+named volume are owned by an ID from its private range, so a bind mount the
+host user expects to read back needs `:U` (Podman chowns the mount to the
+container's mapping) or a volume shared only between containers. Podman
+estimates the size of the range from the image; a service whose image expects
+more IDs than that declares it, as `userns_mode: auto:size=65536`.
+
 ### Volume SELinux labels
 
 On SELinux-enforcing systems, bind mounts require relabeling. Append `:z`

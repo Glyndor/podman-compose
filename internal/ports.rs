@@ -3,12 +3,14 @@
 //! Handles all docker-compose port format variants and converts them to
 //! libpod `PortMapping` structures.
 
+use serde::Serialize;
+
 use crate::compose::types::{PortMapping, StringOrU16};
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::container::PortMapping as LibpodPortMapping;
 
 /// A parsed, normalized port binding.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ParsedPort {
 	/// Container port number.
 	pub container_port: u16,

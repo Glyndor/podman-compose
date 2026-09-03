@@ -8,6 +8,7 @@ use std::process;
 #[cfg(feature = "completions")]
 use clap::CommandFactory;
 
+mod audit;
 mod autostart_cmd;
 mod cli;
 mod dispatch;
@@ -493,6 +494,31 @@ async fn run() -> podup::Result<()> {
 			&project,
 			&base_dir,
 		);
+	}
+
+	// `audit` is the read-only hardening view. It reuses the `config`
+	// loading path verbatim: same parsed file, same active-profile filter,
+	// same `env_file:` fold. It does not contact Podman. Honor active
+	// profiles so a service left out by `--profile` does not get audited;
+	// `audit` reports what `up` would start.
+	if let Commands::Audit { strict, format } = &cli.command {
+		let base_dir = resolve_base_dir(cli.project_directory.as_deref(), &compose_files[0]);
+		let project = resolve_project_name(cli.project.clone(), file.name.as_deref(), &base_dir);
+		startup::validate_project_name(&project)?;
+		podup::ui::set_project(&project);
+		podup::ui::set_services(&file.services.keys().cloned().collect::<Vec<_>>());
+		let mut resolved = file.clone();
+		podup::retain_active_profiles(&mut resolved, &cli.profile);
+		podup::env_file::materialize_env_files(&mut resolved, &base_dir)?;
+		let report = audit::audit_file(&resolved);
+		match format {
+			AuditFormat::Table => audit::render_table(&audit::ordered_services(&resolved), &report),
+			AuditFormat::Json => audit::render_json(&report),
+		}
+		if *strict && report.has_findings() {
+			process::exit(1);
+		}
+		return Ok(());
 	}
 
 	let base_dir = resolve_base_dir(cli.project_directory.as_deref(), &compose_files[0]);

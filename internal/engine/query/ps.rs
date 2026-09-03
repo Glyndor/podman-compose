@@ -576,6 +576,13 @@ impl Engine {
 		let containers: Vec<ContainerListEntry> = all_containers
 			.into_iter()
 			.filter(|c| {
+				// `x-podman-pod`: hide the infra container Podman creates
+				// inside the project pod. The pod addresses itself by name
+				// (`podman pod`), so the infra container has no user-facing
+				// role.
+				if c.is_infra {
+					return false;
+				}
 				let name = name_of(c);
 				allowed_names.as_ref().is_none_or(|set| {
 					c.names
@@ -634,6 +641,57 @@ impl Engine {
 
 		Ok(())
 	}
+}
+
+/// Test-only: returns the JSON row map a `ps` invocation would render, so
+/// the unit tests can introspect the filtered container set without going
+/// through stdout.
+#[cfg(test)]
+pub(crate) async fn ps_rows_for_test(
+	engine: &Engine,
+	file: &ComposeFile,
+) -> Result<Vec<serde_json::Value>> {
+	let opts = PsOptions::new(true, false, true);
+	let filters = PsFilterOptions::default();
+	let display = PsDisplayOptions::default();
+	// Re-run the same filter the production path runs, but capture the
+	// resulting rows instead of printing them.
+	let path = containers_path(&engine.project, opts.all || true, display.size);
+	let all_containers = engine
+		.client
+		.get_json::<Vec<ContainerListEntry>>(&path)
+		.await
+		.map_err(ComposeError::Podman)?;
+	let allowed_names: Option<std::collections::HashSet<String>> = if filters.services.is_empty() {
+		None
+	} else {
+		Some(
+			filters
+				.services
+				.iter()
+				.filter_map(|n| file.services.get(n).map(|s| (n, s)))
+				.flat_map(|(n, s)| engine.replica_names(n, s))
+				.collect(),
+		)
+	};
+	let (status_filter, name_filter, _) = split_ps_filters(&filters.filters);
+	let containers: Vec<ContainerListEntry> = all_containers
+		.into_iter()
+		.filter(|c| {
+			if c.is_infra {
+				return false;
+			}
+			let name = name_of(c);
+			allowed_names.as_ref().is_none_or(|set| {
+				c.names
+					.iter()
+					.any(|n| set.contains(n.trim_start_matches('/')))
+			}) && (status_matches(&c.state, &status_filter)
+				|| status_matches(&c.status, &status_filter))
+				&& (name_filter.is_empty() || name_filter.iter().any(|nf| name.contains(nf)))
+		})
+		.collect();
+	Ok(containers.iter().map(ps_json_row).collect())
 }
 
 #[cfg(test)]

@@ -11,8 +11,8 @@ use super::health::render_healthcheck;
 use super::security::{is_inline_secret, map_security_opt, render_secret};
 use super::{
 	abs_against, collect_warnings, owner_marker, render_command, render_publish_port,
-	render_restart, render_tmpfs_mount, render_volume, sorted_label_pairs, sorted_pairs, unit_stem,
-	QuadletUnit, Section,
+	render_restart, render_tmpfs_mount, render_volume, safe_unit_stem, sorted_label_pairs,
+	sorted_pairs, unit_stem, QuadletUnit, Section,
 };
 use crate::quadlet::is_no_warn_set;
 
@@ -35,6 +35,10 @@ pub(crate) struct UnitContext<'a> {
 	/// Every service in the file, so a `depends_on` condition can be judged
 	/// against the service it names rather than in the abstract.
 	pub services: &'a IndexMap<String, Service>,
+	/// `true` when the compose file opts into `x-podman-pod: true`. Each
+	/// container unit then references the project pod by `Pod=<stem>.pod`
+	/// and drops its own `PublishPort=` and `Network=` lines.
+	pub pod_mode: bool,
 }
 
 /// Build the `.container` unit for one compose `service`.
@@ -56,7 +60,9 @@ pub(crate) fn container_unit(
 		secrets,
 		base_dir,
 		services,
+		pod_mode,
 	} = ctx;
+	let in_pod: bool = *pod_mode;
 	let mut unit = Section::new("Unit");
 	unit.add("Description", format!("{name} (podup)"));
 	for dep in service.depends_on.service_names() {
@@ -85,6 +91,12 @@ pub(crate) fn container_unit(
 			.clone()
 			.unwrap_or_else(|| format!("{project}-{name}")),
 	);
+	// In pod mode every container joins the project pod; reference it by the
+	// `.pod` unit's stem (which is the project name). Without this the
+	// container would launch outside the pod.
+	if in_pod {
+		container.add("Pod", format!("{}.pod", safe_unit_stem(project)));
+	}
 	// A service with a buildable `build:` references its `.build` unit, so Quadlet
 	// builds the image before running; otherwise the explicit `image:` is used.
 	if super::build::emits_build_unit(service) {
@@ -140,9 +152,16 @@ pub(crate) fn container_unit(
 	// here. A malformed/out-of-range mapping is rejected at the command boundary
 	// rather than re-emitted verbatim as an invalid `PublishPort=` — emitting the
 	// raw string would produce a unit Quadlet/Podman would reject anyway.
-	if let Ok(ports) = parse_ports(&service.ports) {
-		for p in ports {
-			container.add("PublishPort", render_publish_port(&p));
+	//
+	// In pod mode the pod owns every published port (the container's own
+	// `portmappings` would conflict with the pod's), so each `.container`
+	// unit drops its `PublishPort=` lines and references the pod by name
+	// further down.
+	if !in_pod {
+		if let Ok(ports) = parse_ports(&service.ports) {
+			for p in ports {
+				container.add("PublishPort", render_publish_port(&p));
+			}
 		}
 	}
 
@@ -162,14 +181,21 @@ pub(crate) fn container_unit(
 			container.add("Volume", render_volume(vol, project, declared_volumes));
 		}
 	}
-	for net in service.networks.names() {
-		// A declared (non-external) network is backed by a generated `.network`
-		// unit; an external network is referenced by its existing name directly,
-		// since no unit is emitted for it.
-		if declared_networks.contains(&net.as_str()) {
-			container.add("Network", format!("{}.network", unit_stem(project, &net)));
-		} else {
-			container.add("Network", net.clone());
+	// In pod mode the pod joins the shared namespace, so each container
+	// drops its own `Network=` lines; the pod unit carries them. The
+	// `Network=` line we emit below (for `network_mode: host`/`none`/
+	// `container:`/`service:`) is the one exception: those are
+	// namespace modes, not network attachments.
+	if !in_pod {
+		for net in service.networks.names() {
+			// A declared (non-external) network is backed by a generated `.network`
+			// unit; an external network is referenced by its existing name directly,
+			// since no unit is emitted for it.
+			if declared_networks.contains(&net.as_str()) {
+				container.add("Network", format!("{}.network", unit_stem(project, &net)));
+			} else {
+				container.add("Network", net.clone());
+			}
 		}
 	}
 	for (key, val) in sorted_label_pairs(service.labels.to_map()) {
@@ -180,6 +206,19 @@ pub(crate) fn container_unit(
 	// way a running one is.
 	container.add("Label", format!("podup.project={project}"));
 	container.add("Label", format!("podup.service={name}"));
+	// The `x-podman-autoupdate` extension. Quadlet's `AutoUpdate=` key sets
+	// the `io.containers.autoupdate` label itself at daemon-reload, so the
+	// `Label=` line is intentionally NOT emitted here, that would duplicate
+	// it. An invalid value is warned about rather than refused: generation has
+	// no error channel here, and writing an unrecognised `AutoUpdate=` would
+	// make Quadlet drop the whole unit at daemon-reload, a far worse failure
+	// than the key being absent. The live `up` path rejects the same value
+	// outright, where it can.
+	match service.podman_autoupdate() {
+		Ok(Some(policy)) => container.add("AutoUpdate", policy.as_str().to_string()),
+		Ok(None) => {}
+		Err(e) => warnings.push(format!("{name}: {e}")),
+	}
 	for cap in &service.cap_add {
 		container.add("AddCapability", cap.clone());
 	}

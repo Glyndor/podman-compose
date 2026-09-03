@@ -199,6 +199,91 @@ fn exec_line(opts: &ServiceUnitOpts, trailing: &[&str]) -> String {
 		.join(" ")
 }
 
+/// The cadence the auto-update timer uses. `interval` is the `OnCalendar=`
+/// word (`hourly`/`daily`/`weekly`) and the only one systemd accepts for the
+/// three document presets, anything else has to be a longer expression like
+/// `*-*-* 03:00:00`, and that surface is deliberately out of scope.
+const ALLOWED_AUTO_UPDATE_INTERVALS: &[&str] = &["hourly", "daily", "weekly"];
+
+/// Reject anything that is not one of the three word forms above. clap already
+/// narrows this at the CLI level, so reaching here means a programmatic caller
+/// (`InstallOptions::with_auto_update_interval`) passed something the user
+/// never typed, surface it the same way any other bad interval would be
+/// surfaced.
+pub fn validate_auto_update_interval(interval: &str) -> Result<(), String> {
+	if ALLOWED_AUTO_UPDATE_INTERVALS.contains(&interval) {
+		Ok(())
+	} else {
+		Err(format!(
+			"invalid --auto-update interval {interval:?} (expected one of: {})",
+			ALLOWED_AUTO_UPDATE_INTERVALS.join(", ")
+		))
+	}
+}
+
+/// The `<unit-name>-update.service` filename.
+pub fn update_service_file_name(project: &str) -> String {
+	format!("podup-{project}-update.service")
+}
+
+/// The `<unit-name>-update.timer` filename.
+pub fn update_timer_file_name(project: &str) -> String {
+	format!("podup-{project}-update.timer")
+}
+
+/// Render the auto-update oneshot service: same leading arguments as the main
+/// unit (so `-f`/`-p`/`--profile`/`--env-file` travel together), then
+/// `up -d`. The timer fires it; systemd runs it `Type=oneshot` so each fire
+/// is its own `podup up -d` invocation, not a long-running process.
+pub fn render_update_service_unit(opts: &ServiceUnitOpts) -> String {
+	let start = exec_line(opts, &["up", "-d"]);
+	let workdir = opts.working_dir.display().to_string().replace('%', "%%");
+	let project = opts.project.replace('%', "%%");
+	format!(
+		"[Unit]\n\
+		 Description=podup {project} auto-update\n\
+		 Wants=podman-user-wait-network-online.service\n\
+		 After=podman-user-wait-network-online.service\n\
+		 \n\
+		 [Service]\n\
+		 Type=oneshot\n\
+		 WorkingDirectory={workdir}\n\
+		 ExecStart={start}\n",
+		project = project,
+		workdir = workdir,
+		start = start,
+	)
+}
+
+/// Render the auto-update timer: `OnCalendar=<interval>`, `Persistent=true` so
+/// missed fires (the host was off) catch up on next boot, and
+/// `WantedBy=timers.target` so the standard timer enable path takes it.
+pub fn render_update_timer_unit(project: &str, interval: &str) -> String {
+	let project = project.replace('%', "%%");
+	let interval_word = if let Err(e) = validate_auto_update_interval(interval) {
+		// clap rejects unknown values before reaching here; this is the
+		// programmatic-call guard. Fail loud rather than write a unit with a
+		// bogus OnCalendar= value (systemd drops the timer silently in that
+		// case and the user never knows).
+		panic!("render_update_timer_unit called with bad interval: {e}");
+	} else {
+		interval
+	};
+	format!(
+		"[Unit]\n\
+		 Description=podup {project} auto-update timer\n\
+		 \n\
+		 [Timer]\n\
+		 OnCalendar={interval_word}\n\
+		 Persistent=true\n\
+		 \n\
+		 [Install]\n\
+		 WantedBy=timers.target\n",
+		project = project,
+		interval_word = interval_word,
+	)
+}
+
 /// Render the full `.service` unit file content for service-mode autostart.
 pub fn render_service_unit(opts: &ServiceUnitOpts) -> String {
 	// `up -d`, not `up -d --build`: a boot must not depend on a build. A build

@@ -84,6 +84,14 @@ pub struct ContainerListEntry {
 	/// blank column, the same trap as `Status` versus `State` above.
 	#[serde(rename = "Created", default)]
 	pub created: String,
+
+	/// `true` for the infra container Podman creates inside a pod. The
+	/// `x-podman-pod` extension does not name this container (Podman does)
+	/// and `ps` hides it from the user-facing list, so the field is the only
+	/// discriminator libpod exposes. `false` (the default) covers every
+	/// regular container.
+	#[serde(rename = "IsInfra", default)]
+	pub is_infra: bool,
 }
 
 /// A container's on-disk footprint, as `containers/json?size=true` reports it.

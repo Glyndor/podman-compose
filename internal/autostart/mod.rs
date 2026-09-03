@@ -16,7 +16,11 @@ mod start;
 mod start_tests;
 
 pub use quadlet::{install_quadlet, rebuild_quadlet, uninstall_quadlet};
-pub use service::{render_service_unit, ServiceUnitOpts};
+pub use service::{
+	render_service_unit, render_update_service_unit, render_update_timer_unit,
+	update_service_file_name, update_timer_file_name, validate_auto_update_interval,
+	ServiceUnitOpts,
+};
 pub use start::{
 	render_start_unit, sole_container, validate_start_unit_opts, StartModeRefusal, StartUnitOpts,
 };
@@ -86,6 +90,10 @@ pub struct InstallOptions {
 	pub no_start: bool,
 	/// Print the unit and the actions that would run, but change nothing.
 	pub dry_run: bool,
+	/// When set, also render and install the sibling `<unit>-update.service`
+	/// oneshot and `<unit>-update.timer`. The string is the `OnCalendar=`
+	/// word (`hourly`/`daily`/`weekly`).
+	pub auto_update_interval: Option<String>,
 }
 
 impl InstallOptions {
@@ -95,6 +103,7 @@ impl InstallOptions {
 			unit,
 			no_start: false,
 			dry_run: false,
+			auto_update_interval: None,
 		}
 	}
 
@@ -107,6 +116,13 @@ impl InstallOptions {
 	/// Print what would happen and change nothing. Builder-style.
 	pub fn with_dry_run(mut self, dry_run: bool) -> Self {
 		self.dry_run = dry_run;
+		self
+	}
+
+	/// Install the auto-update timer pair alongside the main unit, with the
+	/// given `OnCalendar=` word (`hourly`/`daily`/`weekly`). Builder-style.
+	pub fn with_auto_update_interval(mut self, interval: Option<String>) -> Self {
+		self.auto_update_interval = interval;
 		self
 	}
 }
@@ -254,6 +270,11 @@ fn refuse_if_quadlet_present(project: &str) -> crate::Result<()> {
 
 /// Install (and, unless `no_start`, enable + start) the service-mode autostart
 /// unit. Writes only under `${XDG_CONFIG_HOME:-~/.config}/systemd/user/`.
+///
+/// With `opts.auto_update_interval` set, also installs the sibling
+/// `<unit>-update.service` (oneshot that runs `podup up -d`) and
+/// `<unit>-update.timer` (the schedule that fires it). Removal takes all
+/// three down together, see [`uninstall`].
 pub fn install<S: SystemCtl>(sc: &S, opts: &InstallOptions) -> crate::Result<()> {
 	let project = &opts.unit.project;
 	refuse_if_quadlet_present(project)?;
@@ -262,8 +283,25 @@ pub fn install<S: SystemCtl>(sc: &S, opts: &InstallOptions) -> crate::Result<()>
 	// would inject directives via the literal `WorkingDirectory=` line).
 	service::validate_unit_opts(&opts.unit).map_err(ComposeError::Autostart)?;
 
+	if let Some(interval) = &opts.auto_update_interval {
+		service::validate_auto_update_interval(interval).map_err(ComposeError::Autostart)?;
+	}
+
 	let unit_text = render_service_unit(&opts.unit);
-	place_unit(sc, project, &unit_text, opts.dry_run, opts.no_start)
+	place_unit(sc, project, &unit_text, opts.dry_run, opts.no_start)?;
+
+	if let Some(interval) = &opts.auto_update_interval {
+		place_update_units(
+			sc,
+			project,
+			&opts.unit,
+			interval,
+			opts.dry_run,
+			opts.no_start,
+		)?;
+	}
+
+	Ok(())
 }
 
 /// Install the start-mode unit: `ExecStart=podman start <container>`, so the
@@ -331,6 +369,64 @@ fn place_unit<S: SystemCtl>(
 	Ok(())
 }
 
+/// Write the auto-update oneshot service and its timer, then enable the timer
+/// (not the service, the timer is what the user enables; the service runs
+/// only when the timer fires). `interval` is the `OnCalendar=` word
+/// (`hourly`/`daily`/`weekly`). The service is installed but not `enable
+/// --now`'d: nothing would start it that way, since the timer is the entry
+/// point and a disabled timer means nothing fires.
+fn place_update_units<S: SystemCtl>(
+	sc: &S,
+	project: &str,
+	main_opts: &service::ServiceUnitOpts,
+	interval: &str,
+	dry_run: bool,
+	no_start: bool,
+) -> crate::Result<()> {
+	let service_text = service::render_update_service_unit(main_opts);
+	let timer_text = service::render_update_timer_unit(project, interval);
+	let service_name = service::update_service_file_name(project);
+	let timer_name = service::update_timer_file_name(project);
+	let dir = unit_dir();
+	let service_path = dir.join(&service_name);
+	let timer_path = dir.join(&timer_name);
+
+	if dry_run {
+		print!("{service_text}");
+		print!("{timer_text}");
+		println!("\n# would write {}", service_path.display());
+		println!("# would write {}", timer_path.display());
+		println!("# would run: systemctl --user daemon-reload");
+		if no_start {
+			println!("# (--no-start) would not enable or start {service_name} or {timer_name}");
+		} else {
+			println!("# would run: systemctl --user enable --now {timer_name}");
+		}
+		return Ok(());
+	}
+
+	std::fs::write(&service_path, service_text.as_bytes()).map_err(|e| {
+		ComposeError::Autostart(format!("cannot write {}: {e}", service_path.display()))
+	})?;
+	eprintln!("podup: wrote {}", service_path.display());
+	std::fs::write(&timer_path, timer_text.as_bytes()).map_err(|e| {
+		ComposeError::Autostart(format!("cannot write {}: {e}", timer_path.display()))
+	})?;
+	eprintln!("podup: wrote {}", timer_path.display());
+
+	checked(sc.systemctl(&["daemon-reload"]), "daemon-reload")?;
+	if !no_start {
+		checked(
+			sc.systemctl(&["enable", "--now", &timer_name]),
+			&format!("enable --now {timer_name}"),
+		)?;
+		eprintln!("podup: enabled and started {timer_name}");
+	} else {
+		eprintln!("podup: installed {service_name} and {timer_name} (not enabled; --no-start)");
+	}
+	Ok(())
+}
+
 /// Whether systemd knows anything about `unit` — loaded, enabled, running, or
 /// merely present as a fragment.
 ///
@@ -357,6 +453,12 @@ fn unit_is_known<S: SystemCtl>(sc: &S, unit: &str) -> bool {
 /// Idempotent — uninstalling when nothing is installed is a quiet no-op — but a
 /// `disable` that genuinely fails is reported rather than swallowed, so the
 /// command cannot claim success while the service is still enabled and running.
+///
+/// When the auto-update timer pair is present, this removes both: the
+/// `<unit>-update.service` oneshot and the `<unit>-update.timer` schedule that
+/// fires it. Without that, the timer would keep firing `up -d` against a stack
+/// whose main unit had been uninstalled, the exact inconsistency the brief
+/// calls out.
 pub fn uninstall<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<()> {
 	let unit_name = unit_file_name(project);
 	let path = unit_path(project);
@@ -383,6 +485,37 @@ pub fn uninstall<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<()> {
 			"podup: no unit file at {} (already removed)",
 			path.display()
 		);
+	}
+
+	// The auto-update pair, when present. Run independently of the main unit's
+	// outcome: the timer pair is its own install and uninstalls the same way.
+	let update_service_name = service::update_service_file_name(project);
+	let update_timer_name = service::update_timer_file_name(project);
+	let update_service_path = unit_dir().join(&update_service_name);
+	let update_timer_path = unit_dir().join(&update_timer_name);
+
+	if unit_is_known(sc, &update_timer_name) {
+		checked(
+			sc.systemctl(&["disable", "--now", &update_timer_name]),
+			&format!("disable --now {update_timer_name}"),
+		)?;
+	}
+	if unit_is_known(sc, &update_service_name) {
+		checked(
+			sc.systemctl(&["disable", "--now", &update_service_name]),
+			&format!("disable --now {update_service_name}"),
+		)?;
+	}
+	for (_name, path) in [
+		(update_service_name.as_str(), &update_service_path),
+		(update_timer_name.as_str(), &update_timer_path),
+	] {
+		if path.exists() {
+			std::fs::remove_file(path).map_err(|e| {
+				ComposeError::Autostart(format!("cannot remove {}: {e}", path.display()))
+			})?;
+			eprintln!("podup: removed {}", path.display());
+		}
 	}
 
 	checked(sc.systemctl(&["daemon-reload"]), "daemon-reload")?;

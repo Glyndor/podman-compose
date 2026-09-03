@@ -19,6 +19,8 @@ mod options;
 mod ps;
 pub(crate) mod terminal;
 
+#[cfg(test)]
+pub(crate) use ps::ps_rows_for_test;
 pub use ps::{PsDisplayOptions, PsFilterOptions, PsOptions};
 
 pub use exec::ExecOptions;
@@ -569,8 +571,11 @@ impl Engine {
 			.flat_map(|(n, s)| self.replica_names(n, s))
 			.collect();
 
+		// A pod's infra container carries the project label and belongs to no
+		// service; it lives and dies with the pod, never as an orphan.
 		let names: Vec<String> = running
 			.iter()
+			.filter(|c| !c.is_infra)
 			.flat_map(|c| c.names.iter())
 			.map(|raw| raw.trim_start_matches('/').to_string())
 			.collect();

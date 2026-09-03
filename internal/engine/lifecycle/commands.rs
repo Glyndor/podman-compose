@@ -4,10 +4,10 @@ use crate::compose::types::ComposeFile;
 use crate::error::{ComposeError, Result};
 
 use super::drop_recheck::LifecycleGoal;
-use super::filter_services;
 use super::parallel::{
 	filter_levels, first_error, join_bounded, restart_service_set, retain_levels,
 };
+use super::targets::filter_services;
 use super::targets::{stop_deadline, stop_timeout_param};
 use crate::engine::Engine;
 use crate::libpod::API_PREFIX;

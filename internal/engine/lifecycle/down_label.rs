@@ -80,6 +80,11 @@ impl Engine {
 		if let Some(e) = self.remove_project_networks_by_label().await {
 			first_err.get_or_insert(e);
 		}
+		// `x-podman-pod`: reap any pod carrying the project's label, a
+		// pod left behind by a crashed `up`, or any other pod the project
+		// owns. The current project's own pod is removed by name in
+		// `down_with_options`; this sweep covers the rest.
+		self.remove_project_pods_by_label().await;
 		if remove_volumes {
 			if let Some(e) = self.remove_project_volumes_by_label().await {
 				first_err.get_or_insert(e);

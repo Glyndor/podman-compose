@@ -620,6 +620,64 @@ still wins over an earlier one, and a bare `KEY` stays valueless because it mean
 | `--no-interpolate` | Leave `${VAR}` placeholders literal. | off |
 | `--resolve-image-digests` | Rewrite each service `image:` to its registry digest (`repo@sha256:...`). | off |
 
+### `audit`
+
+Print one row per service listing every hardening gap the compose file leaves
+open. The `audit` command is read-only and never contacts Podman; no check
+changes what `up` does. The same loading path as `config` is used, so
+`--profile`, `--env-file` and `-f` resolve identically, and `audit` reports
+what `up` would actually start.
+
+The default output is a table:
+
+```
+$ podup audit
+SERVICE  FINDINGS
+api      writable_root no_new_privileges_off secret_in_environment
+db       -
+  api: writable_root: read_only is not true: the container's root filesystem is writable
+  api: no_new_privileges_off: security_opt is missing no-new-privileges:true: setuid binaries may regain privileges
+  api: secret_in_environment: environment: DB_PASSWORD carries a hard-coded value; move it to secrets:
+```
+
+A service with no findings shows `-` in the `FINDINGS` column; a project
+with no findings at all prints `no findings` and nothing else.
+
+`--format json` emits a single machine-readable object so CI can pin the
+shape and grep the `check` ids:
+
+```
+{"findings":[{"service":"api","check":"writable_root","reason":"..."}, ...]}
+```
+
+The keys are alphabetically ordered; an empty list is `{"findings":[]}`,
+never `null`.
+
+`--strict` exits 1 when at least one finding is present (otherwise exits
+0), so a CI job can gate on `podup audit --strict` and fail when hardening
+gaps are introduced.
+
+The eleven checks and what they look for:
+
+| Check id | Fires when | Notes |
+|---|---|---|
+| `privileged` | `privileged: true` | Grants extended host privileges; under rootless Podman reduced but never incidental. |
+| `host_namespace` | `network_mode: host`, or `pid`/`ipc`/`uts`/`cgroup`/`userns_mode: host` | One finding per active mode. |
+| `dangerous_capability` | `cap_add` contains `SYS_ADMIN` or `ALL` | Effectively grants root inside the container. |
+| `writable_root` | `read_only` is not `true` | Compose's default is writable. |
+| `no_cap_drop_all` | `cap_drop` does not contain `ALL` | Without it the runtime's default capability set stays. |
+| `no_new_privileges_off` | `security_opt` lacks `no-new-privileges:true` | Both spellings (`no-new-privileges:true` and `no-new-privileges` alone, the Podman form) are accepted. |
+| `no_pids_limit` | `pids_limit` unset | A fork bomb can exhaust the host's process table. |
+| `no_memory_limit` | Neither `mem_limit` nor `deploy.resources.limits.memory` set | A leak can OOM the host. |
+| `no_userns` | `userns_mode` unset | Without it Podman's `auto` applies; the reason links to `docs/docker-migration.md`. |
+| `secret_in_environment` | `environment:` key matching `PASSWORD`/`SECRET`/`TOKEN`/`KEY` (case-insensitive) with a non-empty literal value | Bare keys (host inheritance) and `${VAR}` placeholders are not flagged. |
+| `unpinned_image` | `image:` with no tag, with tag `latest`, or `latest` without a digest | An `@sha256:` digest counts as pinning regardless of the tag. |
+
+| Flag | Description | Default |
+|---|---|---|
+| `--format <FMT>` | `table` (default) or `json`. | `table` |
+| `--strict` | Exit 1 when any finding is present, 0 otherwise. | off |
+
 ### `completions <SHELL>`
 Print a shell completion script to stdout for `bash`, `zsh`, `fish`,
 `powershell`, or `elvish`. The Debian package installs the bash/zsh/fish files
@@ -778,7 +836,95 @@ keys; they are called out below.
 | Key | Where | What it does | Portable |
 |---|---|---|---|
 | `x-podman-on-failure` | under a service's `healthcheck:` | `none`, `kill`, `restart` or `stop` — what Podman does when the check flips to unhealthy. Default `none`. | yes |
+| `x-podman-pod` | top level | `true` puts every service of the project into one Podman pod named after the project; see [Pods](#pods). | yes |
+| `x-podman-autoupdate` | under a service | `registry` or `local`; see [Auto-update](#auto-update). | yes |
 | `noexec`, `nosuid`, `nodev` | under a long-form volume's `volume:` | mount-hardening flags; see [Per-mount hardening options](docker-migration.md#per-mount-hardening-options-noexec-nosuid-nodev). The short form carries them as raw mount options. | no |
+
+### Auto-update
+
+The Compose Spec has no equivalent. Podman's `auto-update` (driven by
+`podman-auto-update.timer`) only sees containers that carry the
+`io.containers.autoupdate` label, and podup does not emit it on its own.
+
+`x-podman-autoupdate` adds the label and arranges for the registry to be
+checked, so a stack started by `podup up` is no longer invisible to Podman's
+auto-update, and a Quadlet exported by `podup generate quadlet` carries
+`AutoUpdate=<value>` for systemd to set the same label.
+
+| Value | What it does |
+|---|---|
+| `registry` | The container carries `io.containers.autoupdate=registry`, and `podup up` pulls the image with policy `newer` so a moved tag recreates the container. `--pull <policy>` on the command line wins over the extension. |
+| `local` | The container carries `io.containers.autoupdate=local`: Podman's auto-update compares the container's image with the local image of the same name and restarts the unit when they differ, which is what a `podman build` that moved the tag looks like. `podup up` keeps the existing pull behaviour, and the same rebuilt image recreates the container through the config-hash and image-ID comparison it already does. |
+
+On `generate quadlet`, the value lands in the `[Container]` section as
+`AutoUpdate=<value>`. Quadlet derives the `io.containers.autoupdate` label
+itself, so the generator must not also emit a `Label=io.containers.autoupdate=...`
+line, which would duplicate the label and the unit would silently disagree
+with the Quadlet side.
+
+`podup autostart --auto-update <hourly|daily|weekly>` is the executor for
+service-mode stacks; Quadlet mode already uses `podman-auto-update.timer`,
+and start mode has no compose front-end on the boot path. See
+[docs/autostart.md](autostart.md#auto-update) for which executor runs where.
+
+### Pods
+
+The Compose Spec has no equivalent. `x-podman-pod: true` at the top level
+puts every service of the project into one Podman pod, named after the
+project, with a shared network namespace. Nothing else in the file changes
+meaning; without the key `up` creates the containers on the project network
+as before.
+
+What changes inside the pod:
+
+- Services reach each other on `localhost`. `up` adds one `<service>:127.0.0.1`
+  host entry per service to the pod, so a compose file that says `db:5432`
+  keeps working; two services listening on the same container port now
+  collide, since they share the namespace, and podup cannot see that before
+  Podman does.
+- `ports:` are published by the pod, as the union of every service's list.
+  A container inside a pod cannot publish its own.
+- Only the network namespace is shared. UTS and IPC stay per container, so
+  `hostname:` keeps working. The user namespace is the pod's: a `userns_mode`
+  every service declares alike (`auto`, say) is applied to the pod, and a
+  member cannot carry its own.
+- The pod carries the project's networks, the same set the containers would
+  have joined.
+- `up` creates the pod before the first container, prints `Creating`/`Created`
+  for it, and records a hash of the port set, the network set and the host
+  entries as a label. When a later `up` computes a different hash it recreates
+  the pod, prints `Recreating`/`Recreated`, and creates every container
+  afresh, since removing a pod removes its members. A change that leaves the
+  hash alone, such as a service's command or image, recreates only that
+  container, as today.
+- `down` removes the containers, then the pod (which takes the infra
+  container with it), then networks and volumes. `down --remove-orphans` also
+  removes a pod left behind under the project's label.
+- `ps` does not list the infra container.
+- `generate quadlet` writes one `<project>.pod` unit with the ports, the
+  networks and the host entries, and each `.container` unit references it
+  with `Pod=` and drops its own `PublishPort=` and `Network=` lines.
+
+What is refused, before anything is created, with the service and the key in
+the message:
+
+- `network_mode` on any service;
+- a service whose `networks:` set differs from another service's (every
+  service declares the same set, or none and gets the project default);
+- two services publishing the same host port, whichever host IPs they bind;
+- services that disagree on `userns_mode` (one sets it and another does not,
+  or they set different values).
+
+What it costs and what it saves, measured on 2026-09-03 with the `wide-level`
+benchmark scenario (42 services), 10 measured runs after 2 warm-up, twice,
+same binary, cores pinned: `up -d` 1.13 s on the project network against
+1.50 s in a pod; `down -v` 1.76 to 1.91 s against 1.39 to 1.40 s. Creation is
+slower inside a pod and teardown faster. The same 42 containers created one
+at a time from the `podman` CLI went the other way (4.7 s against 3.3 s), so
+the cost sits in how many creates run at once: `up` starts a level's
+containers concurrently, and a pod does not take that in parallel the way a
+network does. Choose a pod for `localhost` between services, one namespace to
+audit, and one place ports are published; not for a faster `up`.
 
 ### Healthcheck timing on a `service_healthy` gate
 

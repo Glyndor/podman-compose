@@ -249,6 +249,15 @@ pub fn generate_at(file: &ComposeFile, project: &str, base_dir: &std::path::Path
 		out.units.push(volume_unit(name, project, cfg.as_ref()));
 	}
 
+	// `x-podman-pod: true` opts the project into one-pod-per-project
+	// semantics: emit one `.pod` unit that carries the union of every
+	// service's ports/networks/host entries, and let the `.container`
+	// units reference it via `Pod=<stem>.pod`. No-op when the extension
+	// is not set.
+	if let Some(pod) = crate::quadlet::unit::pod_unit(project, file) {
+		out.units.push(pod);
+	}
+
 	let declared_volumes: Vec<&str> = file
 		.volumes
 		.iter()
@@ -268,6 +277,13 @@ pub fn generate_at(file: &ComposeFile, project: &str, base_dir: &std::path::Path
 		secrets: &file.secrets,
 		base_dir,
 		services: &file.services,
+		// `x-podman-pod: true` opts each container into the project pod,
+		// dropping the per-container `PublishPort=` / `Network=` lines that
+		// the pod now owns. A typo in the extension (anything other than a
+		// YAML bool) is treated as "not enabled" rather than failing the
+		// whole generate; the live engine rejects it earlier, so a
+		// generate that already passed validation never lands here.
+		pod_mode: file.podman_pod().unwrap_or(false),
 	};
 	for (name, service) in &file.services {
 		// Emit a `.build` unit first so the systemd generator builds the image
