@@ -778,7 +778,35 @@ keys; they are called out below.
 | Key | Where | What it does | Portable |
 |---|---|---|---|
 | `x-podman-on-failure` | under a service's `healthcheck:` | `none`, `kill`, `restart` or `stop` — what Podman does when the check flips to unhealthy. Default `none`. | yes |
+| `x-podman-autoupdate` | under a service | `registry` or `local`; see [Auto-update](#auto-update). | yes |
 | `noexec`, `nosuid`, `nodev` | under a long-form volume's `volume:` | mount-hardening flags; see [Per-mount hardening options](docker-migration.md#per-mount-hardening-options-noexec-nosuid-nodev). The short form carries them as raw mount options. | no |
+
+### Auto-update
+
+The Compose Spec has no equivalent. Podman's `auto-update` (driven by
+`podman-auto-update.timer`) only sees containers that carry the
+`io.containers.autoupdate` label, and podup does not emit it on its own.
+
+`x-podman-autoupdate` adds the label and arranges for the registry to be
+checked, so a stack started by `podup up` is no longer invisible to Podman's
+auto-update, and a Quadlet exported by `podup generate quadlet` carries
+`AutoUpdate=<value>` for systemd to set the same label.
+
+| Value | What it does |
+|---|---|
+| `registry` | The container carries `io.containers.autoupdate=registry`, and `podup up` pulls the image with policy `newer` so a moved tag recreates the container. `--pull <policy>` on the command line wins over the extension. |
+| `local` | The container carries `io.containers.autoupdate=local`: Podman's auto-update compares the container's image with the local image of the same name and restarts the unit when they differ, which is what a `podman build` that moved the tag looks like. `podup up` keeps the existing pull behaviour, and the same rebuilt image recreates the container through the config-hash and image-ID comparison it already does. |
+
+On `generate quadlet`, the value lands in the `[Container]` section as
+`AutoUpdate=<value>`. Quadlet derives the `io.containers.autoupdate` label
+itself, so the generator must not also emit a `Label=io.containers.autoupdate=...`
+line, which would duplicate the label and the unit would silently disagree
+with the Quadlet side.
+
+`podup autostart --auto-update <hourly|daily|weekly>` is the executor for
+service-mode stacks; Quadlet mode already uses `podman-auto-update.timer`,
+and start mode has no compose front-end on the boot path. See
+[docs/autostart.md](autostart.md#auto-update) for which executor runs where.
 
 ### Healthcheck timing on a `service_healthy` gate
 

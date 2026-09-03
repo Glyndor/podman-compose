@@ -69,6 +69,12 @@ pub(super) struct FakePodman {
 	/// that a best-effort pass attempted every container even after one of them
 	/// failed.
 	pub(super) requests: Arc<Mutex<Vec<String>>>,
+	/// The raw body bytes for every request answered so far, in the same order
+	/// as [`requests`](Self::requests). Empty for requests with no body or that
+	/// did not advertise a `Content-Length`. Tests that need to assert on the
+	/// JSON payload of a `POST` (e.g. the `SpecGenerator` sent to
+	/// `/containers/create`) read this.
+	pub(super) bodies: Arc<Mutex<Vec<Vec<u8>>>>,
 	_dir: tempfile::TempDir,
 	task: JoinHandle<()>,
 }
@@ -113,8 +119,10 @@ where
 	let listener = UnixListener::bind(&sock_path).expect("bind fake podman socket");
 	let respond: Arc<Responder> = Arc::new(respond);
 	let requests: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+	let bodies: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
 
 	let task_requests = requests.clone();
+	let task_bodies = bodies.clone();
 	let task = tokio::spawn(async move {
 		loop {
 			let Ok((stream, _)) = listener.accept().await else {
@@ -122,8 +130,9 @@ where
 			};
 			let respond = respond.clone();
 			let requests = task_requests.clone();
+			let bodies = task_bodies.clone();
 			tokio::spawn(async move {
-				let _ = serve_one(stream, respond.as_ref(), &requests).await;
+				let _ = serve_one(stream, respond.as_ref(), &requests, &bodies).await;
 			});
 		}
 	});
@@ -131,6 +140,7 @@ where
 	FakePodman {
 		sock_path,
 		requests,
+		bodies,
 		_dir: dir,
 		task,
 	}
@@ -143,6 +153,7 @@ async fn serve_one(
 	mut stream: UnixStream,
 	respond: &Responder,
 	requests: &Mutex<Vec<String>>,
+	bodies: &Mutex<Vec<Vec<u8>>>,
 ) -> std::io::Result<()> {
 	let mut buf = Vec::new();
 	let mut chunk = [0u8; 1024];
@@ -163,7 +174,48 @@ async fn serve_one(
 	let method = parts.next().unwrap_or_default().to_string();
 	let target = parts.next().unwrap_or_default().to_string();
 
+	// Capture the body so tests can assert on the JSON payload of a POST
+	// (e.g. the `SpecGenerator` sent to `/containers/create`). hyper reports
+	// the body size up front as `Content-Length`, so reading exactly that many
+	// bytes after the header terminator reaches the end of the request. A
+	// missing or non-numeric header leaves the body empty, which is what every
+	// pre-existing test relied on.
+	let content_length: Option<usize> = head
+		.lines()
+		.find_map(|l| {
+			l.strip_prefix("Content-Length: ")
+				.or_else(|| l.strip_prefix("content-length: "))
+		})
+		.and_then(|v| v.trim().parse::<usize>().ok());
+	let body = match content_length {
+		Some(n) if n > 0 => {
+			// Drain the bytes already read past the header terminator.
+			let head_end = head.find("\r\n\r\n").map(|i| i + 4).unwrap_or(buf.len());
+			let already = buf.len() - head_end;
+			let mut body = Vec::with_capacity(n);
+			if already >= n {
+				body.extend_from_slice(&buf[head_end..head_end + n]);
+			} else {
+				body.extend_from_slice(&buf[head_end..]);
+				let mut remaining = n - body.len();
+				let mut tail = [0u8; 1024];
+				while remaining > 0 {
+					let take = remaining.min(tail.len());
+					let n = stream.read(&mut tail[..take]).await?;
+					if n == 0 {
+						break;
+					}
+					body.extend_from_slice(&tail[..n]);
+					remaining -= n;
+				}
+			}
+			body
+		}
+		_ => Vec::new(),
+	};
+
 	requests.lock().unwrap().push(format!("{method} {target}"));
+	bodies.lock().unwrap().push(body);
 
 	match respond(&method, &target) {
 		FakeReply::Body(status, body) => {

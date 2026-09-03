@@ -268,11 +268,20 @@ impl Engine {
 	/// same resolved value — an override collapses the dedup (every service
 	/// resolves to the same policy), while differing per-service policies
 	/// (no override set) keep it split.
+	///
+	/// A service declaring `x-podman-autoupdate: registry` resolves to
+	/// `newer` when no `--pull` override is in effect, the extension's
+	/// whole point is to check the registry on every `up`. The CLI
+	/// override wins, because that is what `--pull` is for.
 	fn resolved_pull_policy(&self, service_name: &str, service: &Service) -> Result<&'static str> {
-		let requested = self
-			.pull_policy_override
-			.as_deref()
-			.or(service.pull_policy.as_deref());
+		let requested = self.pull_policy_override.as_deref().or_else(|| {
+			if let Ok(Some(crate::compose::types::AutoUpdate::Registry)) =
+				service.podman_autoupdate()
+			{
+				return Some("newer");
+			}
+			service.pull_policy.as_deref()
+		});
 		pull_policy_checked(requested, service_name)
 	}
 

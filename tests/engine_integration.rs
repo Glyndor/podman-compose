@@ -199,6 +199,9 @@ mod run_flags;
 #[path = "engine_integration/watch.rs"]
 mod watch_tests;
 
+#[path = "engine_integration/x_podman_autoupdate.rs"]
+mod x_podman_autoupdate;
+
 #[path = "engine_integration/cli_commands.rs"]
 mod cli_commands;
 #[path = "engine_integration/cli_flags.rs"]

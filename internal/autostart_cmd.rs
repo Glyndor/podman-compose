@@ -39,7 +39,15 @@ pub(crate) async fn dispatch(
 			mode: AutostartMode::Quadlet,
 			no_start,
 			dry_run,
+			auto_update,
 		} => {
+			if let Some(interval) = auto_update {
+				return Err(ComposeError::Autostart(format!(
+					"--auto-update is only valid with --mode service (got {}); quadlet mode already \
+					 drives auto-update through podman-auto-update.timer",
+					interval.as_str()
+				)));
+			}
 			// Quadlet mode hands the stack to systemd as native units rendered from
 			// the compose file. It still needs the base directory absolute: a
 			// `.build` unit's context is resolved by the systemd generator with no
@@ -58,6 +66,7 @@ pub(crate) async fn dispatch(
 			mode: AutostartMode::Service,
 			no_start,
 			dry_run,
+			auto_update,
 		} => {
 			// systemd has no relative-path context, so resolve the exe, every compose
 			// file, and the working directory to absolute paths the unit can embed.
@@ -86,14 +95,23 @@ pub(crate) async fn dispatch(
 				.with_max_stop_grace_secs(max_grace);
 			let opts = podup::autostart::InstallOptions::new(unit)
 				.with_no_start(*no_start)
-				.with_dry_run(*dry_run);
+				.with_dry_run(*dry_run)
+				.with_auto_update_interval(auto_update.map(|i| i.as_str().to_string()));
 			podup::autostart::install(&podup::autostart::RealSystemCtl, &opts)
 		}
 		AutostartCommands::Install {
 			mode: AutostartMode::Start,
 			no_start,
 			dry_run,
+			auto_update,
 		} => {
+			if let Some(interval) = auto_update {
+				return Err(ComposeError::Autostart(format!(
+					"--auto-update is only valid with --mode service (got {}); start mode has no \
+					 compose front-end on the boot path to run",
+					interval.as_str()
+				)));
+			}
 			// Start mode's whole point is that the boot path holds no compose
 			// file, so the container name has to be resolved here, once, and
 			// baked into the unit. `sole_container` is also the refusal: it is

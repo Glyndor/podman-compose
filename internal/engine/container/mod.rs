@@ -135,6 +135,24 @@ impl Engine {
 		// Per the Compose Specification, deploy.labels are set on the service
 		// only and must NOT be applied to containers, so they are not merged here.
 		let mut labels = resolve_container_labels(service, label_file_labels);
+		// The `x-podman-autoupdate` extension. Rejected at create time when the
+		// value is not one of Podman's two policies, so a typo cannot silently
+		// leave a container invisible to `podman auto-update`. Mirrors how
+		// `x-podman-on-failure` is rejected above (`health_check_on_failure_action`).
+		match service.podman_autoupdate() {
+			Ok(Some(policy)) => {
+				labels.insert(
+					"io.containers.autoupdate".to_string(),
+					policy.as_str().to_string(),
+				);
+			}
+			Ok(None) => {}
+			Err(e) => {
+				return Err(crate::error::ComposeError::Unsupported(format!(
+					"{service_name}: {e}"
+				)));
+			}
+		}
 		labels.insert("podup.project".to_string(), self.project.clone());
 		labels.insert("podup.service".to_string(), service_name.to_string());
 		labels.insert("podup.config-hash".to_string(), config_hash(service, file)?);
