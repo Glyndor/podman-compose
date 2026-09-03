@@ -70,6 +70,11 @@ pub(crate) fn pod_config_hash(parsed_ports: &[Vec<ParsedPort>], file: &ComposeFi
 	let hosts_value = serde_json::to_value(&hosts).expect("hosts serialise");
 	hasher.update(b"hosts");
 	hash_canon(&mut hasher, &hosts_value);
+	// The pod's user namespace is fixed at create time, so a change to it is
+	// a recreate.
+	let userns_value = serde_json::to_value(super::pod_userns(file)).expect("userns serialises");
+	hasher.update(b"userns");
+	hash_canon(&mut hasher, &userns_value);
 
 	hasher
 		.finalize()

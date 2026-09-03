@@ -171,7 +171,14 @@ impl Engine {
 		let ipcns = service.ipc.as_deref().map(Namespace::parse);
 		let utsns = service.uts.as_deref().map(Namespace::parse);
 		let cgroupns = service.cgroup.as_deref().map(Namespace::parse);
-		let userns = service.userns_mode.as_deref().map(Namespace::parse);
+		// In pod mode the user namespace is the pod's; a member must not set
+		// its own (Podman's CLI refuses the pair, and the API would give the
+		// member a namespace the pod does not share).
+		let userns = if in_pod {
+			None
+		} else {
+			service.userns_mode.as_deref().map(Namespace::parse)
+		};
 		let (image_os, image_arch) = service
 			.platform
 			.as_deref()

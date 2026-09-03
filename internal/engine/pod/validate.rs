@@ -75,6 +75,26 @@ pub(crate) fn validate_pod_or_refuse(file: &ComposeFile) -> Result<(), String> {
 	//    the same host_port bound to two different host IPs. Tracked by
 	//    (host_port, protocol) so a TCP and UDP on the same host port do
 	//    not falsely collide.
+	// A pod has one user namespace and Podman refuses a member with its own,
+	// so every service declares the same `userns_mode`, or none.
+	let mut userns: Option<(&str, Option<&str>)> = None;
+	for (name, service) in &services {
+		let mode = service.userns_mode.as_deref();
+		match userns {
+			None => userns = Some((name, mode)),
+			Some((first, first_mode)) if first_mode != mode => {
+				return Err(format!(
+					"service \"{name}\": userns_mode {} does not match service \"{first}\"'s {}; \
+					 x-podman-pod gives the pod one user namespace, so every service declares \
+					 the same userns_mode (or none)",
+					mode.map_or("(unset)".to_string(), |m| format!("{m:?}")),
+					first_mode.map_or("(unset)".to_string(), |m| format!("{m:?}")),
+				));
+			}
+			_ => {}
+		}
+	}
+
 	let mut host_port_owner: std::collections::HashMap<(u16, String), String> =
 		std::collections::HashMap::new();
 	for (name, service) in &services {

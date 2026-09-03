@@ -14,6 +14,9 @@ mod validate;
 mod validate_tests;
 
 #[cfg(all(test, unix))]
+#[path = "engine_more_tests.rs"]
+mod engine_more_tests;
+#[cfg(all(test, unix))]
 #[path = "engine_tests.rs"]
 mod engine_tests;
 
@@ -79,6 +82,15 @@ where
 /// infra container carries the same attachment list as every joined
 /// service would, so a service that pinned `aliases:` would still see its
 /// name on the network.
+/// The `userns_mode` every service agrees on, applied to the pod. Validation
+/// refused the project before this runs when the services disagree, so the
+/// first service's value is the project's.
+pub(super) fn pod_userns(file: &crate::compose::types::ComposeFile) -> Option<&str> {
+	file.services
+		.values()
+		.find_map(|s| s.userns_mode.as_deref())
+}
+
 pub(super) fn pod_networks(
 	file: &crate::compose::types::ComposeFile,
 	project: &str,
@@ -126,5 +138,6 @@ pub(super) fn build_pod_spec_with_hash(
 		},
 		networks,
 		hostadd: hostadd_for_services(file.services.keys()),
+		userns: pod_userns(file).map(crate::libpod::types::container::Namespace::parse),
 	}
 }

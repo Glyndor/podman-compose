@@ -13,6 +13,7 @@ fn pod_spec_serialises_with_known_field_names() {
 	labels.insert("podup.pod-config-hash".to_string(), "abc".to_string());
 	let spec = PodSpecGenerator {
 		netns: None,
+		userns: None,
 		name: "demo".to_string(),
 		labels,
 		shared_namespaces: vec!["net".to_string()],

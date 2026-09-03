@@ -885,7 +885,9 @@ What changes inside the pod:
 - `ports:` are published by the pod, as the union of every service's list.
   A container inside a pod cannot publish its own.
 - Only the network namespace is shared. UTS and IPC stay per container, so
-  `hostname:` keeps working.
+  `hostname:` keeps working. The user namespace is the pod's: a `userns_mode`
+  every service declares alike (`auto`, say) is applied to the pod, and a
+  member cannot carry its own.
 - The pod carries the project's networks, the same set the containers would
   have joined.
 - `up` creates the pod before the first container, prints `Creating`/`Created`
@@ -909,7 +911,9 @@ the message:
 - `network_mode` on any service;
 - a service whose `networks:` set differs from another service's (every
   service declares the same set, or none and gets the project default);
-- two services publishing the same host port, whichever host IPs they bind.
+- two services publishing the same host port, whichever host IPs they bind;
+- services that disagree on `userns_mode` (one sets it and another does not,
+  or they set different values).
 
 What it costs and what it saves, measured on 2026-09-03 with the `wide-level`
 benchmark scenario (42 services), 10 measured runs after 2 warm-up, twice,

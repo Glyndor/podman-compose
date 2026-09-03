@@ -230,3 +230,48 @@ async fn down_removes_the_pod() {
 	);
 	assert!(gone, "down must remove the pod");
 }
+
+/// A `userns_mode` every service declares is applied to the pod, so a member
+/// runs in that user namespace without carrying the key itself.
+#[tokio::test]
+async fn a_pod_takes_the_services_user_namespace() {
+	if podman().await.is_none() {
+		return;
+	}
+	let dir = tempfile::tempdir().unwrap();
+	let proj = proj("pod-userns");
+	let yaml = "x-podman-pod: true\nservices:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    userns_mode: auto\n  db:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    userns_mode: auto\n";
+	let path = dir.path().join("docker-compose.yml");
+	fs::write(&path, yaml).unwrap();
+	let compose = path.to_str().unwrap().to_string();
+	let up = Command::new(bin())
+		.args(["-f", &compose, "-p", &proj, "up", "-d"])
+		.output()
+		.unwrap();
+	let in_pod = Command::new("podman")
+		.args([
+			"exec",
+			&format!("{proj}-web-1"),
+			"cat",
+			"/proc/self/uid_map",
+		])
+		.output()
+		.unwrap();
+	let plain = Command::new("podman")
+		.args(["run", "--rm", "alpine:latest", "cat", "/proc/self/uid_map"])
+		.output()
+		.unwrap();
+	down(&compose, &proj);
+	assert!(
+		up.status.success(),
+		"up failed: {}",
+		String::from_utf8_lossy(&up.stderr)
+	);
+	let in_pod = String::from_utf8_lossy(&in_pod.stdout).to_string();
+	let plain = String::from_utf8_lossy(&plain.stdout).to_string();
+	assert_ne!(
+		in_pod.trim(),
+		plain.trim(),
+		"a member of a pod created with userns auto must not run in the default rootless mapping"
+	);
+}
