@@ -34,6 +34,7 @@ mod lifecycle;
 mod lock;
 mod names;
 mod network;
+mod pod;
 mod profiles;
 pub use profiles::{retain_active_profiles, retain_active_profiles_with_targets};
 mod projects;

@@ -836,6 +836,7 @@ keys; they are called out below.
 | Key | Where | What it does | Portable |
 |---|---|---|---|
 | `x-podman-on-failure` | under a service's `healthcheck:` | `none`, `kill`, `restart` or `stop` — what Podman does when the check flips to unhealthy. Default `none`. | yes |
+| `x-podman-pod` | top level | `true` puts every service of the project into one Podman pod named after the project; see [Pods](#pods). | yes |
 | `x-podman-autoupdate` | under a service | `registry` or `local`; see [Auto-update](#auto-update). | yes |
 | `noexec`, `nosuid`, `nodev` | under a long-form volume's `volume:` | mount-hardening flags; see [Per-mount hardening options](docker-migration.md#per-mount-hardening-options-noexec-nosuid-nodev). The short form carries them as raw mount options. | no |
 
@@ -865,6 +866,54 @@ with the Quadlet side.
 service-mode stacks; Quadlet mode already uses `podman-auto-update.timer`,
 and start mode has no compose front-end on the boot path. See
 [docs/autostart.md](autostart.md#auto-update) for which executor runs where.
+
+### Pods
+
+The Compose Spec has no equivalent. `x-podman-pod: true` at the top level
+puts every service of the project into one Podman pod, named after the
+project, with a shared network namespace. Nothing else in the file changes
+meaning; without the key `up` creates the containers on the project network
+as before.
+
+What changes inside the pod:
+
+- Services reach each other on `localhost`. `up` adds one `<service>:127.0.0.1`
+  host entry per service to the pod, so a compose file that says `db:5432`
+  keeps working; two services listening on the same container port now
+  collide, since they share the namespace, and podup cannot see that before
+  Podman does.
+- `ports:` are published by the pod, as the union of every service's list.
+  A container inside a pod cannot publish its own.
+- Only the network namespace is shared. UTS and IPC stay per container, so
+  `hostname:` keeps working.
+- The pod carries the project's networks, the same set the containers would
+  have joined.
+- `up` creates the pod before the first container, prints `Creating`/`Created`
+  for it, and records a hash of the port set, the network set and the host
+  entries as a label. When a later `up` computes a different hash it recreates
+  the pod, prints `Recreating`/`Recreated`, and creates every container
+  afresh, since removing a pod removes its members. A change that leaves the
+  hash alone, such as a service's command or image, recreates only that
+  container, as today.
+- `down` removes the containers, then the pod (which takes the infra
+  container with it), then networks and volumes. `down --remove-orphans` also
+  removes a pod left behind under the project's label.
+- `ps` does not list the infra container.
+- `generate quadlet` writes one `<project>.pod` unit with the ports, the
+  networks and the host entries, and each `.container` unit references it
+  with `Pod=` and drops its own `PublishPort=` and `Network=` lines.
+
+What is refused, before anything is created, with the service and the key in
+the message:
+
+- `network_mode` on any service;
+- a service whose `networks:` set differs from another service's (every
+  service declares the same set, or none and gets the project default);
+- two services publishing the same host port, or the same port on different
+  host IPs.
+
+Measured on 2026-09-03 with 42 containers, three runs each: creation on a
+bridge network 4.65 to 4.72 s, inside a pod 3.27 to 3.60 s; teardown equal.
 
 ### Healthcheck timing on a `service_healthy` gate
 

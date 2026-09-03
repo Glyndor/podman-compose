@@ -5,35 +5,33 @@ use std::collections::HashMap;
 
 use crate::compose::types::{ComposeFile, Service};
 use crate::error::{ComposeError, Result};
-use crate::libpod::types::container::{LinuxResources, Namespace, SpecGenerator};
+use crate::libpod::types::container::{LinuxResources, Namespace};
 use crate::libpod::urlencoded;
 use crate::libpod::validate::pre_validate_spec;
 use crate::libpod::API_PREFIX;
-use crate::{ports, size};
+use crate::size;
 
 mod fields;
 mod host_mode;
+mod inputs;
 mod resolve;
+mod rootless;
 mod security;
-use resolve::{
-	build_env, resolve_links, resolve_stop_signal, resolve_volume_name, resolve_volumes_from,
-};
+mod spec;
+use resolve::{build_env, resolve_links, resolve_stop_signal, resolve_volumes_from};
 pub(crate) use resolve::{config_hash, resolve_bind_source};
+pub(crate) use spec::{build_spec_generator, NamespaceInputs, SecurityInputs, SpecInputs};
 
 pub(crate) use host_mode::check_host_mode;
 
 use super::container_config::{
-	build_healthcheck, build_log_config, build_resource_limits, build_restart_policy,
-	build_ulimits, cdi_devices,
+	build_healthcheck, build_log_config, build_resource_limits, build_restart_policy, build_ulimits,
 };
 use super::network::resolve_network_mode;
 use super::volume_mounts::build_mounts_all;
 use super::Engine;
-use fields::{
-	build_blkio_config, build_label_file_labels, encode_path_for_label, parse_device,
-	resolve_container_labels, warn_swarm_only_deploy,
-};
-use security::{cdi_device, parse_device_cgroup_rule, parse_security_opts};
+use fields::{build_blkio_config, warn_swarm_only_deploy};
+use security::parse_security_opts;
 
 impl Engine {
 	pub(super) async fn create_and_start(
@@ -102,24 +100,14 @@ impl Engine {
 		}
 
 		// --- Port mappings ---
-		let parsed_ports = ports::parse_ports(&service.ports)?;
-		let portmappings = ports::to_libpod(&parsed_ports);
-
-		// expose map: port_num → protocol
-		let mut expose: HashMap<u16, String> = parsed_ports
-			.iter()
-			.map(|p| (p.container_port, p.protocol.clone()))
-			.collect();
-		for raw in &service.expose {
-			let (port_str, proto) = if let Some(idx) = raw.rfind('/') {
-				(&raw[..idx], raw[idx + 1..].to_string())
-			} else {
-				(raw.as_str(), "tcp".to_string())
-			};
-			if let Ok(p) = port_str.parse::<u16>() {
-				expose.entry(p).or_insert(proto);
-			}
-		}
+		// In pod mode the pod publishes every service's ports: a container
+		// inside a pod cannot publish ports of its own, so the per-container
+		// list is empty. The pod already aggregated the union via
+		// `Engine::ensure_pod`; sending ports here would conflict.
+		let in_pod = file
+			.podman_pod()
+			.map_err(crate::error::ComposeError::Unsupported)?;
+		let (portmappings, expose) = self.compute_portmappings_and_expose(service, in_pod)?;
 
 		// --- Restart policy ---
 		let (restart_policy, restart_tries) = build_restart_policy(service);
@@ -128,50 +116,19 @@ impl Engine {
 		let log_configuration = build_log_config(service_name, service.logging.as_ref())?;
 
 		// --- Networks ---
-		let (netns, networks) = resolve_network_mode(service_name, service, file, &self.project);
+		// In pod mode the container joins the pod's shared namespace, so its
+		// own `networks:` map and `netns` are empty. Pod mode rejects any
+		// service carrying `network_mode:` up front (see
+		// `validate_pod_or_refuse`), so the only branch here is "no
+		// per-container networks".
+		let (netns, networks) = if in_pod {
+			(None, HashMap::new())
+		} else {
+			resolve_network_mode(service_name, service, file, &self.project)
+		};
 
 		// --- Labels ---
-		let label_file_labels = build_label_file_labels(service, &self.base_dir)?;
-		// Per the Compose Specification, deploy.labels are set on the service
-		// only and must NOT be applied to containers, so they are not merged here.
-		let mut labels = resolve_container_labels(service, label_file_labels);
-		// The `x-podman-autoupdate` extension. Rejected at create time when the
-		// value is not one of Podman's two policies, so a typo cannot silently
-		// leave a container invisible to `podman auto-update`. Mirrors how
-		// `x-podman-on-failure` is rejected above (`health_check_on_failure_action`).
-		match service.podman_autoupdate() {
-			Ok(Some(policy)) => {
-				labels.insert(
-					"io.containers.autoupdate".to_string(),
-					policy.as_str().to_string(),
-				);
-			}
-			Ok(None) => {}
-			Err(e) => {
-				return Err(crate::error::ComposeError::Unsupported(format!(
-					"{service_name}: {e}"
-				)));
-			}
-		}
-		labels.insert("podup.project".to_string(), self.project.clone());
-		labels.insert("podup.service".to_string(), service_name.to_string());
-		labels.insert("podup.config-hash".to_string(), config_hash(service, file)?);
-		// Where this project's compose file lives. `ls` discovers projects purely
-		// by label and keeps no other record, so without this its `ConfigFiles`
-		// column can only ever be blank. Omitted rather than written empty when the
-		// caller did not supply the paths, so a reader can tell "not recorded" from
-		// "recorded as nothing".
-		if !self.compose_files.is_empty() {
-			let joined = self
-				.compose_files
-				.iter()
-				// URL-encode any `,` so a path containing one cannot visually merge
-				// with the next entry when the joined label is split back on `,`.
-				.map(|p| encode_path_for_label(&p.display().to_string()))
-				.collect::<Vec<_>>()
-				.join(",");
-			labels.insert("podup.config-files".to_string(), joined);
-		}
+		let labels = self.compute_container_labels(service, file, service_name)?;
 
 		// annotations
 		let annotations: HashMap<String, String> = service.annotations.to_map();
@@ -191,32 +148,10 @@ impl Engine {
 		let ulimits = build_ulimits(service);
 
 		// --- Devices ---
-		let mut devices: Vec<_> = Vec::with_capacity(service.devices.len());
-		// A device's `:permissions` segment cannot live on the OCI node, so it
-		// rides alongside as a cgroup access rule (mirroring the quadlet backend's
-		// verbatim `AddDevice`). These are merged with the explicit
-		// `device_cgroup_rules` below.
-		let mut device_cgroup_rule: Vec<_> = Vec::new();
-		for raw in &service.devices {
-			let parsed = parse_device(raw);
-			if let Some(rule) = parsed.cgroup_rule {
-				device_cgroup_rule.push(rule);
-			}
-			devices.push(parsed.device);
-		}
-		// CDI device names ride in the same array; Podman pulls them out by path.
-		devices.extend(cdi_devices(service).into_iter().map(cdi_device));
+		let (devices, device_cgroup_rule) = self.compute_devices_and_rules(service);
 
 		// --- Security options (decomposed onto SpecGenerator fields) ---
 		let security = parse_security_opts(service);
-
-		// --- Device cgroup rules (parsed to structured form; skip malformed) ---
-		device_cgroup_rule.extend(service.device_cgroup_rules.iter().filter_map(|r| {
-			parse_device_cgroup_rule(r).or_else(|| {
-				tracing::warn!("device_cgroup_rules entry '{r}' is malformed and is ignored");
-				None
-			})
-		}));
 
 		// Pre-validate the `SpecGenerator` fields libpod validates on its own
 		// (namespace modes, `device_cgroup_rule` access strings), so a rejected
@@ -231,31 +166,20 @@ impl Engine {
 			.collect();
 		pre_validate_spec(service_name, service, &device_cgroup_access)?;
 
-		// --- Namespace modes ---
+		// --- Namespace modes, platform, links, volumes_from ---
 		let pidns = service.pid.as_deref().map(Namespace::parse);
 		let ipcns = service.ipc.as_deref().map(Namespace::parse);
 		let utsns = service.uts.as_deref().map(Namespace::parse);
 		let cgroupns = service.cgroup.as_deref().map(Namespace::parse);
 		let userns = service.userns_mode.as_deref().map(Namespace::parse);
-
-		// --- Platform → os / arch ---
 		let (image_os, image_arch) = service
 			.platform
 			.as_deref()
 			.and_then(|p| p.split_once('/'))
 			.map(|(os, arch)| (Some(os.to_string()), Some(arch.to_string())))
 			.unwrap_or((None, None));
-
-		// --- Links ---
 		let links = resolve_links(service, file, &self.project);
-
-		// --- volumes_from ---
 		let volumes_from = resolve_volumes_from(service, file, &self.project);
-
-		// --- SHM size ---
-		let shm_size = service.shm_size.as_deref().and_then(size::parse_memory);
-
-		// --- Stop timeout ---
 		let stop_timeout = service
 			.stop_grace_period
 			.as_deref()
@@ -268,7 +192,7 @@ impl Engine {
 			);
 		}
 
-		for warning in rootless_caveat_warnings(service_name, service) {
+		for warning in rootless::rootless_caveat_warnings(service_name, service) {
 			tracing::warn!("{warning}");
 		}
 
@@ -290,59 +214,12 @@ impl Engine {
 			.map(resolve_stop_signal)
 			.transpose()?;
 
-		let spec = SpecGenerator {
-			name: container_name.to_string(),
-			image: image.to_string(),
-			command: service.command.as_ref().map(|c| c.to_exec()),
-			entrypoint: service.entrypoint.as_ref().map(|c| c.to_exec()),
-			env,
-			terminal: service.tty,
-			stdin: service.stdin_open,
-			user: service.user.clone(),
-			work_dir: service.working_dir.clone(),
-			stop_signal,
-			stop_timeout,
-			hostname: service.hostname.clone(),
-			domainname: service.domainname.clone(),
-			labels,
-			annotations,
-			cap_add: service.cap_add.clone(),
-			cap_drop: service.cap_drop.clone(),
-			privileged: service.privileged,
-			read_only_filesystem: service.read_only,
-			selinux_opts: security.selinux_opts,
-			apparmor_profile: security.apparmor_profile,
-			seccomp_profile_path: security.seccomp_profile_path,
-			no_new_privileges: security.no_new_privileges,
-			mask: security.mask,
-			unmask: security.unmask,
-			sysctl,
-			expose,
-			portmappings,
-			networks,
-			netns,
-			extra_hosts: service.extra_hosts.clone(),
-			dns_server: service.dns.to_list(),
-			dns_search: service.dns_search.to_list(),
-			dns_option: service.dns_opt.to_list(),
-			mounts,
-			volumes: named_volumes,
-			volumes_from,
-			secrets: native_secrets,
-			userns,
-			pidns,
-			ipcns,
-			utsns,
-			cgroupns,
-			cgroup_parent: service.cgroup_parent.clone(),
-			resource_limits,
-			ulimits,
-			shm_size,
-			healthconfig: service.healthcheck.as_ref().map(build_healthcheck),
-			// The `x-podman-on-failure` extension. Rejected at create time when the
-			// value is not one of Podman's four actions, so a typo cannot silently
-			// leave a sick container in rotation.
-			health_check_on_failure_action: match service
+		let spec = build_spec_generator(
+			&self.project,
+			service,
+			service.healthcheck.as_ref().map(build_healthcheck),
+			log_configuration,
+			match service
 				.healthcheck
 				.as_ref()
 				.map(crate::compose::types::HealthCheck::podman_on_failure)
@@ -368,21 +245,50 @@ impl Engine {
 					)))
 				}
 			},
-			log_configuration,
-			init: service.init,
-			restart_policy,
-			restart_tries,
-			devices,
-			device_cgroup_rule,
-			groups: service.group_add.clone(),
-			oom_score_adj: service.oom_score_adj,
-			runtime: service.runtime.clone(),
-			links,
-			image_os,
-			image_arch,
-			storage_opts: service.storage_opt.clone(),
-			..Default::default()
-		};
+			SpecInputs {
+				in_pod,
+				container_name: container_name.to_string(),
+				image: image.to_string(),
+				portmappings,
+				expose,
+				networks,
+				netns,
+				labels,
+				annotations,
+				sysctl,
+				resource_limits,
+				ulimits,
+				mounts,
+				named_volumes,
+				volumes_from,
+				native_secrets,
+				devices,
+				device_cgroup_rule,
+				security: SecurityInputs {
+					selinux_opts: security.selinux_opts,
+					apparmor_profile: security.apparmor_profile,
+					seccomp_profile_path: security.seccomp_profile_path,
+					no_new_privileges: security.no_new_privileges,
+					mask: security.mask,
+					unmask: security.unmask,
+				},
+				namespaces: NamespaceInputs {
+					userns,
+					pidns,
+					ipcns,
+					utsns,
+					cgroupns,
+				},
+				restart: (restart_policy, restart_tries),
+				stop_signal_timeout: (stop_signal, stop_timeout),
+				command: service.command.as_ref().map(|c| c.to_exec()),
+				entrypoint: service.entrypoint.as_ref().map(|c| c.to_exec()),
+				env,
+				links,
+				image_platform: (image_os, image_arch),
+				storage_opts: service.storage_opt.clone(),
+			},
+		)?;
 
 		// Remove any existing container (idempotent restart). `up
 		// -V/--renew-anon-volumes` also drops its old anonymous volumes (v=true)
@@ -416,68 +322,4 @@ impl Engine {
 
 		Ok(())
 	}
-
-	/// Resolve a service's named-volume reference to the actual volume name
-	/// that `create_volumes` produced: a custom `name:`, the raw name for an
-	/// external volume, or the `{project}_{name}` form. An empty reference is an
-	/// anonymous volume and is left unchanged; a non-empty reference that is not
-	/// declared under the top-level `volumes:` map is rejected (compose-spec).
-	fn resolved_volume_name(&self, reference: &str, file: &ComposeFile) -> Result<String> {
-		resolve_volume_name(reference, &self.project, file)
-	}
 }
-
-/// Compose fields Podman accepts but cannot honor (or that fail) under rootless
-/// Podman on cgroups v2. Returns advisory messages; pure so it can be
-/// unit-tested. The wording mirrors podman-run(1) so operators are not misled
-/// into assuming a no-op limit took effect.
-fn rootless_caveat_warnings(name: &str, service: &Service) -> Vec<String> {
-	let mut out = Vec::new();
-	if service.privileged == Some(true) {
-		out.push(format!(
-			"service \"{name}\": privileged has reduced effect under rootless Podman — a \
-			container cannot gain more privileges than the user that launched it"
-		));
-	}
-	if service.oom_kill_disable.is_some() {
-		out.push(format!(
-			"service \"{name}\": oom_kill_disable is not supported on cgroups v2 systems and \
-			is ignored"
-		));
-	}
-	if service.mem_swappiness.is_some() {
-		out.push(format!(
-			"service \"{name}\": mem_swappiness is only supported on cgroups v1 rootful systems \
-			and is ignored otherwise"
-		));
-	}
-	if service.cpu_rt_runtime.is_some() || service.cpu_rt_period.is_some() {
-		out.push(format!(
-			"service \"{name}\": cpu_rt_runtime/cpu_rt_period are only supported on cgroups v1 \
-			rootful systems; the container may fail to start rootless"
-		));
-	}
-	if !service.links.is_empty() {
-		out.push(format!(
-			"service \"{name}\": links has no effect under rootless Podman networking — put the \
-			services on a shared network and reach them by service name instead"
-		));
-	}
-	if !service.external_links.is_empty() {
-		out.push(format!(
-			"service \"{name}\": external_links has no effect under rootless Podman networking — \
-			attach the target container to a shared network and reach it by service name instead"
-		));
-	}
-	out
-}
-
-#[cfg(test)]
-#[path = "mod_tests.rs"]
-mod tests;
-
-// The fake Podman speaks over a Unix socket, so this test does not build
-// on Windows, like every other test that starts it.
-#[cfg(all(test, unix))]
-#[path = "spec_body_tests.rs"]
-mod spec_body_tests;

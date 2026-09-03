@@ -19,7 +19,7 @@ use crate::compose::types::{ComposeFile, ServiceCondition};
 use crate::engine::Engine;
 use crate::error::ComposeError;
 
-use super::in_started_set;
+use super::targets::in_started_set;
 
 /// A `wait_healthy` future shared across every dependent of one container, so a
 /// service that N others wait on has its healthcheck polled by a single poller

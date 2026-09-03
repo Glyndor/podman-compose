@@ -77,9 +77,10 @@ impl Engine {
 		// waits on their conditions), unless `--no-deps` is given. The service
 		// itself is excluded — only its transitive dependencies are started.
 		if !no_deps {
-			let deps: Vec<String> = super::expand_targets(file, &[service_name.to_string()], false)
-				.map(|set| set.into_iter().filter(|n| n != service_name).collect())
-				.unwrap_or_default();
+			let deps: Vec<String> =
+				super::targets::expand_targets(file, &[service_name.to_string()], false)
+					.map(|set| set.into_iter().filter(|n| n != service_name).collect())
+					.unwrap_or_default();
 			if !deps.is_empty() {
 				self.up_with_options(file, true, &[], &deps, false, false, false)
 					.await?;
@@ -183,6 +184,17 @@ impl Engine {
 		// per-container build path), so materialise them here too before the run
 		// container is created.
 		self.create_project_secrets(file).await?;
+		// `x-podman-pod`: ensure the pod exists with the current hash. A run
+		// container joins the same pod as the project's `up` would.
+		if file.podman_pod().map_err(ComposeError::Unsupported)? {
+			let pod_ports: Vec<Vec<crate::ports::ParsedPort>> = file
+				.services
+				.values()
+				.map(|s| crate::ports::parse_ports(&s.ports))
+				.collect::<crate::error::Result<Vec<_>>>()?;
+			// `run` creates one fresh container, so a recreated pod changes nothing here.
+			self.ensure_pod(file, &pod_ports).await?;
+		}
 
 		// Refuse to clobber a pre-existing container of the same name (data-loss
 		// footgun): `create_and_start` would force-remove it. Only the verbatim

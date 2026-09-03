@@ -242,3 +242,6 @@ mod scale;
 mod start_restores_config;
 #[path = "engine_integration/stats_flags.rs"]
 mod stats_flags;
+
+#[path = "engine_integration/x_podman_pod.rs"]
+mod x_podman_pod;

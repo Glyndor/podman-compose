@@ -27,6 +27,8 @@ fn entry(status: &str, state: &str) -> ContainerListEntry {
 		// Absent by default: libpod only fills this when the request asked, and
 		// the tests that render the cell set it explicitly.
 		size: None,
+		// Absent on regular containers; infra containers set it explicitly.
+		is_infra: false,
 	}
 }
 
@@ -521,6 +523,7 @@ fn ps_json_row_surfaces_state_exitcode_and_publishers() {
 		started_at: 1_785_728_082,
 		created: "2026-08-02T22:34:41.982670-05:00".into(),
 		size: None,
+		is_infra: false,
 	};
 	let row = ps_json_row(&c);
 	assert_eq!(row["Name"], "demo-web-1");
