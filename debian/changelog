@@ -1,3 +1,28 @@
+podup (5.8.0) unstable; urgency=medium
+
+  * `x-podman-pod: true` at the top level puts every service of a project
+    into one Podman pod named after the project: one shared network namespace,
+    ports published by the pod, services reaching each other on localhost, and
+    a `.pod` unit from `generate quadlet`. Opt-in; a project that does not fit
+    (network_mode, differing network sets, duplicate host ports) is refused
+    before anything is created. Measured on 42 services: creation slower than
+    on a project network, teardown faster.
+  * `x-podman-autoupdate: registry|local` on a service puts Podman's
+    auto-update label on the container, pulls a `registry` service with policy
+    `newer` on every `up`, lands as `AutoUpdate=` in the exported Quadlet, and
+    `autostart --mode service --auto-update hourly|daily|weekly` installs a
+    timer that runs `up -d` for stacks that are not under Quadlet.
+  * `podup audit` prints one row per service naming the hardening it did not
+    ask for (privileged, host namespaces, dangerous capabilities, writable
+    root, no cap_drop ALL, no no-new-privileges, no pids or memory limit, no
+    userns_mode, secrets in environment, unpinned images); `--strict` exits 1
+    for CI, `--format json` for machines. No check changes what `up` does.
+  * Documentation: what the host's image signature policy and `userns_mode:
+    auto` give a podup user, measured. The validated Podman baseline moves to
+    6.1.1.
+
+ -- Jose <75870284+Jaro-c@users.noreply.github.com>  Thu, 03 Sep 2026 15:29:42 -0500
+
 podup (5.7.1) unstable; urgency=medium
 
   * The arm64 Linux binary and the arm64 Debian package are now static
