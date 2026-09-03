@@ -476,6 +476,8 @@ fn rootless_caveat_warnings(name: &str, service: &Service) -> Vec<String> {
 #[path = "mod_tests.rs"]
 mod tests;
 
-#[cfg(test)]
+// The fake Podman speaks over a Unix socket, so this test does not build
+// on Windows, like every other test that starts it.
+#[cfg(all(test, unix))]
 #[path = "spec_body_tests.rs"]
 mod spec_body_tests;
