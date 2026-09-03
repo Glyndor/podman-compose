@@ -159,6 +159,14 @@ pub struct ComposeFile {
 	pub extensions: IndexMap<String, serde_yaml::Value>,
 }
 
+/// Compose-spec top-level extension key that opts the project into running
+/// every service inside one Podman pod. Mirrors the `x-podman-autoupdate`
+/// shape: a top-level `x-` extension key parsed from the file's captured
+/// extension map so the compose file stays portable to docker compose. The
+/// value is a boolean; `true` enables the feature, anything else is rejected
+/// with a message naming the key (see [`ComposeFile::podman_pod`]).
+pub const X_PODMAN_POD: &str = "x-podman-pod";
+
 /// Placeholder substituted for inline secret/config `content:` values when the
 /// file is rendered for display.
 pub const REDACTED_PLACEHOLDER: &str = "<redacted>";
@@ -221,6 +229,24 @@ impl ComposeFile {
 			if let Some(provider) = svc.provider.as_mut() {
 				retain_extension_keys(&mut provider.unknown);
 			}
+		}
+	}
+
+	/// Whether the `x-podman-pod: true` extension is set on this compose file.
+	/// `Ok(true)` opts the project into one-pod-per-project semantics;
+	/// `Ok(false)` (the default) keeps the existing per-network shape. A
+	/// value that is not a YAML boolean is rejected with a message naming the
+	/// key, so a typo or stray quote is reported rather than silently dropped.
+	///
+	/// Mirrors `Service::podman_autoupdate`, which reads the same shape from a
+	/// per-service unknown map; here the key is at the top level.
+	pub fn podman_pod(&self) -> std::result::Result<bool, String> {
+		let Some(raw) = self.extensions.get(X_PODMAN_POD) else {
+			return Ok(false);
+		};
+		match raw.as_bool() {
+			Some(value) => Ok(value),
+			None => Err(format!("{X_PODMAN_POD} must be a boolean (expected: true)")),
 		}
 	}
 }

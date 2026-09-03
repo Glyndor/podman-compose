@@ -106,6 +106,16 @@ impl Engine {
 		// `remove_orphans` before teardown. Removing them unconditionally here
 		// made that flag a no-op.
 
+		// `x-podman-pod`: remove the pod (and its infra container) after the
+		// project's containers are gone and before the network sweep. `down`
+		// without the extension is unchanged.
+		if file
+			.podman_pod()
+			.map_err(crate::error::ComposeError::Unsupported)?
+		{
+			self.remove_pod().await?;
+		}
+
 		for (key, config) in &file.networks {
 			let external = config.as_ref().and_then(|c| c.external).unwrap_or(false);
 			if external {

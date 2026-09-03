@@ -19,6 +19,14 @@ pub struct SpecGenerator {
 	/// Image reference to run (name:tag or digest).
 	pub image: String,
 
+	/// Name of an existing pod to attach this container to. When set, the
+	/// container joins the pod's network namespace (the pod publishes any host
+	/// ports itself, so the container's own `portmappings`/`networks`/`netns`
+	/// stay empty in pod mode). Wire name is `pod`; without the rename the
+	/// field would be silently dropped.
+	#[serde(rename = "pod", skip_serializing_if = "Option::is_none")]
+	pub pod: Option<String>,
+
 	/// Command (`CMD`) override; replaces the image's default command.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub command: Option<Vec<String>>,

@@ -836,6 +836,7 @@ keys; they are called out below.
 | Key | Where | What it does | Portable |
 |---|---|---|---|
 | `x-podman-on-failure` | under a service's `healthcheck:` | `none`, `kill`, `restart` or `stop` — what Podman does when the check flips to unhealthy. Default `none`. | yes |
+| `x-podman-pod` | top level | `true` puts every service of the project into one Podman pod named after the project; see [Pods](#pods). | yes |
 | `x-podman-autoupdate` | under a service | `registry` or `local`; see [Auto-update](#auto-update). | yes |
 | `noexec`, `nosuid`, `nodev` | under a long-form volume's `volume:` | mount-hardening flags; see [Per-mount hardening options](docker-migration.md#per-mount-hardening-options-noexec-nosuid-nodev). The short form carries them as raw mount options. | no |
 
@@ -865,6 +866,61 @@ with the Quadlet side.
 service-mode stacks; Quadlet mode already uses `podman-auto-update.timer`,
 and start mode has no compose front-end on the boot path. See
 [docs/autostart.md](autostart.md#auto-update) for which executor runs where.
+
+### Pods
+
+The Compose Spec has no equivalent. `x-podman-pod: true` at the top level
+puts every service of the project into one Podman pod, named after the
+project, with a shared network namespace. Nothing else in the file changes
+meaning; without the key `up` creates the containers on the project network
+as before.
+
+What changes inside the pod:
+
+- Services reach each other on `localhost`. `up` adds one `<service>:127.0.0.1`
+  host entry per service to the pod, so a compose file that says `db:5432`
+  keeps working; two services listening on the same container port now
+  collide, since they share the namespace, and podup cannot see that before
+  Podman does.
+- `ports:` are published by the pod, as the union of every service's list.
+  A container inside a pod cannot publish its own.
+- Only the network namespace is shared. UTS and IPC stay per container, so
+  `hostname:` keeps working.
+- The pod carries the project's networks, the same set the containers would
+  have joined.
+- `up` creates the pod before the first container, prints `Creating`/`Created`
+  for it, and records a hash of the port set, the network set and the host
+  entries as a label. When a later `up` computes a different hash it recreates
+  the pod, prints `Recreating`/`Recreated`, and creates every container
+  afresh, since removing a pod removes its members. A change that leaves the
+  hash alone, such as a service's command or image, recreates only that
+  container, as today.
+- `down` removes the containers, then the pod (which takes the infra
+  container with it), then networks and volumes. `down --remove-orphans` also
+  removes a pod left behind under the project's label.
+- `ps` does not list the infra container.
+- `generate quadlet` writes one `<project>.pod` unit with the ports, the
+  networks and the host entries, and each `.container` unit references it
+  with `Pod=` and drops its own `PublishPort=` and `Network=` lines.
+
+What is refused, before anything is created, with the service and the key in
+the message:
+
+- `network_mode` on any service;
+- a service whose `networks:` set differs from another service's (every
+  service declares the same set, or none and gets the project default);
+- two services publishing the same host port, whichever host IPs they bind.
+
+What it costs and what it saves, measured on 2026-09-03 with the `wide-level`
+benchmark scenario (42 services), 10 measured runs after 2 warm-up, twice,
+same binary, cores pinned: `up -d` 1.13 s on the project network against
+1.50 s in a pod; `down -v` 1.76 to 1.91 s against 1.39 to 1.40 s. Creation is
+slower inside a pod and teardown faster. The same 42 containers created one
+at a time from the `podman` CLI went the other way (4.7 s against 3.3 s), so
+the cost sits in how many creates run at once: `up` starts a level's
+containers concurrently, and a pod does not take that in parallel the way a
+network does. Choose a pod for `localhost` between services, one namespace to
+audit, and one place ports are published; not for a faster `up`.
 
 ### Healthcheck timing on a `service_healthy` gate
 
