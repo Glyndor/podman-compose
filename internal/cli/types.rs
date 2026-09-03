@@ -101,6 +101,14 @@ pub(crate) enum AutostartCommands {
 		/// Print the unit and the actions that would run, but change nothing.
 		#[arg(long)]
 		dry_run: bool,
+		/// In service mode, install a sibling `<unit>-update.service` /
+		/// `<unit>-update.timer` pair that runs `podup up -d` on a schedule so
+		/// the stack stays fresh without human action. Accepted only with
+		/// `--mode service`; quadlet mode already drives auto-update through
+		/// `podman-auto-update.timer`, and start mode has no compose front-end
+		/// to run. `hourly`, `daily`, or `weekly`.
+		#[arg(long, value_enum)]
+		auto_update: Option<AutoUpdateInterval>,
 	},
 	/// Disable, stop, and remove this project's autostart unit.
 	Uninstall {
@@ -119,6 +127,29 @@ pub(crate) enum AutostartCommands {
 		/// Rebuild only this service; omit to rebuild every built service.
 		service: Option<String>,
 	},
+}
+
+/// How often the autostart `--auto-update` timer fires. The `as_str` form is
+/// the `OnCalendar=` value systemd expects, which is the same word.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum AutoUpdateInterval {
+	/// `OnCalendar=hourly`.
+	Hourly,
+	/// `OnCalendar=daily`.
+	Daily,
+	/// `OnCalendar=weekly`.
+	Weekly,
+}
+
+impl AutoUpdateInterval {
+	/// The `OnCalendar=` value systemd expects.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Hourly => "hourly",
+			Self::Daily => "daily",
+			Self::Weekly => "weekly",
+		}
+	}
 }
 
 /// Subcommands of `generate`.

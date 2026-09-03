@@ -150,6 +150,13 @@ individually justified with safety comments, and unit-tested.
     }
   }
   ```
+- A service declaring `x-podman-autoupdate: registry` is pulled on every
+  `up` with policy `newer`, so an upstream image a registry serves today may
+  not be the one an operator reviewed yesterday. It is the same risk a
+  `pull_policy: always` deployment already carries, but on every command
+  rather than on a manual rebuild. The signature policy above is what bounds
+  that pull: a registry the host requires signatures from is checked on every
+  one of them.
 
 ## Self-update
 

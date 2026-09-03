@@ -424,6 +424,74 @@ pub struct Service {
 	pub unknown: IndexMap<String, serde_yaml::Value>,
 }
 
+/// `x-podman-autoupdate` extension key, Podman's auto-update policy for the
+/// container. Mirrors the `x-podman-on-failure` shape: a Compose-spec
+/// `x-`-prefixed key, parsed from the service's captured `unknown` map so the
+/// compose file stays portable to docker compose.
+pub const X_PODMAN_AUTOUPDATE: &str = "x-podman-autoupdate";
+
+/// What Podman's `auto-update` does with a container carrying the
+/// `io.containers.autoupdate` label.
+///
+/// `registry`: on every `up`, pull the image and recreate the container if the
+/// pulled image moved the tag. `local`: do not check the registry, a locally
+/// rebuilt image that moves the tag is still caught by the existing config-hash
+/// + image-ID comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoUpdate {
+	/// Check the registry on every `up` and recreate on a tag move.
+	Registry,
+	/// Stay with the local image; rely on the existing image-ID comparison for
+	/// locally rebuilt images.
+	Local,
+}
+
+impl std::str::FromStr for AutoUpdate {
+	type Err = String;
+
+	fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+		match value {
+			"registry" => Ok(Self::Registry),
+			"local" => Ok(Self::Local),
+			other => Err(format!(
+				"invalid {X_PODMAN_AUTOUPDATE} value {other:?} (expected one of: registry, local)"
+			)),
+		}
+	}
+}
+
+impl AutoUpdate {
+	/// The Quadlet `AutoUpdate=` value and the `io.containers.autoupdate` label
+	/// value, the same spelling Podman expects in both places.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Registry => "registry",
+			Self::Local => "local",
+		}
+	}
+}
+
+impl Service {
+	/// The `x-podman-autoupdate` extension, parsed and validated.
+	///
+	/// Spec-defined keys are typed fields on this struct; a Podman extension
+	/// lives in `unknown` (where `#[serde(flatten)]` already preserves it for
+	/// round-tripping) and is read through here. `Err` for a value that is not
+	/// one of Podman's two policies, so a typo is rejected rather than silently
+	/// doing nothing.
+	pub fn podman_autoupdate(&self) -> std::result::Result<Option<AutoUpdate>, String> {
+		let Some(raw) = self.unknown.get(X_PODMAN_AUTOUPDATE) else {
+			return Ok(None);
+		};
+		let Some(text) = raw.as_str() else {
+			return Err(format!(
+				"{X_PODMAN_AUTOUPDATE} must be a string (expected one of: registry, local)"
+			));
+		};
+		text.parse().map(Some)
+	}
+}
+
 /// `credential_spec:` — source of a Windows managed-service-account credential
 /// spec. Exactly one of `config`/`file`/`registry` is expected per the Compose
 /// Spec; podup parses all three for fidelity but honors none.
@@ -462,3 +530,7 @@ pub struct ProviderConfig {
 	#[serde(flatten, default, skip_serializing_if = "IndexMap::is_empty")]
 	pub unknown: IndexMap<String, serde_yaml::Value>,
 }
+
+#[cfg(test)]
+#[path = "service_tests.rs"]
+mod tests;
