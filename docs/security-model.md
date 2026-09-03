@@ -119,6 +119,37 @@ individually justified with safety comments, and unit-tested.
   release. See [self-update.md](self-update.md) for verification steps.
 - The Debian package can be built fully offline from a vendored crate tree, for
   air-gapped/classified environments.
+- **Image signatures are the host's policy, and podup inherits it.** Every pull
+  podup asks for is performed by libpod, which applies the host's
+  `containers-policy.json` (system-wide in `/etc/containers/`, per user in
+  `~/.config/containers/`) and the registry configuration under
+  `registries.d`. A host that requires signatures for a registry gets that
+  enforcement on `podup up` with nothing added on podup's side; the default
+  shipped by most distributions, `insecureAcceptAnything`, enforces nothing.
+  Measured on Podman 5.7.0 with a `reject` rule scoped to one repository:
+  `up` fails at the pull with libpod's own message, `Source image rejected:
+  Running image docker://... is rejected by policy.`, and creates no
+  container. The policy is consulted at pull time only: an image already in
+  local storage runs under `pull_policy: missing` (the default) without the
+  policy being asked, and `pull_policy: always` or `newer` asks it again. A
+  host that wants the policy to bite on every `up` sets `pull_policy` to one
+  of those two. The rule that requires sigstore signatures from one registry,
+  for reference:
+
+  ```json
+  {
+    "default": [{ "type": "reject" }],
+    "transports": {
+      "docker": {
+        "registry.example.com": [{
+          "type": "sigstoreSigned",
+          "keyPath": "/etc/containers/keys/registry.example.com.pub",
+          "signedIdentity": { "type": "matchRepository" }
+        }]
+      }
+    }
+  }
+  ```
 
 ## Self-update
 
