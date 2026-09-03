@@ -1,0 +1,119 @@
+services:
+  web:
+    image: example/web:1.2.3
+    container_name: proj-web-1
+    command: ["nginx", "-g", "daemon off;"]
+    entrypoint: ["/docker-entrypoint.sh"]
+    environment:
+      FOO: bar
+      EMPTY: ""
+      BAZ: qux
+    user: "1000:1000"
+    working_dir: /app
+    stop_signal: SIGTERM
+    stop_grace_period: 10s
+    hostname: my-host
+    domainname: example.com
+    labels:
+      svc.label: present
+    annotations:
+      org.opencontainers.image.title: web
+    cap_add: [NET_ADMIN, SYS_TIME]
+    cap_drop: [MKNOD]
+    privileged: false
+    read_only: true
+    security_opt:
+      - label=user:role:svirt_lxc_net_t:s0
+      - apparmor=runtime/default
+      - seccomp=unconfined
+      - no-new-privileges:true
+      - "mask:/proc/asound"
+      - "unmask:/proc/asound"
+    sysctls:
+      net.core.somaxconn: 1024
+    expose:
+      - "9000/tcp"
+    ports:
+      - "127.0.0.1:8080:80"
+      - "9090-9091:9090-9091"
+    networks:
+      app:
+        aliases:
+          - web-alias
+    extra_hosts:
+      - "host1:1.2.3.4"
+      - "host2:5.6.7.8"
+    dns:
+      - 1.1.1.1
+    dns_search:
+      - example.lan
+    dns_opt:
+      - ndots:2
+    volumes:
+      - type: bind
+        source: ./host-data
+        target: /data
+        read_only: true
+      - myvolume:/named:ro
+    tmpfs:
+      - /tmp:size=64m,uid=1000
+    secrets:
+      - source: api_token
+        target: /run/secrets/api_token
+    userns_mode: keep-id
+    pid: host
+    ipc: private
+    cgroup_parent: /system.slice/podup
+    shm_size: 64m
+    mem_limit: 256m
+    cpus: "0.5"
+    cpu_shares: 512
+    cpuset: "0,1"
+    pids_limit: 100
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 2048
+      nproc: 64
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 5s
+      timeout: 3s
+      retries: 4
+      start_period: 10s
+      x-podman-on-failure: kill
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+    init: true
+    restart: on-failure:5
+    devices:
+      - "/dev/null:/dev/null:rwm"
+    device_cgroup_rules:
+      - "c 1:3 rwm"
+    group_add:
+      - "1001"
+    oom_score_adj: -500
+    runtime: crun
+    platform: linux/amd64
+    storage_opt:
+      size: 1G
+    links:
+      - other-svc:other-alias
+    volumes_from:
+      - other-svc:ro
+
+  other-svc:
+    image: example/other:1.0
+
+networks:
+  app:
+    name: app-net
+
+volumes:
+  myvolume:
+
+secrets:
+  api_token:
+    external: true

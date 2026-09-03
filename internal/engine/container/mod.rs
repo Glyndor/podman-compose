@@ -475,3 +475,7 @@ fn rootless_caveat_warnings(name: &str, service: &Service) -> Vec<String> {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "spec_body_tests.rs"]
+mod spec_body_tests;
