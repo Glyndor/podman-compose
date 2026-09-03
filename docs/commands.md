@@ -911,8 +911,16 @@ the message:
   service declares the same set, or none and gets the project default);
 - two services publishing the same host port, whichever host IPs they bind.
 
-Measured on 2026-09-03 with 42 containers, three runs each: creation on a
-bridge network 4.65 to 4.72 s, inside a pod 3.27 to 3.60 s; teardown equal.
+What it costs and what it saves, measured on 2026-09-03 with the `wide-level`
+benchmark scenario (42 services), 10 measured runs after 2 warm-up, twice,
+same binary, cores pinned: `up -d` 1.13 s on the project network against
+1.50 s in a pod; `down -v` 1.76 to 1.91 s against 1.39 to 1.40 s. Creation is
+slower inside a pod and teardown faster. The same 42 containers created one
+at a time from the `podman` CLI went the other way (4.7 s against 3.3 s), so
+the cost sits in how many creates run at once: `up` starts a level's
+containers concurrently, and a pod does not take that in parallel the way a
+network does. Choose a pod for `localhost` between services, one namespace to
+audit, and one place ports are published; not for a faster `up`.
 
 ### Healthcheck timing on a `service_healthy` gate
 
