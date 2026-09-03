@@ -65,6 +65,12 @@ pub struct PodSpecGenerator {
 	/// container spec's `hostadd` uses (a `Vec<String>` of `<host>:<ip>`).
 	#[serde(skip_serializing_if = "Vec::is_empty", default)]
 	pub hostadd: Vec<String>,
+
+	/// User namespace of the pod, shared by every member. Podman's CLI
+	/// refuses `--userns` on a container inside a pod; the namespace is the
+	/// pod's, so a project's common `userns_mode` lands here.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub userns: Option<Namespace>,
 }
 
 /// Response from `GET /libpod/pods/{name}/json`. Only the fields the engine

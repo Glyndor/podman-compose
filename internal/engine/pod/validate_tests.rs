@@ -160,3 +160,36 @@ services:
 "#;
 	check(yaml).expect("the same port on the same IP for two protocols must be accepted");
 }
+
+/// One user namespace per pod: services that disagree on `userns_mode` are
+/// refused, naming both, and the unset case counts as a value.
+#[test]
+fn pod_refuses_services_that_disagree_on_userns_mode() {
+	let yaml = r#"
+services:
+  web:
+    image: nginx
+    userns_mode: auto
+  db:
+    image: postgres
+"#;
+	let err = check(yaml).expect_err("a userns_mode on one service only must be refused");
+	assert!(
+		err.contains("userns_mode") && err.contains("web") && err.contains("db"),
+		"{err}"
+	);
+}
+
+#[test]
+fn pod_accepts_services_that_agree_on_userns_mode() {
+	let yaml = r#"
+services:
+  web:
+    image: nginx
+    userns_mode: auto
+  db:
+    image: postgres
+    userns_mode: auto
+"#;
+	check(yaml).expect("the same userns_mode on every service must be accepted");
+}

@@ -561,3 +561,58 @@ async fn the_label_sweep_removes_stale_pods_and_keeps_the_projects_own() {
 		"the project's own pod is not the sweep's to remove; requests: {requests:?}"
 	);
 }
+
+/// A common `userns_mode` lands on the pod, not on the members, and it is
+/// part of the hash that decides a recreate.
+#[tokio::test]
+#[cfg(unix)]
+async fn a_common_userns_mode_is_the_pods_and_not_the_members() {
+	let fake = pod_up_fake();
+	let engine = engine_for(&fake, "proj");
+	let yaml = r#"
+x-podman-pod: true
+services:
+  web:
+    image: nginx
+    userns_mode: auto
+  db:
+    image: postgres
+    userns_mode: auto
+"#;
+	let file = parse_str(yaml).unwrap();
+	engine.up(&file).await.expect("up must succeed");
+	let requests = fake.requests.lock().unwrap().clone();
+	let bodies = fake.bodies.lock().unwrap().clone();
+	let mut pod_body = None;
+	let mut container_bodies = Vec::new();
+	for (r, b) in requests.iter().zip(bodies.iter()) {
+		if r.contains("/pods/create") {
+			pod_body = Some(serde_json::from_slice::<serde_json::Value>(b).unwrap());
+		} else if r.contains("/containers/create") {
+			container_bodies.push(serde_json::from_slice::<serde_json::Value>(b).unwrap());
+		}
+	}
+	let pod_body = pod_body.expect("a pod must be created");
+	assert_eq!(
+		pod_body["userns"],
+		serde_json::json!({"nsmode": "auto"}),
+		"{pod_body}"
+	);
+	assert_eq!(container_bodies.len(), 2);
+	for c in &container_bodies {
+		assert!(
+			c.get("userns").is_none() || c["userns"].is_null(),
+			"a member must not carry its own userns: {c}"
+		);
+	}
+	let without = parse_str(
+		"x-podman-pod: true\nservices:\n  web:\n    image: nginx\n  db:\n    image: postgres\n",
+	)
+	.unwrap();
+	let ports: Vec<Vec<crate::ports::ParsedPort>> = vec![Vec::new(), Vec::new()];
+	assert_ne!(
+		crate::engine::pod::pod_config_hash(&ports, &file),
+		crate::engine::pod::pod_config_hash(&ports, &without),
+		"the user namespace is part of the pod hash"
+	);
+}
