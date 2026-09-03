@@ -301,6 +301,7 @@ pub(super) async fn dispatch_rest(
 		Commands::Pause { .. } => unreachable!("handled in dispatch"),
 		Commands::Unpause { .. } => unreachable!("handled in dispatch"),
 		Commands::Config { .. } => unreachable!("handled above"),
+		Commands::Audit { .. } => unreachable!("handled above"),
 		Commands::Generate { .. } => unreachable!("handled above"),
 		Commands::Autostart { .. } => unreachable!("handled above"),
 		Commands::Watch => engine.watch(file).await?,
