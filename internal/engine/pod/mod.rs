@@ -14,6 +14,9 @@ mod validate;
 mod validate_tests;
 
 #[cfg(all(test, unix))]
+#[path = "engine_more_tests.rs"]
+mod engine_more_tests;
+#[cfg(all(test, unix))]
 #[path = "engine_tests.rs"]
 mod engine_tests;
 
