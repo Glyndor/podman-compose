@@ -63,6 +63,10 @@ services:
     userns_mode: keep-id
     pid: host
     ipc: private
+    uts: host
+    cgroup: host
+    tty: true
+    stdin_open: true
     cgroup_parent: /system.slice/podup
     shm_size: 64m
     mem_limit: 256m

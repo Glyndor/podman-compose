@@ -337,6 +337,10 @@ async fn create_sends_every_compose_field_in_the_spec_generator() {
 	assert_eq!(body["userns"], serde_json::json!({"nsmode": "keep-id"}));
 	assert_eq!(body["pidns"], serde_json::json!({"nsmode": "host"}));
 	assert_eq!(body["ipcns"], serde_json::json!({"nsmode": "private"}));
+	assert_eq!(body["utsns"], serde_json::json!({"nsmode": "host"}));
+	assert_eq!(body["cgroupns"], serde_json::json!({"nsmode": "host"}));
+	assert_eq!(body["terminal"], serde_json::json!(true));
+	assert_eq!(body["stdin"], serde_json::json!(true));
 
 	// -- resource_limits: memory.limit from `mem_limit`, cpu from `cpus` +
 	// `cpu_shares` + `cpuset`, pids from `pids_limit`. The 100ms period
