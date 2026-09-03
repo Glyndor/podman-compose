@@ -62,6 +62,9 @@ jobs:
   pssa:
     name: pssa
     runs-on: windows-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 41s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     defaults:
       run:
         shell: pwsh

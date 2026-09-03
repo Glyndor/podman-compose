@@ -74,6 +74,9 @@ jobs:
   lint:
     name: Format & lint
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 49s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -108,6 +111,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 106s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -140,6 +146,9 @@ jobs:
     name: Test (${{ matrix.os }})
     if: inputs.extra-test-os != '[]'
     runs-on: ${{ matrix.os }}
+    # Bound: worst of the last three successful runs on 2026-09-02 was 205s; the slowest leg is windows-latest. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -192,6 +201,9 @@ jobs:
     # it a gate rather than a decoration.
     if: always()
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 4s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     steps:
       - name: Reflect the extra-platform test result
         env:
@@ -209,6 +221,9 @@ jobs:
     name: Coverage
     if: inputs.coverage-threshold > 0
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 166s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -271,6 +286,9 @@ jobs:
     name: MSRV (${{ inputs.msrv }})
     if: inputs.msrv != ''
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 62s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -308,6 +326,9 @@ jobs:
     needs: msrv
     if: always()
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 4s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     steps:
       - name: Reflect the MSRV result
         env:
@@ -324,6 +345,9 @@ jobs:
     name: Package check
     if: inputs.package-check
     runs-on: ubuntu-latest
+    # Bound: skipped here since publish = false; bounded for the caller that does publish. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -346,6 +370,9 @@ jobs:
     name: Semver checks
     if: inputs.semver-check
     runs-on: ubuntu-latest
+    # Bound: skipped here since publish = false; bounded for the caller that does publish. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -373,6 +400,9 @@ jobs:
     name: Doc warnings
     if: inputs.doc-warnings
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 56s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}

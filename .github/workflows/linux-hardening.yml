@@ -1,0 +1,86 @@
+name: Linux release binaries are hardened
+
+# The release verifies the Linux binaries are static PIE, full RELRO, NX
+# stack and stripped before it signs them (.github/scripts/check-hardening.sh).
+# That gate fires at tag time, when a failure costs a release run. This job
+# builds the two Linux release targets the way release.yml does, on the same
+# runners, runs the binary once and reads the same properties off it, so the
+# change that would fail the release fails here first. The aarch64 leg is the
+# reason it exists: that target is not static PIE by rustc's defaults, and
+# nothing on an x86_64 host can run what .cargo/config.toml makes of it.
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - ".cargo/**"
+      - "Cargo.toml"
+      - ".github/scripts/check-hardening.sh"
+      - ".github/workflows/linux-hardening.yml"
+      - ".github/workflows/release.yml"
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - ".cargo/**"
+      - "Cargo.toml"
+      - ".github/scripts/check-hardening.sh"
+      - ".github/workflows/linux-hardening.yml"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-hardening-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  hardened:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    # Bound: a release build leg measured 347 s at worst on 2026-09-02, and
+    # this is one such leg plus a readelf. Ten times that, rounded up.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain and the musl target
+        env:
+          TARGET: ${{ matrix.target }}
+          # Keep in step with release.yml's build job.
+          RUST_TOOLCHAIN: "1.98"
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq musl-tools
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+          rustup target add "$TARGET"
+
+      - name: Build the release binary the way the release does
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Run it once and read its hardening
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          bin="target/$TARGET/release/podup"
+          "$bin" --version
+          bash .github/scripts/check-hardening.sh "$bin"

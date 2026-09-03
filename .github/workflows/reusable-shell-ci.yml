@@ -47,6 +47,9 @@ jobs:
   shellcheck:
     name: shellcheck
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 8s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -168,6 +171,9 @@ jobs:
     name: test
     if: inputs.test-command != ''
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 7s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}

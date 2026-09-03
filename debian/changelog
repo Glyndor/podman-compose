@@ -1,3 +1,15 @@
+podup (5.7.1) unstable; urgency=medium
+
+  * The arm64 Linux binary and the arm64 Debian package are now static
+    position-independent executables, like the x86_64 ones have been. Until
+    5.7.0 they were static executables at a fixed address, so the kernel could
+    not randomise where the program sat in memory. The release now reads that
+    property, full RELRO, a non-executable stack and a stripped symbol table
+    off every Linux binary before signing anything, and runs each binary once
+    on the architecture it was built for.
+
+ -- Jose <75870284+Jaro-c@users.noreply.github.com>  Wed, 02 Sep 2026 18:57:13 -0500
+
 podup (5.7.0) unstable; urgency=medium
 
   * `up` reports a container it replaced as `Recreating`/`Recreated`, and

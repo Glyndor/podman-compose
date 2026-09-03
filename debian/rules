@@ -53,7 +53,7 @@ CARGO_FEATURES = --no-default-features --features watch,completions
 
 override_dh_auto_build:
 ifneq ($(wildcard vendor/),)
-	$(if $(wildcard .cargo/config.toml),,$(MAKE) -f debian/rules debian/cargo-config)
+	$(if $(wildcard $(CARGO_HOME)/config.toml),,$(MAKE) -f debian/rules debian/cargo-config)
 endif
 	cargo build --release --locked --target $(RUST_TARGET) $(CARGO_FLAGS) $(CARGO_FEATURES)
 
@@ -86,16 +86,19 @@ override_dh_installman:
 override_dh_auto_clean:
 	cargo clean
 	rm -rf debian/cargo-home
-	# A vendored build writes .cargo/config.toml pointing at vendor/; drop it so a
-	# later non-vendored build does not fail on missing vendored sources.
-	rm -f .cargo/config.toml
+	# The vendor mapping a vendored build writes lives under CARGO_HOME, removed
+	# just above, so a later non-vendored build cannot inherit it. The tracked
+	# .cargo/config.toml holds only per-target link flags and stays.
 	# Restore the man page if an installman run was interrupted before it could
 	# revert its in-place version stamp.
 	test ! -f debian/podup.1.bak || mv debian/podup.1.bak debian/podup.1
 
-# Generate .cargo/config.toml pointing at the vendor tree (only when vendored).
+# Point cargo at the vendor tree (only when vendored). Written under
+# CARGO_HOME, which cargo reads alongside the tracked .cargo/config.toml, so
+# the per-target link flags there apply to the vendored build too and a
+# source package never has to overwrite a tracked file.
 debian/cargo-config:
 ifneq ($(wildcard vendor/),)
-	mkdir -p .cargo
-	printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
+	mkdir -p $(CARGO_HOME)
+	printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > $(CARGO_HOME)/config.toml
 endif

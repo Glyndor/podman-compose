@@ -44,4 +44,4 @@ jobs:
       # one. Naming the interpreter removes the dependency instead of detecting
       # it, which is also what reusable-shell-ci.yml's exec-bit guard already
       # says about this repository.
-      test-command: bash ./tests/shell/locale-pinned.test.sh && bash ./tests/shell/ci-runs-every-test.test.sh
+      test-command: bash ./tests/shell/locale-pinned.test.sh && bash ./tests/shell/ci-runs-every-test.test.sh && bash ./tests/shell/check-hardening.test.sh

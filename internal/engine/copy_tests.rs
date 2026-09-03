@@ -177,3 +177,22 @@ fn check_endpoint_allows_normal_forms() {
 	assert!(super::check_endpoint("web:/app/data").is_ok());
 	assert!(super::check_endpoint("./local").is_ok());
 }
+
+/// The builders set the field they are named for and nothing else. Nothing
+/// in the tree calls them (the CLI goes through `CpOptions::new`), so a
+/// mutation sweep on 2026-09-02 replaced each with `Default::default()` and
+/// every suite stayed green; this is the only thing that reads them.
+#[test]
+fn the_cp_option_builders_set_their_field() {
+	use super::CpOptions;
+	let base = CpOptions::new(None, false, false);
+	assert_eq!(
+		CpOptions::new(Some(3), false, false),
+		base.clone().with_index(Some(3))
+	);
+	assert_eq!(
+		CpOptions::new(None, true, false),
+		base.clone().with_follow_link(true)
+	);
+	assert_eq!(CpOptions::new(None, false, true), base.with_archive(true));
+}

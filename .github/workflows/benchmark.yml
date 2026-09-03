@@ -38,6 +38,9 @@ permissions: {}
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 17s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -70,6 +73,9 @@ jobs:
 
   benchmark:
     runs-on: [self-hosted, bench]
+    # Bound: no successful scheduled run in the last three to measure; bounded generously and to be tightened from the first. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 90
     if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: read

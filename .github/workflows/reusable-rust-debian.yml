@@ -94,6 +94,9 @@ jobs:
   build:
     name: dpkg-buildpackage
     runs-on: ${{ inputs.runner }}
+    # Bound: worst of the last three successful runs on 2026-09-02 was 432s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 60
     container:
       image: ${{ inputs.debian-image }}
     defaults:
@@ -222,6 +225,9 @@ jobs:
     name: build (vendored / offline)
     if: ${{ inputs.check-vendored }}
     runs-on: ${{ inputs.runner }}
+    # Bound: worst of the last three successful runs on 2026-09-02 was 171s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 30
     container:
       image: ${{ inputs.debian-image }}
     defaults:
@@ -270,8 +276,11 @@ jobs:
       - name: Vendor dependencies (the only step allowed network access)
         run: |
           cargo vendor vendor
+          # Appended, not written: .cargo/config.toml is tracked and carries
+          # the per-target link flags the release relies on. cargo merges the
+          # sections, and this job never commits.
           mkdir -p .cargo
-          printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
+          printf '\n[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' >> .cargo/config.toml
 
       - name: Build offline from the vendored tree
         env:

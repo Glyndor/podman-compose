@@ -52,6 +52,9 @@ jobs:
   # pin the L7 error class on Linux.
   shell-signing-fixture:
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 16s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -120,6 +123,9 @@ jobs:
   # same L7 error class.
   powershell-signing-fixture:
     runs-on: windows-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 40s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -155,6 +161,9 @@ jobs:
   # the strict-equality-with-optional-v comparison fails here.
   shell-version-self-test:
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 6s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -167,6 +176,9 @@ jobs:
   # comparison or in the staged-file-removal on failure fails here.
   powershell-version-self-test:
     runs-on: windows-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 35s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -182,6 +194,9 @@ jobs:
   # release.yml sets up the release build.
   rust-self-test-reference:
     runs-on: ubuntu-latest
+    # Bound: worst of the last three successful runs on 2026-09-02 was 88s. Ten times that, rounded up, never under ten
+    # minutes; the six-hour default is what a hang would otherwise cost.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
