@@ -66,6 +66,17 @@ pub(crate) enum ConfigFormat {
 	Json,
 }
 
+/// Output rendering for `audit`.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum AuditFormat {
+	/// Aligned columns (`SERVICE` / `FINDINGS`) followed by per-finding lines.
+	#[default]
+	Table,
+	/// One JSON object per finding, with stable keys, or `{"findings": []}`
+	/// when nothing matched.
+	Json,
+}
+
 /// Which autostart backend `autostart install` sets up.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum AutostartMode {

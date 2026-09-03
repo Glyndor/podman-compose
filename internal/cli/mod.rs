@@ -9,8 +9,8 @@ mod parse;
 mod types;
 pub(crate) use commands::Commands;
 pub(crate) use types::{
-	AnsiMode, AutostartCommands, AutostartMode, ConfigFormat, EventsFormat, GenerateCommands,
-	OutputFormat, RmiScope,
+	AnsiMode, AuditFormat, AutostartCommands, AutostartMode, ConfigFormat, EventsFormat,
+	GenerateCommands, OutputFormat, RmiScope,
 };
 
 /// Help-screen colours.

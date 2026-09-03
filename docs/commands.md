@@ -620,6 +620,64 @@ still wins over an earlier one, and a bare `KEY` stays valueless because it mean
 | `--no-interpolate` | Leave `${VAR}` placeholders literal. | off |
 | `--resolve-image-digests` | Rewrite each service `image:` to its registry digest (`repo@sha256:...`). | off |
 
+### `audit`
+
+Print one row per service listing every hardening gap the compose file leaves
+open. The `audit` command is read-only and never contacts Podman; no check
+changes what `up` does. The same loading path as `config` is used, so
+`--profile`, `--env-file` and `-f` resolve identically, and `audit` reports
+what `up` would actually start.
+
+The default output is a table:
+
+```
+$ podup audit
+SERVICE  FINDINGS
+api      writable_root no_new_privileges_off secret_in_environment
+db       -
+  api: writable_root: read_only is not true: the container's root filesystem is writable
+  api: no_new_privileges_off: security_opt is missing no-new-privileges:true: setuid binaries may regain privileges
+  api: secret_in_environment: environment: DB_PASSWORD carries a hard-coded value; move it to secrets:
+```
+
+A service with no findings shows `-` in the `FINDINGS` column; a project
+with no findings at all prints `no findings` and nothing else.
+
+`--format json` emits a single machine-readable object so CI can pin the
+shape and grep the `check` ids:
+
+```
+{"findings":[{"service":"api","check":"writable_root","reason":"..."}, ...]}
+```
+
+The keys are alphabetically ordered; an empty list is `{"findings":[]}`,
+never `null`.
+
+`--strict` exits 1 when at least one finding is present (otherwise exits
+0), so a CI job can gate on `podup audit --strict` and fail when hardening
+gaps are introduced.
+
+The eleven checks and what they look for:
+
+| Check id | Fires when | Notes |
+|---|---|---|
+| `privileged` | `privileged: true` | Grants extended host privileges; under rootless Podman reduced but never incidental. |
+| `host_namespace` | `network_mode: host`, or `pid`/`ipc`/`uts`/`cgroup`/`userns_mode: host` | One finding per active mode. |
+| `dangerous_capability` | `cap_add` contains `SYS_ADMIN` or `ALL` | Effectively grants root inside the container. |
+| `writable_root` | `read_only` is not `true` | Compose's default is writable. |
+| `no_cap_drop_all` | `cap_drop` does not contain `ALL` | Without it the runtime's default capability set stays. |
+| `no_new_privileges_off` | `security_opt` lacks `no-new-privileges:true` | Both spellings (`no-new-privileges:true` and `no-new-privileges` alone, the Podman form) are accepted. |
+| `no_pids_limit` | `pids_limit` unset | A fork bomb can exhaust the host's process table. |
+| `no_memory_limit` | Neither `mem_limit` nor `deploy.resources.limits.memory` set | A leak can OOM the host. |
+| `no_userns` | `userns_mode` unset | Without it Podman's `auto` applies; the reason links to `docs/docker-migration.md`. |
+| `secret_in_environment` | `environment:` key matching `PASSWORD`/`SECRET`/`TOKEN`/`KEY` (case-insensitive) with a non-empty literal value | Bare keys (host inheritance) and `${VAR}` placeholders are not flagged. |
+| `unpinned_image` | `image:` with no tag, with tag `latest`, or `latest` without a digest | An `@sha256:` digest counts as pinning regardless of the tag. |
+
+| Flag | Description | Default |
+|---|---|---|
+| `--format <FMT>` | `table` (default) or `json`. | `table` |
+| `--strict` | Exit 1 when any finding is present, 0 otherwise. | off |
+
 ### `completions <SHELL>`
 Print a shell completion script to stdout for `bash`, `zsh`, `fish`,
 `powershell`, or `elvish`. The Debian package installs the bash/zsh/fish files

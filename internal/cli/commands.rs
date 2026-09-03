@@ -9,7 +9,8 @@ use clap_complete::Shell;
 
 use super::parse::{parse_progress, parse_pull_policy, parse_scale_pair, parse_timeout};
 use super::types::{
-	AutostartCommands, ConfigFormat, EventsFormat, GenerateCommands, OutputFormat, RmiScope,
+	AuditFormat, AutostartCommands, ConfigFormat, EventsFormat, GenerateCommands, OutputFormat,
+	RmiScope,
 };
 
 #[derive(Subcommand)]
@@ -653,6 +654,19 @@ pub(crate) enum Commands {
 		/// Rewrite each service image to its registry digest (repo@sha256:...).
 		#[arg(long)]
 		resolve_image_digests: bool,
+	},
+	/// Audit the compose file for hardening gaps (read-only rootfs, dropped
+	/// capabilities, memory/PID limits, host-binding modes, secret-shaped env
+	/// vars, unpinned images, …) and print a row per service. No check changes
+	/// what `up` does; this is a view, not a gate. `--strict` exits 1 when any
+	/// finding is present, so it can fail CI.
+	Audit {
+		/// Exit 1 when any finding is present.
+		#[arg(long)]
+		strict: bool,
+		/// Output format.
+		#[arg(long, value_enum, default_value_t = AuditFormat::Table)]
+		format: AuditFormat,
 	},
 	/// Generate declarative artifacts from the compose file.
 	#[command(

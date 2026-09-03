@@ -58,6 +58,16 @@ The compose keys that constrain a container are translated onto Podman's
 dropped. Everything below remains bounded by the rootless ceiling: a key can
 only tighten, never widen, what the launching user already has.
 
+A `podup audit [-f ...] [--strict]` subcommand reads the project the same way
+`config` does and prints, for each service, which of those keys the file did
+not set: host-binding namespacing modes, missing `read_only: true`, missing
+`cap_drop: [ALL]`, missing `security_opt: [no-new-privileges:true]`,
+missing `pids_limit`, missing memory limit, missing `userns_mode`, secrets in
+`environment:` instead of `secrets:`, and unpinned `:latest` images. The
+check list and exit codes are documented in
+[commands.md](commands.md#audit); `audit` never changes what `up` does, so it
+can be added to a CI gate without altering runtime behaviour.
+
 - `security_opt` is parsed into the matching SpecGenerator fields:
   - `no-new-privileges` → `no_new_privileges`
   - `seccomp=<profile.json>` (and `seccomp=unconfined`) → `seccomp_profile_path`
