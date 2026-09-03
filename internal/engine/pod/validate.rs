@@ -77,8 +77,6 @@ pub(crate) fn validate_pod_or_refuse(file: &ComposeFile) -> Result<(), String> {
 	//    not falsely collide.
 	let mut host_port_owner: std::collections::HashMap<(u16, String), String> =
 		std::collections::HashMap::new();
-	let mut host_port_ip: std::collections::HashMap<(u16, String), String> =
-		std::collections::HashMap::new();
 	for (name, service) in &services {
 		let Ok(parsed) = crate::ports::parse_ports(&service.ports) else {
 			// An invalid port is already reported by the per-service path; the
@@ -104,28 +102,7 @@ pub(crate) fn validate_pod_or_refuse(file: &ComposeFile) -> Result<(), String> {
 				}
 				continue;
 			}
-			host_port_owner.insert(key.clone(), name.to_string());
-
-			// 4. Different host IP for the same (host_port, protocol).
-			if p.host_ip.is_empty() {
-				continue;
-			}
-			match host_port_ip.get(&key) {
-				None => {
-					host_port_ip.insert(key, p.host_ip.clone());
-				}
-				Some(prev_ip) if prev_ip != &p.host_ip => {
-					return Err(format!(
-						"services \"{name}\" and \"{prev}\" publish port {host_port}/{} on \
-						 different host IPs (\"{prev_ip}\" vs \"{}\"); x-podman-pod hands the \
-						 union to the pod, where per-IP bindings collapse",
-						p.protocol,
-						p.host_ip,
-						prev = host_port_owner.get(&key).cloned().unwrap_or_default(),
-					));
-				}
-				_ => {}
-			}
+			host_port_owner.insert(key, name.to_string());
 		}
 	}
 

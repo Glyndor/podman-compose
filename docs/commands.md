@@ -909,8 +909,7 @@ the message:
 - `network_mode` on any service;
 - a service whose `networks:` set differs from another service's (every
   service declares the same set, or none and gets the project default);
-- two services publishing the same host port, or the same port on different
-  host IPs.
+- two services publishing the same host port, whichever host IPs they bind.
 
 Measured on 2026-09-03 with 42 containers, three runs each: creation on a
 bridge network 4.65 to 4.72 s, inside a pod 3.27 to 3.60 s; teardown equal.

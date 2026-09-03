@@ -127,10 +127,11 @@ services:
 	check(yaml).expect("two ephemeral host ports must be accepted");
 }
 
-/// The same host port on two host IPs would be two bindings on a network,
-/// and one binding on the pod; refused, naming both services.
+/// The duplicate-port rule does not care which host IP each service binds:
+/// the pod publishes the union, and one host port there belongs to one
+/// service.
 #[test]
-fn pod_refuses_the_same_host_port_on_different_host_ips() {
+fn pod_refuses_the_same_host_port_across_services_even_on_different_ips() {
 	let yaml = r#"
 services:
   web:
@@ -147,8 +148,8 @@ services:
 	);
 }
 
-/// One service may bind the same host port twice on the same IP (tcp and
-/// udp, say); the IP check only fires when the IPs differ.
+/// One service may bind the same host port twice for two protocols; the
+/// rule is per service, port and protocol.
 #[test]
 fn pod_accepts_the_same_host_port_and_ip_for_two_protocols() {
 	let yaml = r#"
