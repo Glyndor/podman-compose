@@ -66,13 +66,15 @@ $OPT_HDR_MAGIC_PE32_PLUS = 0x20b
 $OPT_HDR_MAGIC_PE32      = 0x10b
 $DLLCHARACTERISTICS_OFFSET = 70  # within the optional header
 
+# Each byte is widened to [int] before the shift. A [byte] shifted left in
+# PowerShell stays a byte and drops the high bits, which read "MZ" as 77.
 function Read-UInt16LE([byte[]]$Buf, [int]$Off) {
-	return [uint16]($Buf[$Off] -bor ($Buf[$Off + 1] -shl 8))
+	return [uint16]([int]$Buf[$Off] -bor ([int]$Buf[$Off + 1] -shl 8))
 }
 
 function Read-UInt32LE([byte[]]$Buf, [int]$Off) {
 	return [uint32](
-		($Buf[$Off] -bor ($Buf[$Off + 1] -shl 8) -bor ($Buf[$Off + 2] -shl 16) -bor ($Buf[$Off + 3] -shl 24))
+		([int]$Buf[$Off] -bor ([int]$Buf[$Off + 1] -shl 8) -bor ([int]$Buf[$Off + 2] -shl 16) -bor ([int]$Buf[$Off + 3] -shl 24))
 	)
 }
 
@@ -98,7 +100,7 @@ foreach ($path in $args) {
 		continue
 	}
 
-	if (Read-UInt16LE $bytes 0 -ne $DOS_MAGIC) {
+	if ((Read-UInt16LE $bytes 0) -ne $DOS_MAGIC) {
 		Write-Output "FAIL not-pe  $path"
 		$status = 1
 		continue
@@ -114,7 +116,7 @@ foreach ($path in $args) {
 		continue
 	}
 
-	if (Read-UInt32LE $bytes $peSigOff -ne $PE_SIG) {
+	if ((Read-UInt32LE $bytes $peSigOff) -ne $PE_SIG) {
 		Write-Output "FAIL not-pe  $path"
 		$status = 1
 		continue

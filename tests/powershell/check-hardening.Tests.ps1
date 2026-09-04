@@ -75,10 +75,11 @@ function New-GoodPe {
 }
 
 function Write-PeWith([byte[]]$Source, [string]$Path, [uint16]$ClearBit) {
-	$copy = New-Object byte[] $Size
-	[Array]::Copy($Source, $copy, $Size)
-	$current = [BitConverter]::ToUInt16($copy, 158)
-	$next = $current -band (-bnot $ClearBit)
+	# A full copy of the good image with exactly one bit cleared, so the
+	# control differs from the good binary in that bit and nothing else.
+	[byte[]]$copy = $Source.Clone()
+	[int]$current = [BitConverter]::ToUInt16($copy, 158)
+	[int]$next = $current -band (-bnot [int]$ClearBit)
 	[BitConverter]::GetBytes([uint16]$next).CopyTo($copy, 158)
 	[System.IO.File]::WriteAllBytes($Path, $copy)
 }
@@ -129,7 +130,8 @@ try {
 	$stdout = & pwsh -NoProfile -File $Script $goodPath $bad $goodPath 2>&1
 	$rc = $LASTEXITCODE
 	Assert-Eq 'one bad file among good ones fails the run' '1' "$rc"
-	Assert-Eq 'the good ones are still listed as ok' '2' ("$(($stdout -join "`n") -split "`n" | Where-Object { $_ -like 'ok    *' }).Count")
+	$okLines = @(($stdout -join "`n") -split "`n" | Where-Object { $_ -like 'ok    *' })
+	Assert-Eq 'the good ones are still listed as ok' '2' "$($okLines.Count)"
 
 	# 5. No arguments is a usage error. Spawn pwsh so $LASTEXITCODE reflects
 	#    the script's own exit code (running a script via `&` in the same
