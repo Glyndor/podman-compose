@@ -573,3 +573,40 @@ async fn logs_issues_one_container_list_for_the_whole_project() {
 		fake.requests.lock().unwrap()
 	);
 }
+
+/// A surplus replica's row opens with `Stopping` before the stop request,
+/// moves to `Removing` before the delete, and closes with `Removed`. The row
+/// used to appear only at `Removed`, with no start time and nothing on screen
+/// during a ten-second grace (#1686).
+#[tokio::test]
+#[cfg(unix)]
+async fn stop_and_remove_opens_the_row_before_the_stop_and_closes_it_removed() {
+	let live = r#"[{"Names":["/proj-web-1"]},{"Names":["/proj-web-2"]}]"#;
+	let fake = fake_podman::start(move |method, target| {
+		if method == "GET" && target.contains("/containers/json") {
+			(200, live.to_string())
+		} else if (method == "POST" && target.contains("/stop"))
+			|| (method == "DELETE" && target.contains("/proj-web-2?force=true"))
+		{
+			(200, String::new())
+		} else {
+			(404, r#"{"message":"not found"}"#.to_string())
+		}
+	});
+	let e = engine_with(fake.client(), "proj");
+	let capture = crate::ui::progress::capture::Capture::start();
+	e.remove_surplus_replicas("web", &crate::compose::types::Service::default(), 1)
+		.await
+		.expect("the surplus replica is removed");
+	let verbs: Vec<String> = capture
+		.verbs()
+		.into_iter()
+		.filter(|(_, name, _)| name == "proj-web-2")
+		.map(|(_, _, verb)| verb)
+		.collect();
+	assert_eq!(
+		verbs,
+		vec!["Stopping", "Removing", "Removed"],
+		"the row is opened before the stop and closed after the delete"
+	);
+}

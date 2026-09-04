@@ -222,6 +222,11 @@ impl Engine {
 		// Bound the stop by the grace window: the force-remove below SIGKILLs the
 		// container, so a stop that stalls past the grace must not pin us for the
 		// full client READ_TIMEOUT before we fall through to it.
+		// Open the row before the stop, not after: with the default grace the
+		// stop can take ten seconds, and a row that appears only at `Removed`
+		// has no start time and says nothing while the container winds down
+		// (#1686).
+		crate::ui::progress::start("Container", name, "Stopping");
 		let stop_path = format!(
 			"{API_PREFIX}/containers/{}/stop?t={}",
 			urlencoded(name),
@@ -231,6 +236,7 @@ impl Engine {
 			.client
 			.post_empty_ok_within(&stop_path, stop_deadline(grace))
 			.await;
+		crate::ui::progress::start("Container", name, "Removing");
 		let rm_path = super::container_rm_path(name, remove_volumes);
 		match self.client.delete_ok(&rm_path).await {
 			Ok(()) => {
@@ -239,9 +245,13 @@ impl Engine {
 			}
 			Err(e) if e.is_status(404) => {
 				tracing::debug!("scale-down rm {name}: already gone ({e})");
+				crate::ui::progress_line("Container", name, "Absent");
 				Ok(())
 			}
-			Err(e) => Err(ComposeError::Podman(e)),
+			Err(e) => {
+				crate::ui::progress_line("Container", name, "Failed");
+				Err(ComposeError::Podman(e))
+			}
 		}
 	}
 

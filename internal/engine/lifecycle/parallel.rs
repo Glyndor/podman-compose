@@ -273,6 +273,11 @@ impl Engine {
 				"{API_PREFIX}/containers/{}?force={force_str}&v={remove_volumes}",
 				urlencoded(&container_name),
 			);
+			// The row opens with its working verb so it carries a start time and
+			// `Removed` comes with the elapsed time, the way `down` reports the
+			// same removal (#1686). Every arm closes the row: one left at
+			// `Removing` would be flushed as such by the plain sink.
+			crate::ui::progress::start("Container", &container_name, "Removing");
 			match self.client.delete_existed(&path).await {
 				// Only report a removal that actually happened — a phantom
 				// (never-created) container 404s and must not be logged as
@@ -281,16 +286,18 @@ impl Engine {
 					acted.store(true, std::sync::atomic::Ordering::Relaxed);
 					crate::ui::progress_line("Container", &container_name, "Removed");
 				}
-				Ok(false) => {}
+				Ok(false) => crate::ui::progress_line("Container", &container_name, "Absent"),
 				// Without `--force`, a running container 409s. docker compose rm
 				// skips running containers rather than aborting, so warn and keep
 				// going (later stopped containers still get removed).
 				Err(e) if !force && e.is_status(409) => {
+					crate::ui::progress_line("Container", &container_name, "Skipped");
 					tracing::warn!(
 						"{container_name} is running — skipping (pass -f to force removal)"
 					);
 				}
 				Err(e) => {
+					crate::ui::progress_line("Container", &container_name, "Failed");
 					first_err.get_or_insert(ComposeError::Podman(e));
 				}
 			}

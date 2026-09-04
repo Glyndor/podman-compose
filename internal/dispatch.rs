@@ -275,7 +275,7 @@ pub(crate) async fn dispatch(
 			// state error), so resume it first — matching `docker compose rm
 			// -s`. `unpause` is idempotent, so this is a no-op when not paused.
 			if stop {
-				engine.unpause(file, &services).await?;
+				engine.unpause_paused(file, &services).await?;
 				engine.stop(file, &services).await?;
 			}
 			engine
