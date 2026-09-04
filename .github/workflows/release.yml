@@ -218,6 +218,23 @@ jobs:
         # written for. Every leg now builds on the architecture it ships for.
         run: ./"${{ matrix.asset }}" --version
 
+      # PE / Mach-O hardening gate, parallel to the Linux ELF one in the
+      # release job below. The Windows legs read DllCharacteristics with a
+      # PowerShell script; the macOS legs read mach_header.flags and the
+      # symbol table with `otool`/`nm`. Each script is a property check
+      # that runs over the staged asset before anything is signed, so a
+      # missing flag burns nothing. Both Windows legs run this gate even
+      # though the arm64 one cannot execute its binary (#1648): reading
+      # the PE header does not require the host the binary targets.
+      - name: Verify Windows hardening (DllCharacteristics)
+        if: matrix.target == 'x86_64-pc-windows-msvc' || matrix.target == 'aarch64-pc-windows-msvc'
+        shell: pwsh
+        run: pwsh -NoProfile -File .github/scripts/check-hardening.ps1 "${{ matrix.asset }}"
+
+      - name: Verify macOS hardening (MH_PIE + stripped symbol table)
+        if: matrix.target == 'aarch64-apple-darwin' || matrix.target == 'x86_64-apple-darwin'
+        run: bash .github/scripts/check-hardening-macos.sh "${{ matrix.asset }}"
+
       - name: Sign binary
         env:
           GLYNDOR_RELEASE_ED25519_KEY: ${{ secrets.GLYNDOR_RELEASE_ED25519_KEY }}
