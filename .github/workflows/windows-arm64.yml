@@ -80,3 +80,19 @@ jobs:
         # Forward slashes: bash on Windows honours them and the backslashes a
         # Windows path would normally carry are literal characters to shellcheck.
         run: target/aarch64-pc-windows-msvc/release/podup.exe --version
+
+      # The release signs on this runner with an x64 Python, since the
+      # signing dependencies publish no arm64 Windows wheel. Install them the
+      # way the release does (no key needed) so a wheel that stops resolving
+      # fails here, not after the tag (v5.9.0, 2026-09-04).
+      - name: Use an x64 Python, as the release does on this runner
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - name: Install the signing dependencies the release installs
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/signvenv"
+          "$RUNNER_TEMP/signvenv/Scripts/python.exe" -m pip install --quiet --require-hashes -r .github/scripts/sign-requirements.txt
+          "$RUNNER_TEMP/signvenv/Scripts/python.exe" -c "import cryptography, platform; print(cryptography.__version__, platform.machine())"

@@ -15,6 +15,8 @@ on:
       - ".github/workflows/reusable-shell-ci.yml"
       - ".github/scripts/check-hardening-macos.sh"
       - "tests/shell/check-hardening-macos.test.sh"
+      - ".cargo/**"
+      - "Cargo.toml"
   pull_request:
     branches:
       - main
@@ -30,6 +32,8 @@ on:
       - ".github/workflows/reusable-shell-ci.yml"
       - ".github/scripts/check-hardening-macos.sh"
       - "tests/shell/check-hardening-macos.test.sh"
+      - ".cargo/**"
+      - "Cargo.toml"
 
 permissions:
   contents: read
@@ -54,3 +58,34 @@ jobs:
       # the script only runs the controls where the tools exist, and
       # ci-runs-every-test.test.sh still sees the file as wired.
       test-command: bash ./tests/shell/locale-pinned.test.sh && bash ./tests/shell/ci-runs-every-test.test.sh && bash ./tests/shell/check-hardening.test.sh && bash ./tests/shell/check-hardening-macos.test.sh
+
+  # The macOS gate on a Mac. The fixture skips where clang/otool/nm are
+  # absent, so on the Linux job above it never runs; the first release that
+  # exercised the script (v5.9.0, 2026-09-04) failed both darwin legs on a
+  # parsing bug the fixture would have caught here. The job then builds the
+  # binary the way the release does and reads the two properties off it, so
+  # a toolchain that stops emitting PIE or stops stripping is caught before
+  # a tag.
+  check-hardening-macos:
+    name: check-hardening-macos.sh tests
+    runs-on: macos-latest
+    # Bound: the Windows twin of this job took 5m33s on its first run; the
+    # release profile builds with fat LTO. Ten times that, rounded up.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the Mach-O hardening fixture
+        run: bash ./tests/shell/check-hardening-macos.test.sh
+      - name: Install the pinned toolchain
+        env:
+          # Keep in step with the release workflow and reusable-rust-ci.
+          RUST_TOOLCHAIN: "1.98"
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+      - name: Build the release binary the way the release does
+        run: cargo build --release --locked
+      - name: Read the hardening off the built binary
+        run: bash .github/scripts/check-hardening-macos.sh target/release/podup

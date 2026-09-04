@@ -163,9 +163,11 @@ jobs:
             runner: windows-latest
             target: x86_64-pc-windows-msvc
             bin: podup.exe
-          # Cross-compiled from the x64 Windows runner: the aarch64 toolchain
-          # is added with rustup, and the signing step's Python wheels are only
-          # published for x64 Windows (no native arm64 wheel exists).
+          # Built and run on the arm64 runner (#1683). The signing step's
+          # Python wheels are only published for x64 Windows, so that leg
+          # signs with an x64 Python the runner executes under emulation; the
+          # first native release run (v5.9.0) tried to build cryptography
+          # from source and failed.
           - asset: podup-windows-arm64.exe
             runner: windows-11-arm
             target: aarch64-pc-windows-msvc
@@ -235,6 +237,13 @@ jobs:
         if: matrix.target == 'aarch64-apple-darwin' || matrix.target == 'x86_64-apple-darwin'
         run: bash .github/scripts/check-hardening-macos.sh "${{ matrix.asset }}"
 
+      - name: Use an x64 Python on the arm64 Windows runner (no arm64 wheel for cryptography)
+        if: matrix.target == 'aarch64-pc-windows-msvc'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0
+        with:
+          python-version: "3.12"
+          architecture: x64
+
       - name: Sign binary
         env:
           GLYNDOR_RELEASE_ED25519_KEY: ${{ secrets.GLYNDOR_RELEASE_ED25519_KEY }}
@@ -253,7 +262,10 @@ jobs:
           # environment: a runner image may ship a different, system-managed
           # cryptography that pip can neither uninstall (no RECORD) nor write
           # over (read-only prefix). A fresh venv honours the pin on every OS.
-          python3 -m venv "$RUNNER_TEMP/signvenv"
+          # setup-python puts `python` first on PATH; the runner images also
+          # carry `python3`. Prefer whichever a setup step put there.
+          py=python; command -v python >/dev/null 2>&1 || py=python3
+          "$py" -m venv "$RUNNER_TEMP/signvenv"
           venv_py="$RUNNER_TEMP/signvenv/bin/python"
           [ -x "$venv_py" ] || venv_py="$RUNNER_TEMP/signvenv/Scripts/python.exe"
           "$venv_py" -m pip install --quiet --require-hashes -r .github/scripts/sign-requirements.txt
@@ -580,7 +592,10 @@ jobs:
           fi
           # Isolated venv so the pinned cryptography is honoured regardless of
           # any system-managed copy on the runner (see the per-binary sign step).
-          python3 -m venv "$RUNNER_TEMP/signvenv"
+          # setup-python puts `python` first on PATH; the runner images also
+          # carry `python3`. Prefer whichever a setup step put there.
+          py=python; command -v python >/dev/null 2>&1 || py=python3
+          "$py" -m venv "$RUNNER_TEMP/signvenv"
           venv_py="$RUNNER_TEMP/signvenv/bin/python"
           [ -x "$venv_py" ] || venv_py="$RUNNER_TEMP/signvenv/Scripts/python.exe"
           "$venv_py" -m pip install --quiet --require-hashes -r .github/scripts/sign-requirements.txt
