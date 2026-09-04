@@ -11,6 +11,8 @@
 //! Everything goes to stderr. stdout stays a clean pipe, which is what lets
 //! `run -d` keep printing its container id there.
 
+use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -22,6 +24,14 @@ mod row;
 
 pub use board::{Board, Kind, Row, State};
 pub use live::{Region, Target};
+
+/// How many stream lines a row keeps under itself when it is being built.
+/// Tuned by reading a real buildah stream: the last few lines are the layer
+/// hash, the `--> running step` markers and the `COMMIT` line, which is the
+/// shape a reader needs to tell where the build is. Five or more drowns the
+/// row; three loses the layer hash before the next step lands; four is the
+/// narrowest window that keeps both.
+const MAX_NOTES_PER_ROW: usize = 4;
 
 /// How often the region repaints while nothing is happening, so the spinner
 /// turns during a long pull instead of looking like a hang. The same cadence
@@ -57,6 +67,11 @@ struct Session {
 	/// Width of the name column, sized from the seeded rows so it does not jump
 	/// as rows come and go.
 	name_width: usize,
+	/// Per-row stream tail, kept only while a row is being built. On a terminal
+	/// these are the dimmed lines painted under the row; in a pipe they are
+	/// written through the plain sink as they arrive. Cleared when the row
+	/// finishes: the row itself, plus its closing verb, is the record.
+	notes: HashMap<(Kind, String), VecDeque<String>>,
 }
 
 /// Whether the live tail region is allowed at all.
@@ -130,6 +145,7 @@ pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
 			region,
 			frame: 0,
 			name_width,
+			notes: HashMap::new(),
 		});
 	}
 	// The flag goes up *after* the session is installed: a `finish` racing the
@@ -149,6 +165,23 @@ pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
 /// This is the event the tree could not previously produce: every one of the 21
 /// existing progress sites fires once the work is already over.
 pub fn start(kind: &str, name: &str, verb: &str) {
+	start_anchored(kind, name, verb, None, None);
+}
+
+/// As [`start`], but insert the row in front of `anchor_kind, anchor_name`
+/// rather than appending it. The `up` build path uses this so the image row
+/// sits before the container rows that depend on it; a plain `start` would
+/// put it after them, and the reader would see the container starting before
+/// the row that says which image is being built.
+///
+/// `None` for either anchor argument falls back to plain `start` semantics.
+pub fn start_anchored(
+	kind: &str,
+	name: &str,
+	verb: &str,
+	anchor_kind: Option<&str>,
+	anchor_name: Option<&str>,
+) {
 	let Some(kind) = Kind::from_noun(kind) else {
 		return;
 	};
@@ -158,13 +191,28 @@ pub fn start(kind: &str, name: &str, verb: &str) {
 	// test-only, compiled out of a release build entirely.
 	#[cfg(test)]
 	capture::record_start(kind, name, verb);
+	let anchor = match (anchor_kind, anchor_name) {
+		(Some(k), Some(n)) => Kind::from_noun(k).map(|ak| (ak, n.to_string())),
+		_ => None,
+	};
 	let sink = {
 		let Ok(mut slot) = SESSION.lock() else {
 			return;
 		};
 		match slot.as_mut() {
 			Some(session) => {
-				session.board.start(kind, name, verb, Instant::now());
+				if let Some((anchor_kind, anchor_name)) = anchor {
+					session.board.start_before(
+						anchor_kind,
+						&anchor_name,
+						kind,
+						name,
+						verb,
+						Instant::now(),
+					);
+				} else {
+					session.board.start(kind, name, verb, Instant::now());
+				}
 				if session.region.is_some() {
 					Sink::Live
 				} else {
@@ -175,6 +223,91 @@ pub fn start(kind: &str, name: &str, verb: &str) {
 		}
 	};
 	emit(sink, kind, name, verb);
+}
+
+/// Hand one line of a row's stream output to the renderer.
+///
+/// On a live terminal the line is appended to the per-row tail kept under the
+/// row (capped at [`MAX_NOTES_PER_ROW`]), then the region is repainted so the
+/// dimmed line shows under the row. In a pipe or whenever the session has no
+/// region the same call writes `<name> | <line>` to stderr directly, so a
+/// redirected stderr still sees every stream line, prefixed the way the
+/// `logs` command prefixes container output.
+///
+/// The transition is decided once, here, by the same predicate `start` uses:
+/// `live_terminal()` is consulted at `begin` and the result is cached, so a
+/// live session always has a region, and a non-live session never does. That
+/// keeps the decision in lockstep with the rest of the renderer; a divergent
+/// decision here would let a live run leak stream lines to stderr and a
+/// piped run paint dimmed notes on a sink that does not exist.
+///
+/// Empty lines and lines that trim to empty are skipped: a buildah stream that
+/// emits `\n` between blocks would otherwise fill the tail with blanks and
+/// push the meaningful lines off the end.
+pub fn note_for(kind: &str, name: &str, line: &str) {
+	let Some(kind) = Kind::from_noun(kind) else {
+		return;
+	};
+	let trimmed = line.trim();
+	if trimmed.is_empty() {
+		return;
+	}
+	let sink = {
+		let Ok(mut slot) = SESSION.lock() else {
+			return;
+		};
+		match slot.as_mut() {
+			Some(session) => {
+				if session.region.is_some() {
+					push_note_live(&mut session.notes, kind, name, trimmed);
+					Sink::Live
+				} else {
+					Sink::Plain
+				}
+			}
+			None => Sink::None,
+		}
+	};
+	match sink {
+		Sink::Live => repaint(),
+		Sink::Plain | Sink::None => {
+			if !super::progress_enabled() {
+				return;
+			}
+			use std::io::Write;
+			let _ = writeln!(anstream::stderr(), "{name} | {trimmed}");
+		}
+	}
+}
+
+/// Push one line into a row's tail, keeping only the last [`MAX_NOTES_PER_ROW`]
+/// lines. Split out of [`note_for`] so the trim/append/pop-front logic is
+/// reachable from a test without first opening a live region, which the
+/// cargo-test runner cannot give us.
+fn push_note_live(
+	notes: &mut HashMap<(Kind, String), VecDeque<String>>,
+	kind: Kind,
+	name: &str,
+	trimmed: &str,
+) {
+	let tail = notes.entry((kind, name.to_string())).or_default();
+	tail.push_back(trimmed.to_string());
+	while tail.len() > MAX_NOTES_PER_ROW {
+		tail.pop_front();
+	}
+}
+
+#[cfg(test)]
+pub(crate) const MAX_NOTES_PER_ROW_FOR_TESTS: usize = MAX_NOTES_PER_ROW;
+
+#[cfg(test)]
+pub(crate) fn push_note_live_for_tests(
+	notes: &mut HashMap<(Kind, String), VecDeque<String>>,
+	kind: Kind,
+	name: &str,
+	trimmed: &str,
+) {
+	push_note_live(notes, kind, name, trimmed);
 }
 
 /// The plain-sink buffer for transitional verbs that have not yet been
@@ -371,6 +504,10 @@ pub(super) fn finish(kind: &str, name: &str, verb: &str) -> bool {
 		match slot.as_mut() {
 			Some(session) => {
 				session.board.finish(kind, name, verb, Instant::now());
+				// Drop the per-row stream tail: the row is closing, and the
+				// dimmed lines under it would otherwise linger as the next
+				// repaint's noise. A finished row keeps no shadow.
+				session.notes.remove(&(kind, name.to_string()));
 				if session.region.is_some() {
 					Sink::Live
 				} else {
@@ -422,6 +559,12 @@ pub fn end() {
 		if let Some(region) = session.region.as_ref() {
 			region.close_out();
 		}
+		// Drop every per-row stream tail. The session is gone; the VecDeques
+		// go with it. Belt-and-braces: `finish` already clears each row's
+		// notes as it closes, so anything still in the map here belongs to a
+		// row that closed without a `finish`, and would otherwise linger as
+		// garbage the next test picks up.
+		drop(session.notes);
 	}
 	// Flush any buffered transitional verbs that never received a final one.
 	// The plain sink is the only one that buffers, but `end` is the right place
@@ -440,7 +583,12 @@ fn repaint() {
 	};
 	let frame = session.frame;
 	let name_width = session.name_width;
-	let Session { board, region, .. } = session;
+	let Session {
+		board,
+		region,
+		notes,
+		..
+	} = session;
 	let Some(region) = region.as_mut() else {
 		return;
 	};
@@ -460,10 +608,17 @@ fn repaint() {
 	if !rows.is_empty() {
 		let (done, total) = board.tally();
 		lines.push(row::summary(done, total, width));
-		lines.extend(
-			rows.iter()
-				.map(|r| row::render(r, name_width, frame, now, width)),
-		);
+		for r in rows {
+			lines.push(row::render(r, name_width, frame, now, width));
+			// Per-row tail: the last few stream lines the row has produced,
+			// rendered dimmed and indented one space so they sit under the
+			// row without competing with the marker column on the next row.
+			if let Some(tail) = notes.get(&(r.kind, r.name.clone())) {
+				for line in tail.iter() {
+					lines.push(row::render_note(line, width));
+				}
+			}
+		}
 	}
 	region.show(&scrollback, &lines);
 }

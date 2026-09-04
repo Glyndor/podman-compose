@@ -24,6 +24,8 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use tracing::{info, warn};
 
+use std::io::IsTerminal;
+
 use crate::compose::types::{BuildConfig, Service};
 use crate::engine::container_config::resources::is_known_ulimit;
 use crate::error::{ComposeError, Result};
@@ -185,13 +187,53 @@ impl Engine {
 			target_services.to_vec()
 		};
 
+		// Seed the board with the image set this pass will build, one row
+		// per image, before the first `Building` line. A service with no
+		// `build:` block is skipped, the same way `build_service` does; its
+		// row would never move and would read as something hung (#1681).
+		// Two services on the same image share one row, since the row is
+		// the image.
+		let mut images: Vec<String> = Vec::new();
 		for name in &names {
-			let service = &file.services[name];
-			if service.build.is_some() {
-				self.build_service(name, service, file, opts).await?;
+			let Some(service) = file.services.get(name) else {
+				continue;
+			};
+			if service.build.is_none() {
+				continue;
+			}
+			let tag = primary_build_tag(
+				&self.project,
+				name,
+				service.image.as_deref(),
+				service.build.as_ref().map(|b| b.tags()).unwrap_or(&[]),
+			);
+			if !images.iter().any(|seen| seen == &tag) {
+				images.push(tag);
 			}
 		}
-		Ok(())
+		crate::ui::progress::begin(
+			images
+				.iter()
+				.map(|image| (crate::ui::progress::Kind::Image, image.clone())),
+		);
+
+		let result = async {
+			for name in &names {
+				let service = &file.services[name];
+				if service.build.is_some() {
+					self.build_service(name, service, file, opts).await?;
+				}
+			}
+			Ok(())
+		}
+		.await;
+
+		// Close the board on every exit, the way `pull_services_with_options`
+		// and `run_up` do. The live region hides the cursor, so an early
+		// return through it would leave the terminal without a caret. `end`
+		// is idempotent.
+		crate::ui::progress::end();
+		result
 	}
 
 	pub(super) async fn build_service(
@@ -495,23 +537,73 @@ impl Engine {
 		};
 		let mut stream = crate::libpod::parse_json_lines::<BuildOutput>(resp.into_body());
 
+		// Open the board row for this image before the first `STEP` line, so
+		// the row's `Building` verb is what the reader sees while the stream
+		// arrives. `progress::start` is a no-op when the board already had
+		// the row seeded (`build_all_with_options` did this for a standalone
+		// `build`), and inserts it before the service's container row when
+		// `up --build` calls into a board the `up` pass opened. Either way,
+		// the row ends up with the right identifier, in the right position
+		// and with a working verb (#1681).
+		if !opts.quiet {
+			let first_container = self.replica_names(service_name, service).into_iter().next();
+			match first_container {
+				Some(container_name) => crate::ui::progress::start_anchored(
+					"Image",
+					&tag,
+					"Building",
+					Some("Container"),
+					Some(&container_name),
+				),
+				None => crate::ui::progress::start("Image", &tag, "Building"),
+			}
+		}
+
+		// The captured stream of this image: needed on a terminal failure
+		// path, where the notes buffer only kept the last 4 lines and the
+		// rest has to be replayed as scrollback so the reason is on screen.
+		// Off a terminal, every line is already in stderr through `note_for`,
+		// so this stays empty in the test runs.
+		let mut capture: Vec<String> = Vec::new();
+		// Track the last image id the stream emitted, so the success path
+		// can put it on stdout when stdout is not a terminal. Buildah
+		// closes with a `--> sha256:<64-hex>` line, which is what a script
+		// capturing stdout wants; on a terminal it is dropped (the row
+		// already says it landed). `None` until the first matching line.
+		let mut last_image_id: Option<String> = None;
+		let mut progress = BuildStreamProgress::new();
+
 		while let Some(result) = stream.next().await {
 			match result {
 				Ok(output) => {
-					// stderr, not stdout. Build output went to stdout via `print!`,
-					// which contradicted the documented promise that stdout stays
-					// a clean pipe — the one thing a caller redirecting `podup
-					// build > log` relies on, and the same promise `config` and
-					// `generate quadlet` are built around.
-					if !opts.quiet && !output.stream.is_empty() {
-						eprint!("{}", output.stream);
+					if !output.stream.is_empty() {
+						let trimmed = output.stream.trim_end().to_string();
+						if !opts.quiet && !trimmed.is_empty() {
+							// `STEP n/m:` lines advance the row verb. Every
+							// other line is a tail note, painted dimmed under
+							// the row on a terminal and prefixed on stderr in
+							// a pipe.
+							if let Some(verb) = progress.observe(&trimmed) {
+								crate::ui::progress::start("Image", &tag, &verb);
+							}
+							// The image id line is the one carry-over from
+							// today that a script reading stdout needs. It
+							// goes to notes/live as any other line, and is
+							// additionally stashed so the success path can
+							// echo it to stdout when stdout is not a tty.
+							if let Some(id) = parse_image_id_line(&trimmed) {
+								last_image_id = Some(id);
+							}
+							crate::ui::progress::note_for("Image", &tag, &trimmed);
+						}
+						capture.push(trimmed);
 					}
 					if let Some(err) = output.error_detail.and_then(|e| e.message) {
-						return Err(ComposeError::Build(err));
+						return Err(self.fail_build(&tag, err, capture, opts.quiet));
 					}
 					if let Some(err) = output.error {
 						if !err.is_empty() {
-							return Err(ComposeError::Build(err));
+							return Err(self.fail_build(&tag, err, capture, opts.quiet));
 						}
 					}
 				}
@@ -519,8 +611,52 @@ impl Engine {
 			}
 		}
 
+		// Success: close the row with `Built`. The trailing image id goes to
+		// stdout only when stdout is not a terminal, so a script reading
+		// `podup build | awk '{print $1}'` can still pluck the id; on a
+		// terminal the row says it landed and the id would only be noise.
+		if !opts.quiet {
+			crate::ui::progress_line("Image", &tag, "Built");
+		}
+		if !std::io::stdout().is_terminal() {
+			let resolved = match last_image_id {
+				Some(id) => Some(id),
+				None => match self.image_id(&tag).await {
+					Ok(Some(id)) => Some(id),
+					_ => None,
+				},
+			};
+			if let Some(id) = resolved {
+				use std::io::Write;
+				let _ = writeln!(std::io::stdout(), "{id}");
+			}
+		}
+
 		self.apply_extra_tags(build, &tag).await?;
 		Ok(())
+	}
+
+	/// Close the row as `Failed`, then on a terminal replay the full stream
+	/// as scrollback so the failure reason is on screen. In a pipe every line
+	/// has already been written by `note_for` and no replay is needed.
+	fn fail_build(
+		&self,
+		tag: &str,
+		err: String,
+		capture: Vec<String>,
+		quiet: bool,
+	) -> ComposeError {
+		if !quiet {
+			crate::ui::progress_line("Image", tag, "Failed");
+		}
+		if !quiet && std::io::stderr().is_terminal() {
+			use std::io::Write;
+			let mut out = std::io::stderr().lock();
+			for line in &capture {
+				let _ = writeln!(out, "{tag} | {line}");
+			}
+		}
+		ComposeError::Build(err)
 	}
 
 	/// Resolve `build.secrets` into `(in-tar files, secret specs)`.
@@ -602,6 +738,66 @@ impl Engine {
 	}
 }
 
+/// Whether a buildah stream line is the one that carries the new image id.
+///
+/// Buildah closes a successful build with the full image id on a line of its
+/// own: 64 hex digits, nothing else. It is the second-to-last line of the
+/// stream, between `Successfully tagged <tag>` and `Successfully built
+/// <short-id>` (measured on Podman 5.7, 2026-09-04). The `--> <short-id>`
+/// layer markers and `--> Using cache <digest>` carry a prefix and are not
+/// matched. A script reading `podup build` from a pipe wants exactly this
+/// value, and a terminal does not (#1681).
+fn parse_image_id_line(line: &str) -> Option<String> {
+	let line = line.trim();
+	if line.len() != 64 || !line.bytes().all(|b| b.is_ascii_hexdigit()) {
+		return None;
+	}
+	Some(line.to_string())
+}
+
+/// Parse one buildah stream line into the row verb it implies, if any.
+///
+/// On the libpod build stream a `STEP n/m: <instruction>` line arrives once
+/// per Dockerfile instruction: the row's verb should reflect where in the
+/// build we are. Every other line (`--> 3f3c...`, `COMMIT <tag>`,
+/// `Successfully tagged <tag>`) carries no transition of its own; those are
+/// routed through `progress::note_for` as tail lines.
+#[derive(Default)]
+struct BuildStreamProgress {
+	last_step: Option<(usize, usize)>,
+}
+
+impl BuildStreamProgress {
+	fn new() -> Self {
+		Self::default()
+	}
+
+	fn observe(&mut self, line: &str) -> Option<String> {
+		const STEP_PREFIX: &str = "STEP ";
+		let line = line.trim_end();
+		let rest = line.strip_prefix(STEP_PREFIX)?;
+		// `STEP n/m: <instruction>`. The colon separates the counters from
+		// the instruction text. Both sides must parse.
+		let (counters, _) = rest.split_once(':')?;
+		let (cur, total) = counters.split_once('/')?;
+		let cur: usize = cur.parse().ok()?;
+		let total: usize = total.parse().ok()?;
+		self.last_step = Some((cur, total));
+		Some(self.format_verb())
+	}
+
+	fn format_verb(&self) -> String {
+		match self.last_step {
+			Some((cur, total)) => format!("Building {cur}/{total}"),
+			None => "Building".to_string(),
+		}
+	}
+}
+
 #[cfg(test)]
 #[path = "build_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "build_board_tests.rs"]
+mod board_tests;

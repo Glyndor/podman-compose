@@ -3,6 +3,17 @@ use super::width_from;
 use crate::ui::progress::row;
 use crate::ui::progress::{Kind, Row, State};
 
+/// The plain-sink tests share one process-wide session and buffer, and the
+/// test harness runs them on separate threads: without this lock two of them
+/// reset the buffer under each other and the count assertions fail on some
+/// runs (3 of 20 measured in parallel, 0 of 43 single-threaded). A poisoned
+/// lock is still a lock, so a failed test does not take the rest with it.
+static SESSION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn hold_session() -> std::sync::MutexGuard<'static, ()> {
+	SESSION_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// `window_size` answers `(rows, cols)`. Getting this backwards is invisible
 /// on a square-ish terminal and mangles every line on a normal one.
 #[test]
@@ -123,6 +134,7 @@ fn reset_plain_buffer() {
 /// pairing without touching the buffer.
 #[test]
 fn plain_sink_prints_only_the_final_verb() {
+	let _session = hold_session();
 	reset_plain_buffer();
 	// Disable colour so the renderer (and anstream::stderr) does not insert
 	// any escape sequence we would have to strip from the captured output.
@@ -159,10 +171,10 @@ fn plain_sink_prints_only_the_final_verb() {
 
 /// A transitional verb whose final never arrives is flushed at `progress::end`
 /// with the transitional verb intact, so a crash mid-way still says `Creating`
-/// in the log (#1673). The brief calls this out as the `Creating` with no end
-/// case.
+/// in the log (#1673): the `Creating` with no end case.
 #[test]
 fn plain_sink_keeps_a_transitional_verb_when_nothing_final_arrives() {
+	let _session = hold_session();
 	reset_plain_buffer();
 	let prev_progress = super::super::progress_enabled();
 	super::super::set_progress(true);
@@ -221,6 +233,7 @@ fn a_failed_row_is_printed_once() {
 /// end-to-end case through a pipe).
 #[test]
 fn only_a_no_op_final_verb_drops_the_transitional_line() {
+	let _session = hold_session();
 	for verb in ["Exists", "Running", "Absent", "Skipped"] {
 		assert!(
 			super::super::progress::is_noop_final_for_tests(verb),
@@ -235,4 +248,55 @@ fn only_a_no_op_final_verb_drops_the_transitional_line() {
 			"{verb}"
 		);
 	}
+}
+
+/// A row's stream tail keeps only the last four lines. Five lines pushed in
+/// leaves the tail holding lines 2..=5, in arrival order. That is the
+/// shape the live region paints dimmed under the row (#1681): four is the
+/// window that keeps a step's `--> <layer>` line and the `COMMIT` line on
+/// screen together at the end of a build without the region growing past
+/// what a short terminal shows.
+///
+/// Reaching the live-push path in a cargo test requires going around the
+/// terminal check that `note_for` uses to decide live vs plain: the test
+/// runner captures stderr, so `live_terminal()` is false, and a `note_for`
+/// call routes to the plain-sink stderr write instead of the tail. The
+/// internal `push_note_live` helper is the only thing that calls the
+/// append-and-trim path, so the test exercises it directly to pin the
+/// trim window.
+#[test]
+fn notes_keep_the_last_four_lines_per_row() {
+	let mut notes = std::collections::HashMap::new();
+	let mut push = |line: &str| {
+		super::super::progress::push_note_live_for_tests(
+			&mut notes,
+			Kind::Image,
+			"localhost/img:1",
+			line,
+		);
+	};
+	push("first");
+	push("second");
+	push("third");
+	push("fourth");
+	push("fifth");
+
+	let tail = notes
+		.get(&(Kind::Image, "localhost/img:1".to_string()))
+		.expect("the row's tail is populated");
+	assert_eq!(
+		tail.iter().cloned().collect::<Vec<_>>(),
+		vec![
+			"second".to_string(),
+			"third".to_string(),
+			"fourth".to_string(),
+			"fifth".to_string(),
+		],
+		"after five pushes the tail holds the last four, in order"
+	);
+	assert_eq!(
+		tail.len(),
+		super::super::progress::MAX_NOTES_PER_ROW_FOR_TESTS,
+		"the cap is enforced on every push"
+	);
 }

@@ -208,7 +208,7 @@ fn a_retried_blob_is_counted_once() {
 ///
 /// Driving this through the fake Podman (and not by mocking the parser) is
 /// what pins the gate in pull.rs and not somewhere inside
-/// `internal/ui/progress/`, which is what the brief asked for.
+/// `internal/ui/progress/`, which is where the contract belongs.
 #[tokio::test]
 async fn a_piped_pull_prints_only_pulling_and_pulled() {
 	// Each chunk is the wire form of one `ImagePullProgress` event, which is a

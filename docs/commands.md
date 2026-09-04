@@ -186,6 +186,21 @@ Build or rebuild service images (optionally only the named services).
 | `--push` | Push each built image to its registry after a successful build. | off |
 | `-q, --quiet` | Suppress the build output. | off |
 
+On a terminal `build` draws a board of its own, one row per image, `Building`, then `Building n/m` as each
+`STEP n/m` line arrives, then `Built` (or `Failed`). The buildah stream
+itself is folded: while a row builds, its last four lines sit dimmed under
+the row and vanish when it finishes; on failure the whole stream is
+printed once, above the error, so the reason is on screen.
+`up --build` runs that build board first and the `up` board after it; an
+`up` that finds a service's image missing builds it on the `up` board,
+with the image row just above the service's container row.
+
+In a pipe every stream line goes to stderr prefixed with `<image-tag> | `,
+the way `logs` prefixes container output. The image id of the freshly built
+image goes to stdout only when stdout is not a terminal, so a script
+piping `podup build | awk '{print $1}'` can pluck it; on a terminal the
+row says `Built` and the id is dropped so the row is the record.
+
 ## Inspection
 
 ### `ps`

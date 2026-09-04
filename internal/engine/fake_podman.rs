@@ -180,6 +180,13 @@ async fn serve_one(
 	// bytes after the header terminator reaches the end of the request. A
 	// missing or non-numeric header leaves the body empty, which is what every
 	// pre-existing test relied on.
+	//
+	// When the client does not know the body size up front, `post_stream_body`
+	// (`POST /libpod/build` and the build-context tar), hyper falls back to
+	// `Transfer-Encoding: chunked` and the wire shape is a sequence of
+	// `<hex-len>\r\n<bytes>\r\n` blocks ending in `0\r\n\r\n`. The pre-existing
+	// tests never exercised that path; `build` (#1681) does, and needs the
+	// fake to read it so the body can complete and the response head can fly.
 	let content_length: Option<usize> = head
 		.lines()
 		.find_map(|l| {
@@ -187,31 +194,40 @@ async fn serve_one(
 				.or_else(|| l.strip_prefix("content-length: "))
 		})
 		.and_then(|v| v.trim().parse::<usize>().ok());
-	let body = match content_length {
-		Some(n) if n > 0 => {
-			// Drain the bytes already read past the header terminator.
-			let head_end = head.find("\r\n\r\n").map(|i| i + 4).unwrap_or(buf.len());
-			let already = buf.len() - head_end;
-			let mut body = Vec::with_capacity(n);
-			if already >= n {
-				body.extend_from_slice(&buf[head_end..head_end + n]);
-			} else {
-				body.extend_from_slice(&buf[head_end..]);
-				let mut remaining = n - body.len();
-				let mut tail = [0u8; 1024];
-				while remaining > 0 {
-					let take = remaining.min(tail.len());
-					let n = stream.read(&mut tail[..take]).await?;
-					if n == 0 {
-						break;
+	let chunked = head
+		.lines()
+		.any(|l| l.eq_ignore_ascii_case("transfer-encoding: chunked"));
+	let head_end = head.find("\r\n\r\n").map(|i| i + 4).unwrap_or(buf.len());
+	let body = if chunked {
+		let mut body = Vec::new();
+		read_chunked_body(&mut stream, &buf[head_end..], &mut body).await?;
+		body
+	} else {
+		match content_length {
+			Some(n) if n > 0 => {
+				// Drain the bytes already read past the header terminator.
+				let already = buf.len() - head_end;
+				let mut body = Vec::with_capacity(n);
+				if already >= n {
+					body.extend_from_slice(&buf[head_end..head_end + n]);
+				} else {
+					body.extend_from_slice(&buf[head_end..]);
+					let mut remaining = n - body.len();
+					let mut tail = [0u8; 1024];
+					while remaining > 0 {
+						let take = remaining.min(tail.len());
+						let n = stream.read(&mut tail[..take]).await?;
+						if n == 0 {
+							break;
+						}
+						body.extend_from_slice(&tail[..n]);
+						remaining -= n;
 					}
-					body.extend_from_slice(&tail[..n]);
-					remaining -= n;
 				}
+				body
 			}
-			body
+			_ => Vec::new(),
 		}
-		_ => Vec::new(),
 	};
 
 	requests.lock().unwrap().push(format!("{method} {target}"));
@@ -282,4 +298,75 @@ async fn write_chunked(stream: &mut UnixStream, chunks: &[String]) -> std::io::R
 			.await?;
 	}
 	stream.flush().await
+}
+
+/// Read a `Transfer-Encoding: chunked` request body into `out`. `prefix` is
+/// whatever was already in the read buffer past the `\r\n\r\n` header
+/// terminator; the rest comes off the socket. Walks the chunked wire shape
+/// until the zero-length terminator, appending each chunk's payload bytes to
+/// `out` and ignoring the chunk-extension / trailer framing the client is
+/// allowed to send.
+async fn read_chunked_body(
+	stream: &mut UnixStream,
+	prefix: &[u8],
+	out: &mut Vec<u8>,
+) -> std::io::Result<()> {
+	let mut buf: Vec<u8> = prefix.to_vec();
+	loop {
+		// Pull enough bytes to find the next `\r\n`, which terminates a chunk
+		// size header. Hyper's StreamBody emits short chunks (one frame per
+		// mpsc receive), so a 4 KiB read window is plenty.
+		while !buf.windows(2).any(|w| w == b"\r\n") {
+			let mut tmp = [0u8; 4096];
+			let read = stream.read(&mut tmp).await?;
+			if read == 0 {
+				return Ok(());
+			}
+			buf.extend_from_slice(&tmp[..read]);
+		}
+		let nl = buf.windows(2).position(|w| w == b"\r\n").unwrap();
+		let size_line = std::str::from_utf8(&buf[..nl])
+			.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+		// Chunk extensions (`name=value;name=value`) are legal; split off the
+		// size token at the first `;`. We do not act on any extension.
+		let size_tok = size_line.split(';').next().unwrap_or("").trim();
+		let size: usize = match usize::from_str_radix(size_tok, 16) {
+			Ok(n) => n,
+			Err(_) => {
+				return Err(std::io::Error::new(
+					std::io::ErrorKind::InvalidData,
+					format!("invalid chunk size '{size_tok}'"),
+				));
+			}
+		};
+		// Drop the size line; what remains starts at the chunk's payload (or
+		// at the next chunk's size header if `size == 0`).
+		buf.drain(..nl + 2);
+		if size == 0 {
+			// Trailing `\r\n` is optional in HTTP/1.1; consume what the
+			// client sent (one or two bytes) and stop.
+			while buf.len() < 2 {
+				let mut tmp = [0u8; 2];
+				let read = stream.read(&mut tmp).await?;
+				if read == 0 {
+					break;
+				}
+				buf.extend_from_slice(&tmp[..read]);
+			}
+			buf.drain(..buf.len().min(2));
+			return Ok(());
+		}
+		// Make sure we have the full chunk (and its trailing CRLF) in `buf`,
+		// pulling more bytes if needed.
+		while buf.len() < size + 2 {
+			let mut tmp = [0u8; 4096];
+			let read = stream.read(&mut tmp).await?;
+			if read == 0 {
+				return Ok(());
+			}
+			buf.extend_from_slice(&tmp[..read]);
+		}
+		out.extend_from_slice(&buf[..size]);
+		buf.drain(..size + 2);
+	}
 }

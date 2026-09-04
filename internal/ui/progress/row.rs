@@ -205,6 +205,26 @@ pub fn summary(done: usize, total: usize, width: usize) -> String {
 	}
 }
 
+/// A dimmed tail line painted under a working row to give the reader a peek
+/// at what the producer is currently emitting. One leading space keeps it
+/// visually under the marker column rather than butting against it, and the
+/// rest is plain text the caller has already collapsed to a single line.
+/// Truncated by character, not by escape sequence, the same way [`render`]
+/// does it.
+pub fn render_note(line: &str, width: usize) -> String {
+	let indented = format!(" {line}");
+	let trimmed = if width > 0 && indented.chars().count() > width {
+		indented.chars().take(width).collect::<String>()
+	} else {
+		indented
+	};
+	let plain = trimmed.trim_end();
+	if !stderr_colored() {
+		return plain.to_string();
+	}
+	paint(Style::new().dimmed(), plain, true)
+}
+
 #[cfg(test)]
 #[path = "row_tests.rs"]
 mod tests;
