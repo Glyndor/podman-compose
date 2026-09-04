@@ -79,6 +79,11 @@ where
 		.await
 }
 
+/// What determines one actual pull request: the image reference, the resolved
+/// pull policy (the `--pull` override applied ahead of the service's own
+/// `pull_policy:`), and the platform. The dedup key of a standalone pull.
+type PullKey<'a> = (&'a str, &'static str, Option<&'a str>);
+
 impl Engine {
 	/// Pull images for all services that declare an `image:` key, concurrently.
 	pub async fn pull(&self, file: &ComposeFile) -> Result<()> {
@@ -139,7 +144,6 @@ impl Engine {
 		// the dedup step below and the final reporting loop agree on exactly
 		// the same value instead of recomputing it (and re-warning on an
 		// unrecognized policy) twice.
-		type PullKey<'a> = (&'a str, &'static str, Option<&'a str>);
 		let candidates: Vec<(&str, &Service, PullKey)> = file
 			.services
 			.iter()
@@ -167,13 +171,45 @@ impl Engine {
 			})
 			.collect::<Result<Vec<_>>>()?;
 
+		// Seed the board with every distinct image this pass will fetch, before
+		// the first `Pulling` line. The set is knowable exactly here: it is the
+		// same `candidates` the dedup below works from, and every progress event
+		// on this path fires once its own pull is over. Two services naming the
+		// same image share one row, since the row is the image.
+		let mut images: Vec<String> = Vec::new();
+		for (_, _, key) in &candidates {
+			if !images.iter().any(|seen| seen == key.0) {
+				images.push(key.0.to_string());
+			}
+		}
+		crate::ui::progress::begin(
+			images
+				.into_iter()
+				.map(|image| (crate::ui::progress::Kind::Image, image)),
+		);
+		let outcome = self.pull_candidates(&candidates, opts).await;
+		// Close the board on every exit, the way `run_up` does: the live region
+		// hides the cursor, so an early return through it would leave the
+		// terminal without a caret. `end` is idempotent.
+		crate::ui::progress::end();
+		outcome
+	}
+
+	/// Issue the deduplicated pulls for `candidates` and report each service's
+	/// outcome. Split out of [`Self::pull_services_with_options`] so the board
+	/// opened over the image set has exactly one exit to close on.
+	async fn pull_candidates<'a>(
+		&self,
+		candidates: &[(&'a str, &'a Service, PullKey<'a>)],
+		opts: PullOptions,
+	) -> Result<()> {
 		// Dedup by that key: 50 services agreeing on image, resolved policy
 		// and platform must issue one pull, not 50. Two services naming the
 		// same image with a different resolved policy or platform get their
 		// own key, and so their own pull — one representative service per
 		// unique key is enough to issue it.
-		let mut representative: HashMap<PullKey, &Service> = HashMap::new();
-		for (_, service, key) in &candidates {
+		let mut representative: HashMap<PullKey<'a>, &'a Service> = HashMap::new();
+		for (_, service, key) in candidates {
 			representative.entry(*key).or_insert(service);
 		}
 
@@ -207,7 +243,7 @@ impl Engine {
 
 		for (name, _service, key) in candidates {
 			let image = key.0;
-			let (present, pull_err) = outcomes.get(&key).cloned().unwrap_or((false, None));
+			let (present, pull_err) = outcomes.get(key).cloned().unwrap_or((false, None));
 			// Presence alone is not success. A stale copy of the image already in
 			// local storage makes the probe pass while the pull actually failed,
 			// so `pull` against an unreachable registry exited 0 and reported
@@ -476,3 +512,7 @@ mod tests;
 #[cfg(test)]
 #[path = "pull_typo_tests.rs"]
 mod typo_tests;
+
+#[cfg(all(test, unix))]
+#[path = "pull_board_tests.rs"]
+mod board_tests;

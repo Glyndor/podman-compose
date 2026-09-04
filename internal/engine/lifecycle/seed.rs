@@ -14,15 +14,74 @@
 //! is appended by the board when its event arrives. Being approximately right
 //! before the work starts beats being exactly right after it finished.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::compose::types::ComposeFile;
+use crate::compose::types::{ComposeFile, Service};
 use crate::ui::progress::Kind;
 
 use super::super::network::resolve_network_name;
 use super::super::Engine;
 
+/// Every container a level-walking lifecycle command will act on, in the order
+/// it will act on them: the levels as that command walks them (already
+/// reversed for the ones that tear down), and within a level the replicas the
+/// prefetched listing found.
+///
+/// Built from what Podman actually has, like [`Engine::down_resources`]: a
+/// service the file defines but that was never created contributes no row,
+/// because a row that never moves reads as something hung. Shared by `stop`,
+/// `start`, `restart`, `kill`, `pause`, `unpause` and `rm`, which all walk
+/// levels over the same prefetched listing.
+pub(super) fn level_container_resources(
+	levels: &[Vec<String>],
+	live_by_service: &HashMap<String, Vec<String>>,
+) -> Vec<(Kind, String)> {
+	levels
+		.iter()
+		.flatten()
+		.filter_map(|service| live_by_service.get(service))
+		.flatten()
+		.map(|name| (Kind::Container, name.clone()))
+		.collect()
+}
+
 impl Engine {
+	/// The project networks a command will create or remove: every declared
+	/// network that is not `external`, under the name Podman will show it by.
+	///
+	/// External networks are never created or removed by podup, so they are not
+	/// work any command will do and must not appear as rows waiting to happen.
+	fn network_resources(&self, file: &ComposeFile) -> Vec<(Kind, String)> {
+		file.networks
+			.iter()
+			.filter(|(_, cfg)| !cfg.as_ref().and_then(|c| c.external).unwrap_or(false))
+			.map(|(key, _)| {
+				(
+					Kind::Network,
+					resolve_network_name(key, file, &self.project),
+				)
+			})
+			.collect()
+	}
+
+	/// The project volumes a command will create or remove, under the names
+	/// Podman will show them by. External volumes are left out for the same
+	/// reason external networks are.
+	fn volume_resources(&self, file: &ComposeFile) -> Vec<(Kind, String)> {
+		file.volumes
+			.iter()
+			.filter(|(_, cfg)| !cfg.as_ref().and_then(|c| c.external).unwrap_or(false))
+			.map(|(key, cfg)| {
+				let name = cfg
+					.as_ref()
+					.and_then(|c| c.name.as_deref())
+					.map(str::to_string)
+					.unwrap_or_else(|| format!("{}_{key}", self.project));
+				(Kind::Volume, name)
+			})
+			.collect()
+	}
+
 	/// Every resource an `up`/`create` pass will touch, in the order it will
 	/// touch them: networks, then volumes, then containers by dependency level.
 	///
@@ -35,31 +94,8 @@ impl Engine {
 		enabled: &HashSet<String>,
 		target_set: &Option<HashSet<String>>,
 	) -> Vec<(Kind, String)> {
-		let mut out = Vec::new();
-
-		// External networks and volumes are never created by podup, so they are
-		// not work this command will do and must not appear as rows waiting to
-		// happen.
-		for (key, cfg) in &file.networks {
-			if cfg.as_ref().and_then(|c| c.external).unwrap_or(false) {
-				continue;
-			}
-			out.push((
-				Kind::Network,
-				resolve_network_name(key, file, &self.project),
-			));
-		}
-		for (key, cfg) in &file.volumes {
-			let cfg = cfg.as_ref();
-			if cfg.and_then(|c| c.external).unwrap_or(false) {
-				continue;
-			}
-			let name = cfg
-				.and_then(|c| c.name.as_deref())
-				.map(str::to_string)
-				.unwrap_or_else(|| format!("{}_{}", self.project, key));
-			out.push((Kind::Volume, name));
-		}
+		let mut out = self.network_resources(file);
+		out.extend(self.volume_resources(file));
 
 		// Containers in dependency order, which is the order they will start.
 		// Falls back to the file's own order if the graph cannot be resolved —
@@ -107,29 +143,33 @@ impl Engine {
 			.iter()
 			.map(|name| (Kind::Container, name.clone()))
 			.collect();
-		for (key, cfg) in &file.networks {
-			if cfg.as_ref().and_then(|c| c.external).unwrap_or(false) {
-				continue;
-			}
-			out.push((
-				Kind::Network,
-				resolve_network_name(key, file, &self.project),
-			));
-		}
+		out.extend(self.network_resources(file));
 		// Volumes survive a `down` without `-v`, so they are not work this pass
 		// will do.
 		if remove_volumes {
-			for (key, cfg) in &file.volumes {
-				let cfg = cfg.as_ref();
-				if cfg.and_then(|c| c.external).unwrap_or(false) {
-					continue;
-				}
-				let name = cfg
-					.and_then(|c| c.name.as_deref())
-					.map(str::to_string)
-					.unwrap_or_else(|| format!("{}_{}", self.project, key));
-				out.push((Kind::Volume, name));
-			}
+			out.extend(self.volume_resources(file));
+		}
+		out
+	}
+
+	/// What a one-off `run` reports before the container's own output takes
+	/// over: the project networks it ensures, then the service's image when
+	/// that image still has to be acquired.
+	///
+	/// `image_missing` is the caller's answer to "is the image absent from
+	/// local storage", which is the only part of this list that a compose file
+	/// cannot tell. An image already in storage produces no verb on this path,
+	/// so seeding a row for it would leave a line reading `Pending` after the
+	/// board closed.
+	pub(super) fn run_resources(
+		&self,
+		file: &ComposeFile,
+		service: &Service,
+		image_missing: bool,
+	) -> Vec<(Kind, String)> {
+		let mut out = self.network_resources(file);
+		if let Some(image) = service.image.as_deref().filter(|_| image_missing) {
+			out.push((Kind::Image, image.to_string()));
 		}
 		out
 	}

@@ -15,6 +15,8 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 mod board;
+#[cfg(test)]
+pub(crate) mod capture;
 mod live;
 mod row;
 
@@ -96,9 +98,21 @@ fn width_from(size: Option<(u16, u16)>) -> Option<usize> {
 /// A no-op when progress output is off, so an embedding crate never gets a
 /// board it did not ask for.
 pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
+	// Recorded before the gate, so a test can read which rows a command asked
+	// for without switching the process-wide progress flag on for every other
+	// test in the suite. Compiled out of a release build entirely.
+	#[cfg(test)]
+	let resources: Vec<(Kind, String)> = resources.into_iter().collect();
+	#[cfg(test)]
+	capture::record_begin(&resources, live_terminal_colored());
 	if !super::progress_enabled() {
 		return;
 	}
+	// Cache the terminal+colour decision here (it cannot change mid-command)
+	// and only re-read the width per repaint, so a resize mid-command is
+	// still honoured. `live_allowed` previously re-ran both halves ten times a
+	// second for the lifetime of the board (#1364).
+	let live = live_terminal_colored();
 	let board = Board::new(resources);
 	let name_width = board
 		.live_rows()
@@ -107,11 +121,6 @@ pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
 		.max()
 		.unwrap_or(0)
 		.clamp(12, 40);
-	// Cache the terminal+colour decision here (it cannot change mid-command)
-	// and only re-read the width per repaint, so a resize mid-command is
-	// still honoured. `live_allowed` previously re-ran both halves ten times a
-	// second for the lifetime of the board (#1364).
-	let live = live_terminal_colored();
 	let region = live.then(|| live::Region::new(live::Target::Stderr));
 	if let Ok(mut slot) = SESSION.lock() {
 		*slot = Some(Session {
@@ -237,6 +246,8 @@ pub(super) fn finish(kind: &str, name: &str, verb: &str) -> bool {
 ///
 /// Idempotent, because the commands that open a board have several exits.
 pub fn end() {
+	#[cfg(test)]
+	capture::record_end();
 	if !SESSION_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel) {
 		// No board was ever opened — the flag is the single source of truth
 		// for that. Drop it first so a racing `finish` doesn't take the lock

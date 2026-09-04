@@ -176,35 +176,55 @@ impl Engine {
 		// framing a TTY produces. So the two are consistent, not contradictory.
 		run_service.tty = want_tty.then_some(true);
 
-		// Ensure the project networks exist (compose `run` brings them up like
-		// `up` does); the service may reference the synthesized `default`
-		// network, which is created here as `{project}_default`.
-		self.create_networks(file).await?;
-		// Inline secrets/configs are created up front (no longer in the
-		// per-container build path), so materialise them here too before the run
-		// container is created.
-		self.create_project_secrets(file).await?;
-		// `x-podman-pod`: ensure the pod exists with the current hash. A run
-		// container joins the same pod as the project's `up` would.
-		if file.podman_pod().map_err(ComposeError::Unsupported)? {
-			let pod_ports: Vec<Vec<crate::ports::ParsedPort>> = file
-				.services
-				.values()
-				.map(|s| crate::ports::parse_ports(&s.ports))
-				.collect::<crate::error::Result<Vec<_>>>()?;
-			// `run` creates one fresh container, so a recreated pod changes nothing here.
-			self.ensure_pod(file, &pod_ports).await?;
-		}
+		// Seed the board with the rows `run` reports before the container's own
+		// output takes over: the project networks, and the image when it still
+		// has to be acquired. Asked here rather than derived from the compose
+		// file alone, because whether the image is present is the one part of
+		// that list the file cannot answer.
+		let image_missing = match run_service.image.as_deref() {
+			Some(image) => !self.image_present(image).await,
+			None => false,
+		};
+		crate::ui::progress::begin(self.run_resources(file, &run_service, image_missing));
+		let prepared = async {
+			// Ensure the project networks exist (compose `run` brings them up like
+			// `up` does); the service may reference the synthesized `default`
+			// network, which is created here as `{project}_default`.
+			self.create_networks(file).await?;
+			// Inline secrets/configs are created up front (no longer in the
+			// per-container build path), so materialise them here too before the run
+			// container is created.
+			self.create_project_secrets(file).await?;
+			// `x-podman-pod`: ensure the pod exists with the current hash. A run
+			// container joins the same pod as the project's `up` would.
+			if file.podman_pod().map_err(ComposeError::Unsupported)? {
+				let pod_ports: Vec<Vec<crate::ports::ParsedPort>> = file
+					.services
+					.values()
+					.map(|s| crate::ports::parse_ports(&s.ports))
+					.collect::<crate::error::Result<Vec<_>>>()?;
+				// `run` creates one fresh container, so a recreated pod changes nothing here.
+				self.ensure_pod(file, &pod_ports).await?;
+			}
 
-		// Refuse to clobber a pre-existing container of the same name (data-loss
-		// footgun): `create_and_start` would force-remove it. Only the verbatim
-		// user-supplied name can collide with something we don't own.
-		if user_named && self.container_exists(&run_name).await? {
-			return Err(ComposeError::Unsupported(format!(
-				"the container name \"{run_name}\" is already in use; remove the existing \
-				 container or choose a different --name"
-			)));
+			// Refuse to clobber a pre-existing container of the same name (data-loss
+			// footgun): `create_and_start` would force-remove it. Only the verbatim
+			// user-supplied name can collide with something we don't own.
+			if user_named && self.container_exists(&run_name).await? {
+				return Err(ComposeError::Unsupported(format!(
+					"the container name \"{run_name}\" is already in use; remove the existing \
+					 container or choose a different --name"
+				)));
+			}
+			Ok(())
 		}
+		.await;
+		// Close the board before the container's own output starts: it is the
+		// container that owns the terminal from here on, and a region left open
+		// would repaint over its output. `end` is idempotent, so the error path
+		// below leaves no hidden cursor either.
+		crate::ui::progress::end();
+		prepared?;
 
 		let rm_path = format!(
 			"{API_PREFIX}/containers/{}?force=true",
@@ -383,3 +403,9 @@ mod tests;
 #[cfg(unix)]
 #[path = "run_stream_end_tests.rs"]
 mod stream_end_tests;
+
+/// The board `run` opens over the networks and image it reports before the
+/// container's own output takes over (#1671).
+#[cfg(all(test, unix))]
+#[path = "run_board_tests.rs"]
+mod board_tests;
