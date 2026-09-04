@@ -180,7 +180,7 @@ services:
 		// asserts at the row level, kept here so the parser is testable
 		// without an end-to-end harness: the only way to assert what the
 		// row actually said.
-		let mut progress = super::super::BuildStreamProgress::new();
+		let mut progress = super::super::steps::BuildStreamProgress::new();
 		let verbs: Vec<String> = [
 			"STEP 1/3: FROM docker.io/library/alpine:3.20",
 			"--> 3f3c8b769775",
@@ -211,12 +211,12 @@ services:
 		// script reading stdout would take them for the image id.
 		let id = "d1a7420d91864dc804e255408877a5234dfcfc9302e2526209d1f60ffd17f90b";
 		assert_eq!(
-			super::super::parse_image_id_line(id).as_deref(),
+			super::super::steps::parse_image_id_line(id).as_deref(),
 			Some(id),
 			"the bare 64-hex line is the image id"
 		);
 		assert_eq!(
-			super::super::parse_image_id_line(&format!("{id}\n")).as_deref(),
+			super::super::steps::parse_image_id_line(&format!("{id}\n")).as_deref(),
 			Some(id),
 			"with the stream's trailing newline still attached"
 		);
@@ -229,7 +229,7 @@ services:
 			"g1a7420d91864dc804e255408877a5234dfcfc9302e2526209d1f60ffd17f90b",
 		] {
 			assert!(
-				super::super::parse_image_id_line(other).is_none(),
+				super::super::steps::parse_image_id_line(other).is_none(),
 				"{other:?} is not the image id line"
 			);
 		}

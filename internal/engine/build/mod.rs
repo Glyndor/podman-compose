@@ -8,6 +8,8 @@
 mod context;
 mod pull;
 mod push;
+mod secrets;
+mod steps;
 mod stream;
 mod tags;
 /// Shared with the `up` image-prefetch and `up`/pull decision paths so they
@@ -34,6 +36,7 @@ use crate::libpod::urlencoded;
 use crate::libpod::validate::pre_validate_build;
 use crate::libpod::API_PREFIX;
 use crate::size;
+use steps::{parse_image_id_line, BuildStreamProgress};
 
 use context::{map_additional_context, INLINE_DOCKERFILE_NAME};
 use stream::{context_body, ContextSource};
@@ -636,77 +639,6 @@ impl Engine {
 		Ok(())
 	}
 
-	/// Close the row as `Failed`, then on a terminal replay the full stream
-	/// as scrollback so the failure reason is on screen. In a pipe every line
-	/// has already been written by `note_for` and no replay is needed.
-	fn fail_build(
-		&self,
-		tag: &str,
-		err: String,
-		capture: Vec<String>,
-		quiet: bool,
-	) -> ComposeError {
-		if !quiet {
-			crate::ui::progress_line("Image", tag, "Failed");
-		}
-		if !quiet && std::io::stderr().is_terminal() {
-			use std::io::Write;
-			let mut out = std::io::stderr().lock();
-			for line in &capture {
-				let _ = writeln!(out, "{tag} | {line}");
-			}
-		}
-		ComposeError::Build(err)
-	}
-
-	/// Resolve `build.secrets` into `(in-tar files, secret specs)`.
-	///
-	/// Each referenced top-level secret is read (from `file:`, inline `content:`,
-	/// or `environment:`) and returned as a `(tar-entry-name, bytes)` pair plus a
-	/// matching `id=NAME,src=ENTRY` spec for the build endpoint's `secrets` param.
-	/// `external` secrets cannot be forwarded over the API and are warned + skipped.
-	fn resolve_build_secrets(
-		&self,
-		build: &BuildConfig,
-		file: &crate::compose::types::ComposeFile,
-	) -> Result<ResolvedBuildSecrets> {
-		let mut files = Vec::new();
-		let mut specs = Vec::new();
-		for name in build.secrets() {
-			let Some(config) = file.secrets.get(name) else {
-				return Err(ComposeError::Unsupported(format!(
-					"build secret '{name}' is not defined in the top-level secrets section"
-				)));
-			};
-			let bytes: Vec<u8> = if let Some(host_path) = &config.file {
-				// Read through the bounded reader so a hostile or accidentally
-				// huge secret file is capped at MAX_FILE_BYTES like every other
-				// file read, rather than allocating an unbounded buffer.
-				crate::filesystem::read_capped(self.base_dir.join(host_path))
-					.map_err(ComposeError::Io)?
-			} else if let Some(content) = &config.content {
-				content.clone().into_bytes()
-			} else if let Some(env_var) = &config.environment {
-				std::env::var(env_var)
-					.map_err(|_| {
-						ComposeError::Unsupported(format!(
-							"build secret '{name}' references env var '{env_var}' which is not set"
-						))
-					})?
-					.into_bytes()
-			} else if config.external == Some(true) {
-				warn!("build secret '{name}' is external; cannot forward over the libpod build API — skipping");
-				continue;
-			} else {
-				continue;
-			};
-			let entry = format!(".podup-build-secret-{name}");
-			specs.push(format!("id={name},src={entry}"));
-			files.push((entry, bytes));
-		}
-		Ok((files, specs))
-	}
-
 	/// Apply any `build.tags` aliases to the freshly built image.
 	///
 	/// The primary `tag` is skipped: when no `image:` is set it is already
@@ -735,62 +667,6 @@ impl Engine {
 				.map_err(ComposeError::Podman)?;
 		}
 		Ok(())
-	}
-}
-
-/// Whether a buildah stream line is the one that carries the new image id.
-///
-/// Buildah closes a successful build with the full image id on a line of its
-/// own: 64 hex digits, nothing else. It is the second-to-last line of the
-/// stream, between `Successfully tagged <tag>` and `Successfully built
-/// <short-id>` (measured on Podman 5.7, 2026-09-04). The `--> <short-id>`
-/// layer markers and `--> Using cache <digest>` carry a prefix and are not
-/// matched. A script reading `podup build` from a pipe wants exactly this
-/// value, and a terminal does not (#1681).
-fn parse_image_id_line(line: &str) -> Option<String> {
-	let line = line.trim();
-	if line.len() != 64 || !line.bytes().all(|b| b.is_ascii_hexdigit()) {
-		return None;
-	}
-	Some(line.to_string())
-}
-
-/// Parse one buildah stream line into the row verb it implies, if any.
-///
-/// On the libpod build stream a `STEP n/m: <instruction>` line arrives once
-/// per Dockerfile instruction: the row's verb should reflect where in the
-/// build we are. Every other line (`--> 3f3c...`, `COMMIT <tag>`,
-/// `Successfully tagged <tag>`) carries no transition of its own; those are
-/// routed through `progress::note_for` as tail lines.
-#[derive(Default)]
-struct BuildStreamProgress {
-	last_step: Option<(usize, usize)>,
-}
-
-impl BuildStreamProgress {
-	fn new() -> Self {
-		Self::default()
-	}
-
-	fn observe(&mut self, line: &str) -> Option<String> {
-		const STEP_PREFIX: &str = "STEP ";
-		let line = line.trim_end();
-		let rest = line.strip_prefix(STEP_PREFIX)?;
-		// `STEP n/m: <instruction>`. The colon separates the counters from
-		// the instruction text. Both sides must parse.
-		let (counters, _) = rest.split_once(':')?;
-		let (cur, total) = counters.split_once('/')?;
-		let cur: usize = cur.parse().ok()?;
-		let total: usize = total.parse().ok()?;
-		self.last_step = Some((cur, total));
-		Some(self.format_verb())
-	}
-
-	fn format_verb(&self) -> String {
-		match self.last_step {
-			Some((cur, total)) => format!("Building {cur}/{total}"),
-			None => "Building".to_string(),
-		}
 	}
 }
 
