@@ -58,7 +58,11 @@ for f in "$@"; do
 
 	failed=""
 
-	flags=$(otool -h "$f" 2>/dev/null | awk '/^flags/ { print $3; exit }')
+	# `otool -h` prints a title line, a column-name line whose last column is
+	# `flags`, and a value line that starts with the magic (`0xfeedfacf`) and
+	# ends with the flags. The first release run read the column-name line
+	# and reported every binary as not-macho (v5.9.0, 2026-09-04).
+	flags=$(otool -h "$f" 2>/dev/null | awk 'NR > 1 && $1 ~ /^0x/ { print $NF; exit }')
 	if [ -z "$flags" ]; then
 		failed="$failed not-macho"
 	else
