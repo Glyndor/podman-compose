@@ -228,7 +228,7 @@ pub fn start_anchored(
 /// Hand one line of a row's stream output to the renderer.
 ///
 /// On a live terminal the line is appended to the per-row tail kept under the
-/// row (capped at [`MAX_NOTES_PER_ROW`]), then the region is repainted so the
+/// row (capped at `MAX_NOTES_PER_ROW`), then the region is repainted so the
 /// dimmed line shows under the row. In a pipe or whenever the session has no
 /// region the same call writes `<name> | <line>` to stderr directly, so a
 /// redirected stderr still sees every stream line, prefixed the way the
