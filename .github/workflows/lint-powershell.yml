@@ -13,6 +13,12 @@ on:
       # without this line a pull request that touches only the reusable
       # merges without ever running it.
       - ".github/workflows/reusable-powershell-ci.yml"
+      - ".github/scripts/check-hardening.ps1"
+      - "tests/powershell/check-hardening.Tests.ps1"
+      # The rustflags that give the Windows binary Control Flow Guard live
+      # here; a change to them is what this workflow builds and reads.
+      - ".cargo/**"
+      - "Cargo.toml"
   pull_request:
     branches:
       - main
@@ -26,6 +32,12 @@ on:
       # without this line a pull request that touches only the reusable
       # merges without ever running it.
       - ".github/workflows/reusable-powershell-ci.yml"
+      - ".github/scripts/check-hardening.ps1"
+      - "tests/powershell/check-hardening.Tests.ps1"
+      # The rustflags that give the Windows binary Control Flow Guard live
+      # here; a change to them is what this workflow builds and reads.
+      - ".cargo/**"
+      - "Cargo.toml"
 
 permissions:
   contents: read
@@ -40,3 +52,49 @@ jobs:
       # Write-Host — Write-Output would leak into the stream the pipe feeds.
       # Same exclusion the previous inline job carried.
       exclude-rules: "PSAvoidUsingWriteHost"
+
+  # Drive the PE hardening check over a hand-built good PE and four
+  # controls (one per property). The script is what the Windows legs
+  # of the release workflow call, and a regression in the offsets it
+  # reads or the bits it checks has to fail here, before the tag exists,
+  # not at release time. windows-latest has pwsh installed by default.
+  #
+  # PSScriptAnalyzer above runs over install.ps1 only; widening its
+  # `paths:` to include this file is a separate, later decision. This
+  # job is what proves the runtime behaviour the release relies on.
+  check-hardening-windows:
+    name: check-hardening.ps1 tests
+    runs-on: windows-latest
+    # Bound: the only measurement so far is the windows-latest signing
+    # fixture in asset-contract.yml (40s); this test is shorter than
+    # that and ten times rounds to ten minutes, which is also where
+    # the six-hour default would otherwise be.
+    # Bound: a Windows release build leg measured 347 s at worst on
+    # 2026-09-02; this job builds once and reads the result. Ten times that,
+    # rounded up.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the PE hardening fixture
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/powershell/check-hardening.Tests.ps1
+      # The fixture proves the script; this proves the binary. The release
+      # runs the same script over the same target before signing, and the
+      # Control Flow Guard bit rests on a rustflag in .cargo/config.toml,
+      # so the change that would fail the release fails here first.
+      - name: Install the pinned toolchain
+        env:
+          # Keep in step with release.yml's build job.
+          RUST_TOOLCHAIN: "1.98"
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+      - name: Build the release binary the way the release does
+        shell: bash
+        run: cargo build --release --locked
+      - name: Read the hardening off the built binary
+        shell: pwsh
+        run: pwsh -NoProfile -File .github/scripts/check-hardening.ps1 target/release/podup.exe
