@@ -55,7 +55,7 @@ fn wait_row(container: &str, code: i64) -> String {
 ///
 /// One helper rather than a literal per command, so the wording cannot drift into
 /// seven dialects of the same sentence.
-fn note_if_idle(acted: &std::sync::atomic::AtomicBool, verb: &str) {
+pub(super) fn note_if_idle(acted: &std::sync::atomic::AtomicBool, verb: &str) {
 	if !acted.load(std::sync::atomic::Ordering::Relaxed) {
 		crate::ui::progress_note(&format!("no containers to {verb}"));
 	}
@@ -625,91 +625,6 @@ impl Engine {
 		crate::ui::progress::end();
 		outcome?;
 		note_if_idle(&acted, "remove");
-		Ok(())
-	}
-
-	/// Pause running service containers (SIGSTOP).
-	///
-	/// If `target_services` is empty, all services are paused.
-	pub async fn pause(&self, file: &ComposeFile, target_services: &[String]) -> Result<()> {
-		let levels = crate::compose::resolve_levels(file)?;
-		let levels = filter_levels(file, levels, target_services)?;
-
-		// Prefetch every project container once and group by service (#1363).
-		let live_by_service = self.live_project_replicas().await?;
-
-		// Idempotent + best-effort: re-pausing an already-paused (or stopped)
-		// container is a no-op, and one state-mismatched service must not abort the
-		// batch and leave the rest in an inconsistent partial state. Services in a
-		// level are paused concurrently (#757).
-		let acted = std::sync::atomic::AtomicBool::new(false);
-		// The board over the containers this pause will reach.
-		crate::ui::progress::begin(super::seed::level_container_resources(
-			&levels,
-			&live_by_service,
-		));
-		let outcome = async {
-			let mut first_err: Option<ComposeError> = None;
-			for level in &levels {
-				let futs = level.iter().map(|name| {
-					let names = live_by_service.get(name).cloned().unwrap_or_default();
-					self.idempotent_state_service(names, "pause", "Paused", &acted)
-				});
-				if let Some(e) = first_error(join_bounded(futs).await) {
-					first_err.get_or_insert(e);
-				}
-			}
-			match first_err {
-				Some(e) => Err(e),
-				None => Ok(()),
-			}
-		}
-		.await;
-		crate::ui::progress::end();
-		outcome?;
-		note_if_idle(&acted, "pause");
-		Ok(())
-	}
-
-	/// Resume paused service containers.
-	///
-	/// If `target_services` is empty, all services are unpaused.
-	pub async fn unpause(&self, file: &ComposeFile, target_services: &[String]) -> Result<()> {
-		let levels = crate::compose::resolve_levels(file)?;
-		let levels = filter_levels(file, levels, target_services)?;
-
-		// Prefetch every project container once and group by service (#1363).
-		let live_by_service = self.live_project_replicas().await?;
-
-		// Idempotent + best-effort, mirroring `pause`: unpausing a not-paused
-		// container is a no-op, and a single mismatch must not abort the batch.
-		// Services in a level are unpaused concurrently (#757).
-		let acted = std::sync::atomic::AtomicBool::new(false);
-		// The board over the containers this unpause will reach.
-		crate::ui::progress::begin(super::seed::level_container_resources(
-			&levels,
-			&live_by_service,
-		));
-		let outcome = async {
-			let mut first_err: Option<ComposeError> = None;
-			for level in &levels {
-				let futs = level.iter().map(|name| {
-					let names = live_by_service.get(name).cloned().unwrap_or_default();
-					self.idempotent_state_service(names, "unpause", "Unpaused", &acted)
-				});
-				if let Some(e) = first_error(join_bounded(futs).await) {
-					first_err.get_or_insert(e);
-				}
-			}
-			match first_err {
-				Some(e) => Err(e),
-				None => Ok(()),
-			}
-		}
-		.await;
-		crate::ui::progress::end();
-		outcome?;
-		note_if_idle(&acted, "unpause");
 		Ok(())
 	}
 

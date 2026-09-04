@@ -33,6 +33,13 @@ const COMPOSE_FILE_CANDIDATES: [&str; 4] = [
 /// otherwise probe the compose-spec precedence list in the current directory,
 /// falling back to `docker-compose.yml` so a missing-file error names a
 /// sensible path. Multiple files are merged in order, later overriding earlier.
+/// Whether the compose files came from the operator (`-f` or `COMPOSE_FILE`)
+/// rather than from the directory lookup. A named file that is not there is
+/// an error even for the commands that can run without any file (#1687).
+pub(crate) fn compose_files_were_named(explicit: &[PathBuf]) -> bool {
+	!explicit.is_empty() || std::env::var("COMPOSE_FILE").is_ok_and(|v| !v.is_empty())
+}
+
 pub(crate) fn resolve_compose_files(explicit: &[PathBuf]) -> Vec<PathBuf> {
 	if !explicit.is_empty() {
 		return explicit.to_vec();

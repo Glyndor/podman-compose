@@ -6,6 +6,7 @@ mod drop_recheck;
 mod images;
 mod options;
 pub(in crate::engine) mod parallel;
+mod pause;
 mod prefetch;
 mod readiness;
 mod run;

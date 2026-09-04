@@ -126,6 +126,25 @@ async fn kill_pause_unpause_rm_draw_the_board_for_every_container() {
 		"rm inverts the levels like stop does"
 	);
 	assert!(capture.every_board_ended());
+	let verbs: Vec<(String, String)> = capture
+		.verbs()
+		.into_iter()
+		.map(|(_, name, verb)| (name, verb))
+		.collect();
+	for name in ["proj-two-1", "proj-one-1"] {
+		let opened = verbs
+			.iter()
+			.position(|(n, v)| n == name && v == "Removing")
+			.unwrap_or_else(|| panic!("{name} opens with Removing: {verbs:?}"));
+		let closed = verbs
+			.iter()
+			.position(|(n, v)| n == name && v == "Removed")
+			.unwrap_or_else(|| panic!("{name} closes with Removed: {verbs:?}"));
+		assert!(
+			opened < closed,
+			"Removing precedes Removed for {name}, so the row has a start time (#1686)"
+		);
+	}
 }
 
 /// A service the file defines but that Podman has never created contributes no
@@ -165,4 +184,75 @@ fn every_final_verb_has_a_working_verb() {
 	] {
 		assert_eq!(super::working_verb(done), doing);
 	}
+}
+
+/// `rm --stop` resumes only what is paused before it stops (#1688). With
+/// nothing paused it draws no board and sends no unpause request; with one
+/// paused container it draws a board for that one alone.
+#[tokio::test]
+async fn unpause_paused_touches_only_the_paused_containers() {
+	let fake = fake_podman::start(|method, target| {
+		if method == "GET" && target.contains("/containers/json") {
+			(
+				200,
+				r#"[{"Names":["/proj-one-1"],"State":"running","Labels":{"podup.service":"one"}},
+				    {"Names":["/proj-two-1"],"State":"running","Labels":{"podup.service":"two"}}]"#
+					.to_string(),
+			)
+		} else {
+			(200, String::new())
+		}
+	});
+	let engine = Engine::with_base_dir(fake.client(), "proj".into(), std::env::temp_dir());
+	let capture = Capture::start();
+	engine
+		.unpause_paused(&file(), &[])
+		.await
+		.expect("nothing paused is not an error");
+	assert!(
+		capture.boards().is_empty(),
+		"nothing paused draws no board: {:?}",
+		capture.boards()
+	);
+	{
+		let seen = fake.requests.lock().unwrap();
+		assert!(
+			!seen.iter().any(|r| r.contains("/unpause")),
+			"nothing paused sends no unpause request: {seen:?}"
+		);
+	}
+	drop(capture);
+
+	let fake = fake_podman::start(|method, target| {
+		if method == "GET" && target.contains("/containers/json") {
+			(
+				200,
+				r#"[{"Names":["/proj-one-1"],"State":"running","Labels":{"podup.service":"one"}},
+				    {"Names":["/proj-two-1"],"State":"paused","Labels":{"podup.service":"two"}}]"#
+					.to_string(),
+			)
+		} else {
+			(200, String::new())
+		}
+	});
+	let engine = Engine::with_base_dir(fake.client(), "proj".into(), std::env::temp_dir());
+	let capture = Capture::start();
+	engine
+		.unpause_paused(&file(), &[])
+		.await
+		.expect("the paused one is resumed");
+	assert_eq!(
+		capture.names(),
+		vec!["proj-two-1"],
+		"only the paused container gets a row"
+	);
+	assert!(
+		capture
+			.verbs()
+			.iter()
+			.any(|(_, n, v)| n == "proj-two-1" && v == "Unpaused"),
+		"and it closes Unpaused: {:?}",
+		capture.verbs()
+	);
+	assert!(capture.every_board_ended());
 }

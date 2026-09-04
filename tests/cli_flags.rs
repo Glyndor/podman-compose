@@ -504,3 +504,24 @@ fn machine_output_carries_no_escapes_even_with_colour_forced() {
 
 	let _ = fs::remove_dir_all(&dir);
 }
+
+/// `ps` and `events` run without a compose file so a directory with none
+/// still answers by label, but a file named with `-f` that is not there is
+/// a typo, not an absence: it fails the way every other command fails
+/// (#1687). Measured before the fix: `ps` printed `no containers` and exited 0.
+#[test]
+fn a_named_compose_file_that_is_missing_fails_ps_and_events() {
+	for cmd in ["ps", "events"] {
+		let out = run_offline(&["-f", "/nonexistent-podup-compose.yml", cmd]);
+		let stderr = String::from_utf8_lossy(&out.stderr);
+		assert!(
+			!out.status.success(),
+			"`-f <missing> {cmd}` must fail; stdout: {}",
+			String::from_utf8_lossy(&out.stdout)
+		);
+		assert!(
+			stderr.contains("compose file not found"),
+			"`-f <missing> {cmd}` names the missing file; got: {stderr}"
+		);
+	}
+}
