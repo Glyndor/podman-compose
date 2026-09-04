@@ -40,7 +40,11 @@ trap 'rm -rf "$tmp"' EXIT
 # A Mach-O that the linker accepts as a standalone executable. The body
 # is irrelevant: the script does not execute the binary, only reads
 # its header.
-printf 'int main(void) { return 0; }\n' > "$tmp/m.c"
+# A static function gives the binary one local symbol (`t _helper`), which is
+# what `-Wl,-x` strips and what the `stripped` check looks for. A `main` alone
+# has no local symbol, so the unstripped control passed the check on the
+# first run of this fixture on a Mac (2026-09-04).
+printf 'static int helper(void) { return 1; }\nint main(void) { return helper(); }\n' > "$tmp/m.c"
 
 build() { # <name> <clang flags...>
 	local name=$1; shift
