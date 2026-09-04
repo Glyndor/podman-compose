@@ -20,7 +20,7 @@ pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦"
 const DONE_MARK: &str = "✔";
 
 /// Marker for a row that finished in error. Distinct from [`DONE_MARK`] so a
-/// failed row cannot be mistaken for a successful one at a glance ,  the verb
+/// failed row cannot be mistaken for a successful one at a glance — the verb
 /// already says "Failed", but the row before the user shows the green checkmark
 /// of a row that closed cleanly, which is the contradiction #1347 introduced
 /// when the missing-close sites started sending `"Failed"` as the closing verb.
@@ -60,7 +60,7 @@ const MIN_NAME_WIDTH: usize = 1;
 /// now exists, a pending one is dim because nothing has happened to it. The name
 /// beside it keeps its identity colour, which is why the marker must not reuse
 /// that palette. A failed row breaks the green-equals-success tie by carrying
-/// the verb "Failed" ,  the marker reads it too, so a failure and a success do
+/// the verb "Failed" — the marker reads it too, so a failure and a success do
 /// not share a glyph.
 fn marker(row: &Row, frame: usize) -> (&'static str, Style) {
 	match &row.state {
@@ -105,7 +105,7 @@ pub fn format_elapsed(d: Duration) -> String {
 ///
 /// Truncation order is name first (with `…`), then verb, leaving the elapsed
 /// column intact as long as it fits. The fixed columns (mark, kind, time) are
-/// never shortened ,  they are the part that says what the row is and how long
+/// never shortened: they are the part that says what the row is and how long
 /// it took, and a `…` in the elapsed column would be misread as a duration.
 pub fn render(row: &Row, name_width: usize, frame: usize, now: Instant, width: usize) -> String {
 	let (mark, mark_style) = marker(row, frame);

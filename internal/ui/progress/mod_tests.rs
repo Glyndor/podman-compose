@@ -12,7 +12,7 @@ fn the_width_is_the_columns_not_the_rows() {
 }
 
 /// The live sink depends on the terminal alone. NO_COLOR=1 and `--ansi never`
-/// collapse colour, not animation ,  a styled run that asked for no escapes
+/// collapse colour, not animation: a styled run that asked for no escapes
 /// keeps its in-place repaint, and the styling is stripped at the renderer
 /// instead of the renderer being skipped entirely (#1672).
 ///
@@ -177,7 +177,7 @@ fn plain_sink_keeps_a_transitional_verb_when_nothing_final_arrives() {
 	);
 
 	// No `progress_line` ever arrives for this entry. `progress::end` is the
-	// fallback ,  it must flush whatever is in the buffer, so a crash that
+	// fallback: it must flush whatever is in the buffer, so a crash that
 	// still reaches `end` (the common case for a graceful abort path) leaves
 	// `Creating` in the log.
 	super::super::progress::end();

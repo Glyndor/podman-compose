@@ -31,7 +31,7 @@ fn cursor_up(n: usize) -> String {
 /// Which stream a region draws on.
 ///
 /// Not always stderr. The lifecycle board goes there so stdout stays a clean
-/// pipe, but `stats` *is* its output ,  its table is the thing a user redirects ,
+/// pipe, but `stats` *is* its output — its table is the thing a user redirects —
 /// so its region belongs on stdout. Getting this wrong would put cursor moves in
 /// one stream and the content in the other.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -58,14 +58,14 @@ impl Target {
 /// A tail region being repainted on a real terminal.
 ///
 /// Owns the count of rows it last painted, which is the only state the repaint
-/// arithmetic needs ,  and the reason every line handed to it must already be
+/// arithmetic needs — and the reason every line handed to it must already be
 /// truncated to the terminal width. A line that wraps makes the terminal count
 /// two rows where this counted one, and from then on every repaint erases the
 /// wrong lines.
 ///
 /// Deliberately knows nothing about what it is drawing. It takes two blocks of
 /// finished text: lines that become permanent scrollback, and lines that are
-/// erased on the next call. That is what lets the board and `stats` share it ,
+/// erased on the next call. That is what lets the board and `stats` share it —
 /// they disagree about everything except needing a block of text repainted in
 /// place.
 pub struct Region {
@@ -138,7 +138,7 @@ impl Drop for Region {
 /// `Drop` covers a command that ends on its own, and nothing else: Rust's
 /// default SIGINT handling terminates the process without unwinding, so
 /// Ctrl-C out of a region left the caret hidden until the user ran `reset`.
-/// Measured on a 100x30 pty before the fix ,  one `\e[?25l`, zero `\e[?25h`.
+/// Measured on a 100x30 pty before the fix — one `\e[?25l`, zero `\e[?25h`.
 ///
 /// `stats` is where it bit hardest, because Ctrl-C is the *normal* way to leave
 /// it rather than an error path, but a long `up` interrupted part-way had the
@@ -146,8 +146,8 @@ impl Drop for Region {
 ///
 /// Exits 130 (128 + SIGINT), the shell convention this binary already documents
 /// for an interrupted command. Installed per region rather than globally, so it
-/// cannot disturb the commands that handle their own interrupt ,  attached `up`,
-/// `exec`, `watch` ,  none of which open one.
+/// cannot disturb the commands that handle their own interrupt — attached `up`,
+/// `exec`, `watch` — none of which open one.
 fn restore_cursor_on_interrupt(target: Target) {
 	if !claim_install() {
 		return;
@@ -164,8 +164,8 @@ fn restore_cursor_on_interrupt(target: Target) {
 
 /// Take the right to install the interrupt handler, once per process.
 ///
-/// Two regions in one invocation ,  a `stats` after an `up` inside an embedding
-/// crate ,  must not stack handlers, since each would race to call
+/// Two regions in one invocation — a `stats` after an `up` inside an embedding
+/// crate — must not stack handlers, since each would race to call
 /// `process::exit`. Split out of the installer so the latch is testable without
 /// spawning anything.
 fn claim_install() -> bool {

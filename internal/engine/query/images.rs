@@ -12,7 +12,7 @@ use super::Engine;
 /// How `images` renders a size: decimal units at three significant digits.
 ///
 /// Decimal because this table exists to be read against `podman images` and
-/// `docker compose images`, which are decimal ,  not against `free`. Three
+/// `docker compose images`, which are decimal — not against `free`. Three
 /// digits because that is what those two print, measured rather than assumed:
 /// `docker compose` v5.1.3 rendered `98.2MB` for `redis:8-alpine` and `podman
 /// images` rendered `1.01 GB` and `805 kB` on the same host. A fixed decimal
@@ -34,7 +34,7 @@ struct ImageRow {
 	tag: String,
 	id: String,
 	/// Raw bytes as libpod reported them. Zero when the image is not present
-	/// locally, which the table renders as an empty cell ,  a missing image has
+	/// locally, which the table renders as an empty cell — a missing image has
 	/// no size, and `0B` would claim it has one.
 	size: u64,
 	/// The RFC 3339 string libpod sent, kept raw so the table can render an age
@@ -103,7 +103,7 @@ impl Engine {
 						created: img.created,
 					});
 				}
-				// A 404 means the image is simply not present locally ,  list it with
+				// A 404 means the image is simply not present locally — list it with
 				// an empty ID rather than silently dropping it, matching docker
 				// compose. Any other error (a connection failure / unreachable
 				// socket, or an HTTP 500) is a real failure that must propagate with
@@ -197,7 +197,7 @@ impl Engine {
 /// The SIZE cell for one row.
 ///
 /// An image that is not present locally has no size to report, so the cell is
-/// empty. `0B` would be a claim ,  that podup asked and the answer was zero ,
+/// empty. `0B` would be a claim — that podup asked and the answer was zero —
 /// and the row already says the image is missing by carrying no ID.
 fn size_cell(size: u64) -> String {
 	if size == 0 {

@@ -5,7 +5,7 @@
 //! colour choice, never from the command: `up` on a tty repaints a tail region,
 //! `up` in a pipe emits the same events as plain append-only lines. **Animation
 //! in a CI log is a defect**, and so is a CI log that says less than the
-//! terminal did ,  both renderers see every event, including the intermediate
+//! terminal did — both renderers see every event, including the intermediate
 //! transitions the old output dropped entirely.
 //!
 //! Everything goes to stderr. stdout stays a clean pipe, which is what lets
@@ -33,7 +33,7 @@ const TICK: std::time::Duration = std::time::Duration::from_millis(100);
 /// Process-global for the same reason the colour choice is: one CLI invocation
 /// runs one lifecycle command, and threading a handle through every engine call
 /// site would change 21 signatures to say something none of them decides. A
-/// library embedder never gets one ,  [`begin`] is a no-op unless the CLI turned
+/// library embedder never gets one — [`begin`] is a no-op unless the CLI turned
 /// progress on.
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 
@@ -135,7 +135,7 @@ pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
 	// The flag goes up *after* the session is installed: a `finish` racing the
 	// install sees either no session (`SESSION_OPEN` false → no lock taken) or
 	// a fully-built session. The reverse order would let `finish` take the
-	// lock only to find an empty session and return false ,  same result, more
+	// lock only to find an empty session and return false — same result, more
 	// work.
 	SESSION_OPEN.store(true, std::sync::atomic::Ordering::Release);
 	if live {
@@ -193,11 +193,11 @@ static PLAIN_BUFFER: Mutex<Vec<(Kind, String, String)>> = Mutex::new(Vec::new())
 ///
 /// The `-ning` exception matters: `Running` is a final state that ends in
 /// `-ing` and would otherwise be buffered, and either flushed at end (which
-/// would print it twice ,  once when the row closes, once when the buffer
+/// would print it twice: once when the row closes, once when the buffer
 /// drains) or held forever (which would lose it on a clean exit). Verbs the
 /// call sites actually pass through `progress::start` are the present
 /// participles `Creating`, `Starting`, `Stopping`, `Removing`, `Pulling`,
-/// `Pushing`, `Recreating` ,  `Running` reaches the final path through
+/// `Pushing`, `Recreating`; `Running` reaches the final path through
 /// `progress_line`, not `progress::start`.
 fn is_transitional(verb: &str) -> bool {
 	let verb = verb.trim();
@@ -229,7 +229,7 @@ enum Sink {
 /// Hand a recorded event to whichever renderer owns it.
 ///
 /// The plain sink writes the same line the tree has always written, through
-/// [`super::write_progress_line`] rather than `progress_line` ,  going back
+/// [`super::write_progress_line`] rather than `progress_line` — going back
 /// through the routing that sent the event here would be a loop, and it is what
 /// made a piped `up` print nothing at all the first time this was wired up: the
 /// board swallowed every line and no renderer put one back.
@@ -337,7 +337,7 @@ pub(crate) fn buffered_count_for_tests() -> usize {
 /// Report that work on a resource has finished. Always returns `true` once
 /// the event has been emitted (or buffered); the caller must not print its own
 /// line in that case. Returns `false` only for an unrecognised `kind`, which
-/// the caller treats as "no event happened" (#1673 ,  the plain-sink buffer
+/// the caller treats as "no event happened" (#1673: the plain-sink buffer
 /// logic used to live partly here and partly in `ui::progress_line`, and a
 /// `Sink::None` finish call dropped the buffer entry on the floor).
 pub(super) fn finish(kind: &str, name: &str, verb: &str) -> bool {
@@ -367,7 +367,7 @@ pub(super) fn finish(kind: &str, name: &str, verb: &str) -> bool {
 			None => Sink::None,
 		}
 	};
-	// `Sink::None` means there is no board ,  still go through `emit` so the
+	// `Sink::None` means there is no board; still go through `emit` so the
 	// plain-sink buffer logic runs in the no-board path too. `emit` decides
 	// what to actually emit: a final verb goes to stderr immediately, a
 	// transitional verb goes to the buffer to be flushed at `end`.
@@ -382,7 +382,7 @@ pub fn end() {
 	#[cfg(test)]
 	capture::record_end();
 	if !SESSION_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel) {
-		// No board was ever opened ,  the flag is the single source of truth
+		// No board was ever opened — the flag is the single source of truth
 		// for that. Drop it first so a racing `finish` doesn't take the lock
 		// just to find an empty session (#1364).
 		buffer_drain();
@@ -400,7 +400,7 @@ pub fn end() {
 	if let Some(session) = slot.take() {
 		// Walk the cursor back over the live region so the trailing rows are
 		// not left dangling, then erase from there. The rows that were in
-		// the live region stay where they are on screen ,  they are the
+		// the live region stay where they are on screen: they are the
 		// permanent record at this point, no different from scrollback. A
 		// re-paint here would write the same bytes again, and a `script`
 		// capture would show the row twice (once written, once erased, once
@@ -432,7 +432,7 @@ fn repaint() {
 		return;
 	};
 	// Re-read the width every repaint, so a resize mid-command does not leave
-	// every later line wrapping ,  and wrapping is what breaks the arithmetic.
+	// every later line wrapping — and wrapping is what breaks the arithmetic.
 	// Only the width is re-read; the terminal+colour decision is cached at
 	// `begin` (#1364).
 	let width = live_width().unwrap_or(0);

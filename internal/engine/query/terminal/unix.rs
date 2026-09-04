@@ -1,8 +1,8 @@
-//! The termios implementation of the terminal contract ,  see the module doc
+//! The termios implementation of the terminal contract — see the module doc
 //! in `mod.rs` for the contract and the restore-on-drop invariant.
 
 // termios and the winsize ioctl are libc FFI. The crate denies `unsafe` and
-// modules that need it opt back in locally, with a soundness comment per block ,
+// modules that need it opt back in locally, with a soundness comment per block —
 // see `engine::lock` and `engine::staging` for the same pattern.
 #![allow(unsafe_code)]
 
@@ -32,7 +32,7 @@ impl RawMode {
 	///
 	/// `enable` is the only place that consults the ambient stdin, which keeps
 	/// this testable: a test that asserted on `enable()` directly would be
-	/// asserting that whoever runs `cargo test` has no terminal ,  true under a
+	/// asserting that whoever runs `cargo test` has no terminal — true under a
 	/// pipe, false in a shell, and on the way to being false it would put the
 	/// developer's own terminal into raw mode.
 	pub(super) fn enable_on(fd: i32) -> Option<Self> {
@@ -54,7 +54,7 @@ impl RawMode {
 		unsafe { libc::cfmakeraw(&mut raw) };
 		// SAFETY: `raw` is a fully initialized `termios` derived from the current
 		// settings. TCSANOW applies immediately, which is what an interactive
-		// session wants ,  a drained flush would swallow keystrokes already typed.
+		// session wants — a drained flush would swallow keystrokes already typed.
 		if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
 			return None;
 		}
@@ -83,8 +83,8 @@ impl Drop for RawMode {
 /// this, a full-screen program inside the container draws to an 80x24 default
 /// and redraws wrong the moment the window changes.
 ///
-/// **stdin first, then stdout.** Asking only stdout looks natural ,  that is
-/// where the drawing goes ,  but the two can differ: `podup exec -it db psql >
+/// **stdin first, then stdout.** Asking only stdout looks natural — that is
+/// where the drawing goes — but the two can differ: `podup exec -it db psql >
 /// out.txt` types into a terminal and writes to a file, and stdout then answers
 /// "not a terminal" while a perfectly good size sits on stdin. Interactivity is
 /// decided by stdin, so the size is asked of stdin too, and stdout is the
@@ -102,7 +102,7 @@ fn size_of(fd: i32) -> Option<(u16, u16)> {
 	if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) } != 0 {
 		return None;
 	}
-	// A terminal that reports 0x0 has no usable geometry ,  treat it as unknown
+	// A terminal that reports 0x0 has no usable geometry — treat it as unknown
 	// rather than sizing the remote pty to nothing.
 	if ws.ws_row == 0 || ws.ws_col == 0 {
 		return None;
@@ -159,7 +159,7 @@ impl ResizeWatcher {
 /// Implemented with `O_NONBLOCK` toggled for the duration of the read so the
 /// call returns immediately on an empty queue. The flag is restored before
 /// returning, so the pump's blocking reads are unaffected. A non-terminal
-/// stdin (a pipe) is a no-op ,  the pump does not run on a pipe.
+/// stdin (a pipe) is a no-op; the pump does not run on a pipe.
 pub(crate) fn drain_stdin() {
 	use std::io::Read;
 	use std::os::fd::AsRawFd;
