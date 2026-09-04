@@ -34,6 +34,9 @@ pub(crate) fn command_failure_exit_code(msg: &str) -> i32 {
 /// Print a top-level error to stderr with a colour-aware bold-red `error:` label.
 /// anstream strips the styling when stderr is not a terminal or colour is off.
 pub(crate) fn print_error(e: &podup::ComposeError) {
+	// A command that failed mid-way may hold a transitional progress line;
+	// it belongs above the error, not nowhere.
+	podup::ui::progress::flush();
 	use std::io::Write;
 	let style = podup::ui::error_style();
 	let mut err = anstream::stderr();

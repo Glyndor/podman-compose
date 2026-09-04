@@ -1,4 +1,4 @@
-//! `volumes` — list the named volumes declared by a compose project.
+//! `volumes` ,  list the named volumes declared by a compose project.
 //!
 //! Mirrors `docker compose volumes [SERVICE...]`: with no services it lists
 //! every top-level `volumes:` entry; with services it lists only the named
@@ -18,8 +18,8 @@ use super::super::Engine;
 /// How `volumes` renders a size: decimal units at three significant digits.
 ///
 /// Three rather than the four `podman system df -v` prints (`193.2MB`,
-/// `67.33MB`, measured on Podman 5.7.0). podman is not self-consistent here —
-/// `podman images` and `podman ps -s` both use three — and matching podup's own
+/// `67.33MB`, measured on Podman 5.7.0). podman is not self-consistent here ,
+/// `podman images` and `podman ps -s` both use three ,  and matching podup's own
 /// other size columns is worth more than reproducing that split.
 const SIZE_FORMAT: SizeFormat = SizeFormat::decimal().with_significant(3);
 
@@ -27,7 +27,7 @@ const SIZE_FORMAT: SizeFormat = SizeFormat::decimal().with_significant(3);
 ///
 /// `#[non_exhaustive]` from birth: [`VolumesOptions`] is externally
 /// constructible with a struct literal, so adding a field to it requires a
-/// MAJOR — `cargo semver-checks` reports `constructible_struct_adds_field`.
+/// MAJOR ,  `cargo semver-checks` reports `constructible_struct_adds_field`.
 /// Same reasoning, and the same shape, as `PsDisplayOptions`.
 #[derive(Default, Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -166,7 +166,7 @@ impl Engine {
 				.iter()
 				.map(|(_, name, driver, external)| {
 					// Raw byte counts, and absent entirely when the size was not
-					// requested — a consumer can tell "not asked" from "empty",
+					// requested ,  a consumer can tell "not asked" from "empty",
 					// the same distinction the table draws.
 					let size = display.size.then(|| {
 						let u = usage.get(name.as_str());
@@ -191,10 +191,10 @@ impl Engine {
 		// The header prints even with no rows, matching `ps`, `ls`, `images` and
 		// `stats`. `volumes` was the only list command that suppressed it, so a
 		// script parsing the header line to locate its columns broke on an empty
-		// project — and an empty result is a legitimate answer, not an absence of
+		// project ,  and an empty result is a legitimate answer, not an absence of
 		// one.
-		// EXTERNAL is the most consequential fact about a volume — podup neither
-		// creates nor deletes an external one — and the table dropped it while the
+		// EXTERNAL is the most consequential fact about a volume ,  podup neither
+		// creates nor deletes an external one ,  and the table dropped it while the
 		// JSON path above has always carried it. A `down -v` that leaves a volume
 		// standing is only explicable if you can see which volumes are external.
 		//
@@ -205,7 +205,7 @@ impl Engine {
 		// column in the binary carried colour, so the most consequential fact in
 		// the table was the least visible one. `caution_col` rather than
 		// `status_col`: green would say "healthy", and an external volume is not
-		// healthy or unhealthy — it is the one podup will not delete.
+		// healthy or unhealthy ,  it is the one podup will not delete.
 		//
 		// SIZE and RECLAIMABLE are appended rather than inserted, so a reader's
 		// existing column positions do not move when the flag is off.
@@ -231,14 +231,23 @@ impl Engine {
 			}
 			table.push(row);
 		}
+		if table.is_empty() {
+			// An empty volumes table is a legitimate answer, not an absence of
+			// one. Print the explicit "no volumes" line on stderr so a script
+			// capturing stdout (or `--format json`) sees nothing, and the user
+			// gets an unambiguous "no volumes" rather than just a header
+			// (matching `ps`, `images`, `ls`) (#1675).
+			crate::ui::progress_note("no volumes");
+			return Ok(());
+		}
 		table.print();
 		Ok(())
 	}
 
 	/// Per-volume disk usage from `system/df`, keyed by on-host volume name.
 	///
-	/// One call for the whole table. libpod has no per-volume size endpoint —
-	/// this one walks the entire installation — so the cost is paid once or not
+	/// One call for the whole table. libpod has no per-volume size endpoint ,
+	/// this one walks the entire installation ,  so the cost is paid once or not
 	/// at all.
 	async fn volume_disk_usage(
 		&self,
@@ -281,7 +290,7 @@ fn mount_source_name(m: &VolumeMount) -> Option<String> {
 	match m {
 		VolumeMount::Short(s) => {
 			let parts: Vec<&str> = s.splitn(3, ':').collect();
-			// `src:target[:opts]` — a leading `.`/`/`/`~` is a bind path, not a name.
+			// `src:target[:opts]` ,  a leading `.`/`/`/`~` is a bind path, not a name.
 			if parts.len() >= 2 && !parts[0].starts_with(['.', '/', '~']) {
 				Some(parts[0].to_string())
 			} else {

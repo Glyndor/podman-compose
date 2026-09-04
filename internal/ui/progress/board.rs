@@ -4,8 +4,8 @@
 //! Pure: no terminal, no clock reading of its own, no I/O. A renderer asks it
 //! what to draw and it answers; that is what makes the state machine testable
 //! without a tty, which matters because the two things most likely to be wrong
-//! here — a row that never leaves `Working`, and a count that disagrees with the
-//! rows — are invisible in a screenshot.
+//! here ,  a row that never leaves `Working`, and a count that disagrees with the
+//! rows ,  are invisible in a screenshot.
 
 use std::time::{Duration, Instant};
 
@@ -148,7 +148,7 @@ impl Board {
 	}
 
 	/// Mark a resource as finished. Also tolerates a resource that was never
-	/// seeded or started — most of the 21 existing call sites report only an
+	/// seeded or started ,  most of the 21 existing call sites report only an
 	/// ending, so this has to work without a matching `start`.
 	pub fn finish(&mut self, kind: Kind, name: &str, verb: &str, now: Instant) {
 		let idx = self.index_of(kind, name).unwrap_or_else(|| {
@@ -172,7 +172,7 @@ impl Board {
 	///
 	/// Only a contiguous run from the front is eligible. A finished row with an
 	/// unfinished one before it has to stay in the live region, or the permanent
-	/// history would print out of order — which is exactly the record `up` exists
+	/// history would print out of order ,  which is exactly the record `up` exists
 	/// to leave behind.
 	pub fn take_completed_prefix(&mut self) -> Vec<Row> {
 		let mut out = Vec::new();
@@ -186,12 +186,27 @@ impl Board {
 		out
 	}
 
+	/// Every row the board holds, regardless of state, for the final paint at
+	/// `progress::end`.
+	///
+	/// Used only at the close of a board: a row that was still in flight during
+	/// the last `repaint` (and so already painted in the live region) is
+	/// re-rendered here as part of the permanent record. Previously `end`
+	/// re-painted the live region too, which made a non-contiguous `Done` row
+	/// like `Failed` appear twice in the final output (#1675). Here the live
+	/// region is collapsed ,  every row is scrollback exactly once.
+	pub fn take_all_rows(&mut self) -> Vec<Row> {
+		let out = self.rows.clone();
+		self.flushed = self.rows.len();
+		out
+	}
+
 	/// The rows still in the live region: everything not yet flushed.
 	pub fn live_rows(&self) -> &[Row] {
 		&self.rows[self.flushed.min(self.rows.len())..]
 	}
 
-	/// How many resources have finished, and how many there are in total — the
+	/// How many resources have finished, and how many there are in total ,  the
 	/// `3/6` in the summary line.
 	pub fn tally(&self) -> (usize, usize) {
 		(

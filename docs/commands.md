@@ -201,6 +201,10 @@ List project containers.
 | `--services` | Print service names only. | off |
 | `-s, --size` | Add a SIZE column with each container's on-disk footprint. | off |
 
+An empty result prints `no containers` on stderr and leaves stdout empty, so
+a script capturing stdout (`podup ps | awk …`) can tell an empty project from
+a non-empty one without parsing headers.
+
 ### `ls`
 List podup compose projects on the host. Needs no compose file.
 
@@ -210,6 +214,10 @@ List podup compose projects on the host. Needs no compose file.
 | `-q, --quiet` | Print project names only. | off |
 | `--format <FMT>` | `table` or `json`. | `table` |
 | `--filter <FILTER>` | Keep only projects matching a predicate: `name=<NAME>` or `status=<running\|exited>`. Repeatable. | none |
+
+An empty result prints `no projects` on stderr and leaves stdout empty, so a
+script capturing stdout (`podup ls | awk …`) can tell an empty host from a
+non-empty one without parsing headers.
 
 ### `logs [SERVICE...]`
 View container output for the named services (or all).
@@ -298,6 +306,9 @@ the raw byte count, not the rendered string.
 | `-q, --quiet` | Print image IDs only. | off |
 | `--format <FMT>` | `table` or `json`. | `table` |
 
+An empty result (no services with `image:` or `build:`) prints `no images` on
+stderr and leaves stdout empty.
+
 ### The ps CREATED and STATUS columns
 
 `STATUS` reports how long a running container has been up (`Up 2h 5m 3s`), with
@@ -370,6 +381,8 @@ neither creates nor deletes an external volume, so those are the ones a
 | `-q, --quiet` | Print volume names only. | off |
 | `-s, --size` | Add SIZE and RECLAIMABLE columns. Slow — see below. | off |
 | `--format <FMT>` | `table` or `json`. | `table` |
+
+An empty result prints `no volumes` on stderr and leaves stdout empty.
 
 ## Container operations
 
@@ -767,6 +780,17 @@ record of what it did.
 
 **Anywhere else** — a pipe, a file, CI, `NO_COLOR`, `--ansi never` — the same
 events come out as plain append-only lines with no escape sequences at all:
+
+**Progress lines on stderr never contradict themselves.** A transitional
+verb (`Creating`, `Starting`, `Pulling`, `Removing`, …) is held until the final
+one arrives. When the final verb reports work (`Created`, `Started`, `Pulled`,
+`Removed`), both lines are printed in order, so a log shows when the work
+started; when it reports that nothing was done (`Exists`, `Running`, `Absent`,
+`Skipped`), only that line is printed, so a piped `up -d` against a network
+that already exists says `Network … Exists` and not the pair `Creating` /
+`Exists`. A transitional verb whose final never arrives (a crash mid-way) is
+still flushed at the end of the command, so the log records what was in
+flight.
 
 ```
  Network myapp_default  Creating

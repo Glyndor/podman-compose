@@ -1,4 +1,4 @@
-//! `ls` — discover podup-managed compose projects on the host.
+//! `ls` ,  discover podup-managed compose projects on the host.
 //!
 //! Unlike the other commands this is project-agnostic: it scans every container
 //! carrying a `podup.project` label and groups by project, so it needs only a
@@ -106,7 +106,7 @@ struct Tally {
 	paused: usize,
 	total: usize,
 	/// The `podup.config-files` label, from the first container that carries one.
-	/// Empty when no container in the project has it — created before the label
+	/// Empty when no container in the project has it ,  created before the label
 	/// existed, or by an embedder that supplied no paths.
 	config_files: String,
 }
@@ -170,7 +170,7 @@ pub async fn list_projects_filtered(
 		}
 	}
 
-	// An unsupported key is an error, not a warning — see the note on the ps
+	// An unsupported key is an error, not a warning ,  see the note on the ps
 	// filters: silently answering a different question is worse than refusing.
 	let (name_filter, status_filter, unknown) = split_ls_filters(filters);
 	if let Some(u) = unknown.first() {
@@ -220,11 +220,18 @@ pub async fn list_projects_filtered(
 	for (name, t) in &rows {
 		table.push(vec![name.to_string(), status_label(t)]);
 	}
+	if table.is_empty() {
+		// An empty ls table is a legitimate answer; print the explicit
+		// "no projects" line on stderr so a script capturing stdout (or
+		// `--format json`) sees nothing (#1675).
+		crate::ui::progress_note("no projects");
+		return Ok(());
+	}
 	table.print();
 	Ok(())
 }
 
-/// Per-state replica counts joined as `running(2), paused(1), exited(1)` —
+/// Per-state replica counts joined as `running(2), paused(1), exited(1)` ,
 /// mirrors the `docker compose ls` status column, which surfaces each state
 /// rather than collapsing to a single running count and discarding the rest.
 fn status_label(t: &Tally) -> String {
@@ -249,7 +256,7 @@ fn status_label(t: &Tally) -> String {
 /// One `ls --format json` row, matching `docker compose ls --format json`.
 ///
 /// `ConfigFiles` comes from the `podup.config-files` label the containers carry
-/// — projects are discovered by label and there is no other record of where a
+/// ,  projects are discovered by label and there is no other record of where a
 /// compose file lives. It is empty for a container created before that label
 /// existed, or by an embedder that did not supply the paths.
 fn project_row(name: &str, t: &Tally, config_files: &str) -> serde_json::Value {

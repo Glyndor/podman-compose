@@ -1,4 +1,4 @@
-//! `ps` — list this project's containers as a table or JSON. Split out of the
+//! `ps` ,  list this project's containers as a table or JSON. Split out of the
 //! query root so each file stays within the source line limit.
 
 use crate::compose::types::ComposeFile;
@@ -62,7 +62,7 @@ impl PsOptions {
 ///
 /// **`#[non_exhaustive]` from birth, and that is the whole point.** Both
 /// [`PsOptions`] and [`PsFilterOptions`] are externally constructible with a
-/// struct literal, so adding a field to either requires a MAJOR — measured with
+/// struct literal, so adding a field to either requires a MAJOR ,  measured with
 /// `cargo semver-checks`, which reports `constructible_struct_adds_field`, not
 /// assumed from the rules. `PsFilterOptions` was itself introduced to keep
 /// `PsOptions` stable and inherited the same problem, so a third frozen struct
@@ -193,7 +193,7 @@ const SPAN_FORMAT: DurationFormat = DurationFormat::default_parts();
 /// span answers "did it just restart", which is the question someone runs `ps`
 /// to settle.
 ///
-/// The health suffix only appears when the container has a healthcheck —
+/// The health suffix only appears when the container has a healthcheck ,
 /// libpod leaves `Status` empty otherwise, measured on Podman 5.7.0, so there is
 /// nothing to append rather than an unknown to invent.
 ///
@@ -219,7 +219,7 @@ fn table_status(c: &ContainerListEntry, now: i64) -> String {
 	};
 	// `health_from_status` answers with an empty string when the container has
 	// no healthcheck, which is the same case as libpod sending an empty
-	// `Status` — nothing to append rather than an unknown to invent.
+	// `Status` ,  nothing to append rather than an unknown to invent.
 	match health_from_status(status) {
 		"" => format!("Up {uptime}"),
 		health => format!("Up {uptime} ({health})"),
@@ -230,8 +230,8 @@ fn table_status(c: &ContainerListEntry, now: i64) -> String {
 ///
 /// Pure so the query it builds can be asserted without a server. The `size`
 /// parameter is the one worth pinning: `size=true` is not a bigger payload, it
-/// is work — libpod walks each container's writable layer to answer, measured
-/// at 21 ms against 109 ms over 59 containers on Podman 5.7.0 — so asking for it
+/// is work ,  libpod walks each container's writable layer to answer, measured
+/// at 21 ms against 109 ms over 59 containers on Podman 5.7.0 ,  so asking for it
 /// unconditionally would make every `ps` pay for a column most readers do not
 /// look at. `docker ps -s` is opt-in for the same reason.
 ///
@@ -249,7 +249,7 @@ fn containers_path(project: &str, all: bool, size: bool) -> String {
 
 /// How `ps` renders a size: decimal units at three significant digits.
 ///
-/// The same shape `images` uses, and for the same reason — this column is read
+/// The same shape `images` uses, and for the same reason ,  this column is read
 /// against `podman ps -s`, which prints `143kB (virtual 225MB)`. Measured
 /// against it rather than assumed.
 const SIZE_FORMAT: SizeFormat = SizeFormat::decimal().with_significant(3);
@@ -257,7 +257,7 @@ const SIZE_FORMAT: SizeFormat = SizeFormat::decimal().with_significant(3);
 /// Table SIZE cell: the writable layer, then the image behind it.
 ///
 /// `143kB (virtual 225MB)`, matching `podman ps -s` and `docker ps -s`.
-/// **`virtual` is the image's own size, not the sum** — verified on three
+/// **`virtual` is the image's own size, not the sum** ,  verified on three
 /// containers whose two readings differ at three significant digits, because on
 /// a container with a small writable layer the two are indistinguishable and a
 /// wrong choice would never show.
@@ -290,7 +290,7 @@ fn table_created(c: &ContainerListEntry, now: i64) -> String {
 /// render.
 ///
 /// A zero `then` means the field was absent, not that the instant was the epoch.
-/// A `then` in the future is clock skew between this process and the server —
+/// A `then` in the future is clock skew between this process and the server ,
 /// clamped to zero rather than rendered as a negative age, since `Up 0s` on a
 /// container that just started is right and `Up -3s` is never right.
 fn span_since(then: i64, now: i64) -> Option<String> {
@@ -374,8 +374,8 @@ fn span_len(p: &ContainerPort) -> u16 {
 }
 
 /// `base + offset` widened to `u32` before adding. `host_port`,
-/// `container_port` and `range` all come straight off libpod's JSON — untrusted
-/// input a hostile or buggy daemon could set to any `u16` value — so a plain
+/// `container_port` and `range` all come straight off libpod's JSON ,  untrusted
+/// input a hostile or buggy daemon could set to any `u16` value ,  so a plain
 /// `u16 + u16` (e.g. `host_port: 65535` with a `range` of 2) can overflow: it
 /// wraps silently in a release build and panics under overflow-checks. Doing
 /// the addition in `u32` keeps every legitimate port value identical while a
@@ -464,7 +464,7 @@ fn ps_json_row(c: &ContainerListEntry) -> serde_json::Value {
 		// wants an instant it can compute with rather than `2mo 1d`.
 		"Created": c.created,
 		"StartedAt": c.started_at,
-		// Raw byte counts, and null when the size was not requested — the same
+		// Raw byte counts, and null when the size was not requested ,  the same
 		// distinction the table draws between an empty cell and a zero.
 		"Size": c.size.map(|s| serde_json::json!({
 			"RwSize": s.rw,
@@ -613,7 +613,7 @@ impl Engine {
 		// second cannot render different ages.
 		let now = now_unix();
 		// SIZE is appended rather than inserted, so a reader's existing column
-		// positions do not move when the flag is off — and `docker ps -s` puts
+		// positions do not move when the flag is off ,  and `docker ps -s` puts
 		// it last too.
 		let mut headers: Vec<&str> = vec!["NAME", "IMAGE", "CREATED", "STATUS", "PORTS"];
 		if display.size {
@@ -636,6 +636,13 @@ impl Engine {
 				row.push(table_size(c));
 			}
 			table.push(row);
+		}
+		if table.is_empty() {
+			// An empty ps table is a legitimate answer; print the explicit
+			// "no containers" line on stderr so a script capturing stdout (or
+			// `--format json`) sees nothing (#1675).
+			crate::ui::progress_note("no containers");
+			return Ok(());
 		}
 		table.print();
 

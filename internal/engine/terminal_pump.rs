@@ -1,8 +1,8 @@
 //! The bidirectional terminal loop, shared by interactive `exec` and `run`.
 //!
 //! Both hand a hijacked socket to the caller's terminal and pump bytes until the
-//! command ends. They differ only in which libpod object gets resized — an exec
-//! session or a container — so that is the one parameter, and the loop that must
+//! command ends. They differ only in which libpod object gets resized ,  an exec
+//! session or a container ,  so that is the one parameter, and the loop that must
 //! not get raw mode wrong lives once rather than twice.
 //!
 //! The loop itself is platform-independent: raw mode, the size query and the
@@ -15,14 +15,14 @@ use crate::error::{ComposeError, Result};
 use crate::libpod::client::Hijacked;
 use crate::libpod::API_PREFIX;
 
-use super::query::terminal::{window_size, RawMode, ResizeWatcher};
+use super::query::terminal::{drain_stdin, window_size, RawMode, ResizeWatcher};
 use super::Engine;
 
 impl Engine {
 	/// Pump the caller's terminal against a hijacked stream until it ends.
 	///
-	/// `resize_base` is the libpod path segment identifying what to resize —
-	/// `exec/{id}` or `containers/{name}` — since the endpoint differs and
+	/// `resize_base` is the libpod path segment identifying what to resize ,
+	/// `exec/{id}` or `containers/{name}` ,  since the endpoint differs and
 	/// nothing else does.
 	///
 	/// The terminal is restored by `RawMode`'s `Drop`, so every exit path leaves
@@ -35,12 +35,21 @@ impl Engine {
 		let _raw = RawMode::enable();
 
 		// Size the pty now, not before: there is nothing to resize until the
-		// session exists, and libpod rejects the call — silently, since a failed
+		// session exists, and libpod rejects the call ,  silently, since a failed
 		// resize is only cosmetic. Sizing here means a full-screen program draws
 		// correctly from its first frame rather than at libpod's 80x24 default.
 		if let Some((rows, cols)) = window_size() {
 			self.resize_pty(resize_base, rows, cols).await;
 		}
+
+		// Drop any bytes the kernel had queued on stdin before raw mode took
+		// effect. Switching to raw surfaces them immediately to a read, and a
+		// pty-startup NUL has been measured to land here under `script -qfc`
+		// (see #1675): forwarding it would echo back as `^@` from the remote
+		// pty and pollute the output as the first byte. The caller has not
+		// had a chance to type anything yet, so any byte read here is pty
+		// startup and is safe to drop.
+		drain_stdin();
 
 		let (mut server_read, mut server_write) = tokio::io::split(hijacked.stream);
 		let mut stdin = tokio::io::stdin();
