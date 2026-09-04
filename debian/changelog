@@ -1,3 +1,24 @@
+podup (5.9.0) unstable; urgency=medium
+
+  * Every command that acts on resources draws the live board: `up`, `down`,
+    `start`, `stop`, `restart`, `kill`, `pause`, `unpause`, `rm`, `create`,
+    `scale`, `pull`, `push` and `build`, with a working verb while a row is in
+    flight and a final verb with the elapsed time. The board survives
+    `NO_COLOR` and a narrow terminal, and in a pipe the plain lines never
+    contradict each other.
+  * `pull` counts the layers as they copy; `build` draws one row per image
+    with `Building n/m` from the builder's STEP lines, folds the builder
+    stream under the row on a terminal, replays it above the error when a
+    build fails, and in a pipe prefixes every line with the image tag and
+    prints the image id on stdout.
+  * The release reads the hardening off every binary before signing: static
+    PIE, RELRO, NX and no symbol table on Linux; ASLR, high-entropy VA, DEP and
+    Control Flow Guard on Windows, with CFG newly enabled for both MSVC
+    targets; PIE and a stripped symbol table on macOS. The windows-arm64 asset
+    is built and run on an arm64 runner.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Fri, 04 Sep 2026 10:05:09 -0500
+
 podup (5.8.0) unstable; urgency=medium
 
   * `x-podman-pod: true` at the top level puts every service of a project
