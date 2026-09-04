@@ -152,6 +152,12 @@ pub fn start(kind: &str, name: &str, verb: &str) {
 	let Some(kind) = Kind::from_noun(kind) else {
 		return;
 	};
+	// Recorded before the sink decision so a test can read what an engine path
+	// asked the board to render, including the transitions the plain sink would
+	// have suppressed in production. Same scope as `record_begin`/`record_end`:
+	// test-only, compiled out of a release build entirely.
+	#[cfg(test)]
+	capture::record_start(kind, name, verb);
 	let sink = {
 		let Ok(mut slot) = SESSION.lock() else {
 			return;
@@ -344,6 +350,13 @@ pub(super) fn finish(kind: &str, name: &str, verb: &str) -> bool {
 	let Some(kind) = Kind::from_noun(kind) else {
 		return false;
 	};
+	// Recorded before the session gate for the same reason `record_begin` and
+	// `record_start` are: a test that wants the row lifecycle end-to-end sees
+	// every event, even when no board was actually opened (which is what
+	// `PROGRESS_ENABLED=false` and `cargo test` produce). The session gate is
+	// about who renders the event, not about whether the event happened.
+	#[cfg(test)]
+	capture::record_finish(kind, name, verb);
 	// Short-circuit the common "no board open" path before taking the lock
 	// (#1364). `progress_line` is the hottest UI site: a 100-service `up`
 	// fires it 100 times, and every call would otherwise acquire and release
