@@ -16,6 +16,11 @@ podup (5.9.0) unstable; urgency=medium
     Control Flow Guard on Windows, with CFG newly enabled for both MSVC
     targets; PIE and a stripped symbol table on macOS. The windows-arm64 asset
     is built and run on an arm64 runner.
+  * `rm` and a scale-down open their rows before stopping and removing, so
+    `Removed` carries the elapsed time; `rm --stop` resumes only the
+    containers that are paused and draws nothing when none is; `ps` and
+    `events` fail on a compose file named with `-f` or `COMPOSE_FILE` that
+    does not exist, instead of answering by label as if none were given.
 
  -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Fri, 04 Sep 2026 10:05:09 -0500
 
