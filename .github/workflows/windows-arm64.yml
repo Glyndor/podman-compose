@@ -1,0 +1,82 @@
+name: Windows arm64 release binary builds and runs
+
+# The release runs every binary once between "Build binary" and "Sign binary",
+# so a binary the loader refuses is caught before it is signed and published
+# (the smoke step added in #1645; the windows-arm64 leg was skipped there in
+# #1648). That gate fires at tag time, when a failure costs a release run.
+# This job builds the aarch64-pc-windows-msvc release target the way
+# release.yml does, on the windows-11-arm runner it ships for, and runs the
+# binary once, so the change that would fail the release fails here first.
+# The leg is the reason this job exists: today it cross-compiles on
+# windows-latest (x86_64) and cannot run what it built, and the runner it can
+# run on is the one this pull request proves is reachable.
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - ".cargo/**"
+      - "Cargo.toml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/windows-arm64.yml"
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - ".cargo/**"
+      - "Cargo.toml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/windows-arm64.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-arm64-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: aarch64-pc-windows-msvc on windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    # Bound: release.yml's worst leg on 2026-09-02 measured 347 s, and the
+    # Windows x86_64 release leg (the closest native-Windows analog the
+    # release matrix has today) sits below that. This job is one build, no
+    # signing and no SBOM, so ten times 347 s, rounded up; the six-hour
+    # default is what a hang would otherwise cost.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-11-arm
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain and the aarch64-pc-windows-msvc target
+        env:
+          # Keep in step with release.yml's build job and its `toolchain`
+          # default. pin-watch.yml reads the nine sites that write this number
+          # and reports them disagreeing.
+          RUST_TOOLCHAIN: "1.98"
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+          rustup target add aarch64-pc-windows-msvc
+
+      - name: Build the release binary the way the release does
+        run: cargo build --release --locked --target aarch64-pc-windows-msvc
+
+      - name: Run it once
+        # Forward slashes: bash on Windows honours them and the backslashes a
+        # Windows path would normally carry are literal characters to shellcheck.
+        run: target/aarch64-pc-windows-msvc/release/podup.exe --version

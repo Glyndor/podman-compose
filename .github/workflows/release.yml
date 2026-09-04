@@ -167,7 +167,7 @@ jobs:
           # is added with rustup, and the signing step's Python wheels are only
           # published for x64 Windows (no native arm64 wheel exists).
           - asset: podup-windows-arm64.exe
-            runner: windows-latest
+            runner: windows-11-arm
             target: aarch64-pc-windows-msvc
             bin: podup.exe
 
@@ -215,13 +215,7 @@ jobs:
         # A link that produced something the loader refuses would otherwise
         # be signed, attested and published; the static-PIE link the aarch64
         # musl target gets from .cargo/config.toml is the case this was
-        # written for. Seven legs build on the architecture they ship for
-        # (the darwin x86_64 leg runs under Rosetta). The windows-arm64 leg
-        # cross-compiles on windows-latest, which is x86_64, and cannot run
-        # what it built: the first release with this step failed there with
-        # "Exec format error" (#1648). It is skipped until that leg moves to a
-        # windows-11-arm runner.
-        if: matrix.target != 'aarch64-pc-windows-msvc'
+        # written for. Every leg now builds on the architecture it ships for.
         run: ./"${{ matrix.asset }}" --version
 
       - name: Sign binary
