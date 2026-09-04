@@ -8,6 +8,8 @@
 mod context;
 mod pull;
 mod push;
+mod secrets;
+mod steps;
 mod stream;
 mod tags;
 /// Shared with the `up` image-prefetch and `up`/pull decision paths so they
@@ -24,6 +26,8 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use tracing::{info, warn};
 
+use std::io::IsTerminal;
+
 use crate::compose::types::{BuildConfig, Service};
 use crate::engine::container_config::resources::is_known_ulimit;
 use crate::error::{ComposeError, Result};
@@ -32,6 +36,7 @@ use crate::libpod::urlencoded;
 use crate::libpod::validate::pre_validate_build;
 use crate::libpod::API_PREFIX;
 use crate::size;
+use steps::{parse_image_id_line, BuildStreamProgress};
 
 use context::{map_additional_context, INLINE_DOCKERFILE_NAME};
 use stream::{context_body, ContextSource};
@@ -185,13 +190,53 @@ impl Engine {
 			target_services.to_vec()
 		};
 
+		// Seed the board with the image set this pass will build, one row
+		// per image, before the first `Building` line. A service with no
+		// `build:` block is skipped, the same way `build_service` does; its
+		// row would never move and would read as something hung (#1681).
+		// Two services on the same image share one row, since the row is
+		// the image.
+		let mut images: Vec<String> = Vec::new();
 		for name in &names {
-			let service = &file.services[name];
-			if service.build.is_some() {
-				self.build_service(name, service, file, opts).await?;
+			let Some(service) = file.services.get(name) else {
+				continue;
+			};
+			if service.build.is_none() {
+				continue;
+			}
+			let tag = primary_build_tag(
+				&self.project,
+				name,
+				service.image.as_deref(),
+				service.build.as_ref().map(|b| b.tags()).unwrap_or(&[]),
+			);
+			if !images.iter().any(|seen| seen == &tag) {
+				images.push(tag);
 			}
 		}
-		Ok(())
+		crate::ui::progress::begin(
+			images
+				.iter()
+				.map(|image| (crate::ui::progress::Kind::Image, image.clone())),
+		);
+
+		let result = async {
+			for name in &names {
+				let service = &file.services[name];
+				if service.build.is_some() {
+					self.build_service(name, service, file, opts).await?;
+				}
+			}
+			Ok(())
+		}
+		.await;
+
+		// Close the board on every exit, the way `pull_services_with_options`
+		// and `run_up` do. The live region hides the cursor, so an early
+		// return through it would leave the terminal without a caret. `end`
+		// is idempotent.
+		crate::ui::progress::end();
+		result
 	}
 
 	pub(super) async fn build_service(
@@ -495,23 +540,73 @@ impl Engine {
 		};
 		let mut stream = crate::libpod::parse_json_lines::<BuildOutput>(resp.into_body());
 
+		// Open the board row for this image before the first `STEP` line, so
+		// the row's `Building` verb is what the reader sees while the stream
+		// arrives. `progress::start` is a no-op when the board already had
+		// the row seeded (`build_all_with_options` did this for a standalone
+		// `build`), and inserts it before the service's container row when
+		// `up --build` calls into a board the `up` pass opened. Either way,
+		// the row ends up with the right identifier, in the right position
+		// and with a working verb (#1681).
+		if !opts.quiet {
+			let first_container = self.replica_names(service_name, service).into_iter().next();
+			match first_container {
+				Some(container_name) => crate::ui::progress::start_anchored(
+					"Image",
+					&tag,
+					"Building",
+					Some("Container"),
+					Some(&container_name),
+				),
+				None => crate::ui::progress::start("Image", &tag, "Building"),
+			}
+		}
+
+		// The captured stream of this image: needed on a terminal failure
+		// path, where the notes buffer only kept the last 4 lines and the
+		// rest has to be replayed as scrollback so the reason is on screen.
+		// Off a terminal, every line is already in stderr through `note_for`,
+		// so this stays empty in the test runs.
+		let mut capture: Vec<String> = Vec::new();
+		// Track the last image id the stream emitted, so the success path
+		// can put it on stdout when stdout is not a terminal. Buildah
+		// closes with a `--> sha256:<64-hex>` line, which is what a script
+		// capturing stdout wants; on a terminal it is dropped (the row
+		// already says it landed). `None` until the first matching line.
+		let mut last_image_id: Option<String> = None;
+		let mut progress = BuildStreamProgress::new();
+
 		while let Some(result) = stream.next().await {
 			match result {
 				Ok(output) => {
-					// stderr, not stdout. Build output went to stdout via `print!`,
-					// which contradicted the documented promise that stdout stays
-					// a clean pipe — the one thing a caller redirecting `podup
-					// build > log` relies on, and the same promise `config` and
-					// `generate quadlet` are built around.
-					if !opts.quiet && !output.stream.is_empty() {
-						eprint!("{}", output.stream);
+					if !output.stream.is_empty() {
+						let trimmed = output.stream.trim_end().to_string();
+						if !opts.quiet && !trimmed.is_empty() {
+							// `STEP n/m:` lines advance the row verb. Every
+							// other line is a tail note, painted dimmed under
+							// the row on a terminal and prefixed on stderr in
+							// a pipe.
+							if let Some(verb) = progress.observe(&trimmed) {
+								crate::ui::progress::start("Image", &tag, &verb);
+							}
+							// The image id line is the one carry-over from
+							// today that a script reading stdout needs. It
+							// goes to notes/live as any other line, and is
+							// additionally stashed so the success path can
+							// echo it to stdout when stdout is not a tty.
+							if let Some(id) = parse_image_id_line(&trimmed) {
+								last_image_id = Some(id);
+							}
+							crate::ui::progress::note_for("Image", &tag, &trimmed);
+						}
+						capture.push(trimmed);
 					}
 					if let Some(err) = output.error_detail.and_then(|e| e.message) {
-						return Err(ComposeError::Build(err));
+						return Err(self.fail_build(&tag, err, capture, opts.quiet));
 					}
 					if let Some(err) = output.error {
 						if !err.is_empty() {
-							return Err(ComposeError::Build(err));
+							return Err(self.fail_build(&tag, err, capture, opts.quiet));
 						}
 					}
 				}
@@ -519,56 +614,29 @@ impl Engine {
 			}
 		}
 
+		// Success: close the row with `Built`. The trailing image id goes to
+		// stdout only when stdout is not a terminal, so a script reading
+		// `podup build | awk '{print $1}'` can still pluck the id; on a
+		// terminal the row says it landed and the id would only be noise.
+		if !opts.quiet {
+			crate::ui::progress_line("Image", &tag, "Built");
+		}
+		if !std::io::stdout().is_terminal() {
+			let resolved = match last_image_id {
+				Some(id) => Some(id),
+				None => match self.image_id(&tag).await {
+					Ok(Some(id)) => Some(id),
+					_ => None,
+				},
+			};
+			if let Some(id) = resolved {
+				use std::io::Write;
+				let _ = writeln!(std::io::stdout(), "{id}");
+			}
+		}
+
 		self.apply_extra_tags(build, &tag).await?;
 		Ok(())
-	}
-
-	/// Resolve `build.secrets` into `(in-tar files, secret specs)`.
-	///
-	/// Each referenced top-level secret is read (from `file:`, inline `content:`,
-	/// or `environment:`) and returned as a `(tar-entry-name, bytes)` pair plus a
-	/// matching `id=NAME,src=ENTRY` spec for the build endpoint's `secrets` param.
-	/// `external` secrets cannot be forwarded over the API and are warned + skipped.
-	fn resolve_build_secrets(
-		&self,
-		build: &BuildConfig,
-		file: &crate::compose::types::ComposeFile,
-	) -> Result<ResolvedBuildSecrets> {
-		let mut files = Vec::new();
-		let mut specs = Vec::new();
-		for name in build.secrets() {
-			let Some(config) = file.secrets.get(name) else {
-				return Err(ComposeError::Unsupported(format!(
-					"build secret '{name}' is not defined in the top-level secrets section"
-				)));
-			};
-			let bytes: Vec<u8> = if let Some(host_path) = &config.file {
-				// Read through the bounded reader so a hostile or accidentally
-				// huge secret file is capped at MAX_FILE_BYTES like every other
-				// file read, rather than allocating an unbounded buffer.
-				crate::filesystem::read_capped(self.base_dir.join(host_path))
-					.map_err(ComposeError::Io)?
-			} else if let Some(content) = &config.content {
-				content.clone().into_bytes()
-			} else if let Some(env_var) = &config.environment {
-				std::env::var(env_var)
-					.map_err(|_| {
-						ComposeError::Unsupported(format!(
-							"build secret '{name}' references env var '{env_var}' which is not set"
-						))
-					})?
-					.into_bytes()
-			} else if config.external == Some(true) {
-				warn!("build secret '{name}' is external; cannot forward over the libpod build API — skipping");
-				continue;
-			} else {
-				continue;
-			};
-			let entry = format!(".podup-build-secret-{name}");
-			specs.push(format!("id={name},src={entry}"));
-			files.push((entry, bytes));
-		}
-		Ok((files, specs))
 	}
 
 	/// Apply any `build.tags` aliases to the freshly built image.
@@ -605,3 +673,7 @@ impl Engine {
 #[cfg(test)]
 #[path = "build_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "build_board_tests.rs"]
+mod board_tests;

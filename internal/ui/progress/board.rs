@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 /// What kind of thing a row is about. The noun printed in the first column, and
 /// the same vocabulary `progress_line` has always used.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Kind {
 	/// A compose network, project-scoped unless declared `external`.
 	Network,
@@ -96,9 +96,9 @@ impl Row {
 
 /// Every resource one command is working through, in the order it was seeded.
 ///
-/// Seeded up front rather than grown as events arrive: a board whose rows appear
-/// one at a time is a transcript with extra steps, and the whole point is to
-/// show what is still to come.
+/// Seeded up front rather than grown as events arrive: a board whose rows is
+/// grown from those events is a transcript with extra steps, and the whole
+/// point is to show what is still to come.
 #[derive(Debug, Default)]
 pub struct Board {
 	rows: Vec<Row>,
@@ -106,6 +106,19 @@ pub struct Board {
 	/// drawn once and never repainted. Counted from the front: rows leave the
 	/// live region in order.
 	flushed: usize,
+}
+
+/// The position a row was inserted at.
+///
+/// Returned by [`Board::start`] and the related variants so the engine can
+/// tell, when it needs to, whether it just created the row or found it
+/// already seeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsertedAt {
+	/// The row already existed; the index it sits at in `rows`.
+	Existing(usize),
+	/// The row was just appended; its new index.
+	Appended(usize),
 }
 
 impl Board {
@@ -131,20 +144,75 @@ impl Board {
 	/// and a compose file can grow a container the seed did not predict (an
 	/// implicit `_default` network, a `--scale` override). Losing the row would
 	/// be worse than a board that grows by one.
-	pub fn start(&mut self, kind: Kind, name: &str, verb: &str, now: Instant) {
-		let idx = self.index_of(kind, name).unwrap_or_else(|| {
-			self.rows.push(Row {
+	pub fn start(&mut self, kind: Kind, name: &str, verb: &str, now: Instant) -> InsertedAt {
+		if let Some(idx) = self.index_of(kind, name) {
+			let row = &mut self.rows[idx];
+			row.state = State::Working(verb.to_string());
+			row.started.get_or_insert(now);
+			return InsertedAt::Existing(idx);
+		}
+		self.rows.push(Row {
+			kind,
+			name: name.to_string(),
+			state: State::Working(verb.to_string()),
+			started: Some(now),
+			elapsed: None,
+		});
+		InsertedAt::Appended(self.rows.len() - 1)
+	}
+
+	/// Mark a resource as being worked on, **inserting** a new row in front
+	/// of `anchor` rather than appending it. Used by the `up` build path: the
+	/// container rows are already seeded in front of the image row, so a
+	/// plain `start` would put the image row *after* them, and the reader
+	/// would see `Container … Starting` before the `Building` row that says
+	/// which image is being built. A row that is already at or before the
+	/// anchor is left alone, so this is also safe to call more than once.
+	pub fn start_before(
+		&mut self,
+		anchor_kind: Kind,
+		anchor_name: &str,
+		kind: Kind,
+		name: &str,
+		verb: &str,
+		now: Instant,
+	) -> InsertedAt {
+		let anchor_idx = self
+			.index_of(anchor_kind, anchor_name)
+			.unwrap_or(self.rows.len());
+		if let Some(idx) = self.index_of(kind, name) {
+			// Already on the board. If it sits at or before the anchor, the
+			// order is already right and we only need to flip its state.
+			if idx <= anchor_idx {
+				let row = &mut self.rows[idx];
+				row.state = State::Working(verb.to_string());
+				row.started.get_or_insert(now);
+				return InsertedAt::Existing(idx);
+			}
+			// Behind the anchor: lift the row to just before the anchor so
+			// the image reads as the prerequisite of the container it lives
+			// for.
+			let row = self.rows.remove(idx);
+			let insert_at = anchor_idx.min(self.rows.len());
+			self.rows.insert(insert_at, row);
+			let row = &mut self.rows[insert_at];
+			row.state = State::Working(verb.to_string());
+			row.started.get_or_insert(now);
+			return InsertedAt::Existing(insert_at);
+		}
+		// Not on the board yet. Insert a fresh row just before the anchor.
+		let insert_at = anchor_idx.min(self.rows.len());
+		self.rows.insert(
+			insert_at,
+			Row {
 				kind,
 				name: name.to_string(),
-				state: State::Pending,
-				started: None,
+				state: State::Working(verb.to_string()),
+				started: Some(now),
 				elapsed: None,
-			});
-			self.rows.len() - 1
-		});
-		let row = &mut self.rows[idx];
-		row.state = State::Working(verb.to_string());
-		row.started.get_or_insert(now);
+			},
+		);
+		InsertedAt::Appended(insert_at)
 	}
 
 	/// Mark a resource as finished. Also tolerates a resource that was never
@@ -183,6 +251,21 @@ impl Board {
 			out.push(row.clone());
 			self.flushed += 1;
 		}
+		out
+	}
+
+	/// Every row the board holds, regardless of state, for the final paint at
+	/// `progress::end`.
+	///
+	/// Used only at the close of a board: a row that was still in flight during
+	/// the last `repaint` (and so already painted in the live region) is
+	/// re-rendered here as part of the permanent record. Previously `end`
+	/// re-painted the live region too, which made a non-contiguous `Done` row
+	/// like `Failed` appear twice in the final output (#1675). Here the live
+	/// region is collapsed: every row is scrollback exactly once.
+	pub fn take_all_rows(&mut self) -> Vec<Row> {
+		let out = self.rows.clone();
+		self.flushed = self.rows.len();
 		out
 	}
 

@@ -1,5 +1,6 @@
 use crate::engine::fake_podman;
 use crate::engine::Engine;
+use crate::ui::progress::capture::Capture;
 
 fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
 	Engine::with_base_dir(client, project.into(), std::env::temp_dir())
@@ -151,5 +152,107 @@ async fn image_already_seen_present_rejects_an_unknown_pull_policy() {
 			}) if service == "web" && field == "pull_policy" && value == "alaways"
 		),
 		"unknown pull_policy must surface as a Field error naming the offending service and value, got {err:?}"
+	);
+}
+
+/// `up` against a service whose image is missing builds it as part of the
+/// `up` board, not before it. The image row appears inside the same board
+/// `up` already drew, with the working verb `Building` and the closing
+/// verb `Built`, before the container rows that depend on it. Before
+/// #1681 the stream landed before the board started, so nothing said
+/// which service was being built or how long it took.
+#[tokio::test]
+async fn up_with_a_missing_image_builds_on_the_same_board() {
+	let chunks = vec![
+		"{\"stream\":\"STEP 1/2: FROM docker.io/library/alpine:3.20\\n\"}\n".to_string(),
+		"{\"stream\":\"--> 3f3c8b769775\\n\"}\n".to_string(),
+		"{\"stream\":\"STEP 2/2: CMD [\\\"echo\\\",\\\"hi\\\"]\\n\"}\n".to_string(),
+		"{\"stream\":\"--> 9f3c8b769775\\n\"}\n".to_string(),
+		"{\"stream\":\"COMMIT localhost/ux-up-build:1\\n\"}\n".to_string(),
+		"{\"stream\":\"--> sha256:1111111111111111111111111111111111111111111111111111111111111111\\n\"}\n".to_string(),
+		"{\"stream\":\"Successfully tagged localhost/ux-up-build:1\\n\"}\n".to_string(),
+	];
+	// The image is missing locally (the inspect probe returns 404), so
+	// `acquire_service_image` decides to build. The fake answers `/build`
+	// with the canned stream and answers the post-build `/tag` call so the
+	// extra-tags step succeeds; everything else 404s so the test can read
+	// what was actually called.
+	let fake = crate::engine::fake_podman::start_replying(move |method, target| {
+		if method == "POST" && target.contains("/build?") {
+			crate::engine::fake_podman::FakeReply::ChunkedEnd(chunks.clone())
+		} else if method == "POST" && target.contains("/images/") && target.contains("/tag") {
+			crate::engine::fake_podman::FakeReply::Body(200, String::new())
+		} else if method == "GET" && target.contains("/images/") && target.contains("/json") {
+			// Image absent: the missing-policy branch takes the build path.
+			crate::engine::fake_podman::FakeReply::Body(
+				404,
+				r#"{"message":"no such image"}"#.to_string(),
+			)
+		} else if method == "GET" && target.contains("/containers/json") {
+			crate::engine::fake_podman::FakeReply::Body(200, "[]".to_string())
+		} else if method == "POST" && target.contains("/containers/create") {
+			crate::engine::fake_podman::FakeReply::Body(200, "{}".to_string())
+		} else if method == "POST" && target.contains("/start") {
+			crate::engine::fake_podman::FakeReply::Body(200, String::new())
+		} else {
+			crate::engine::fake_podman::FakeReply::Body(
+				404,
+				r#"{"message":"not found"}"#.to_string(),
+			)
+		}
+	});
+
+	// A real context directory on disk: `acquire_service_image` calls
+	// `build_service`, which inspects the path before posting.
+	let ctx = tempfile::tempdir().expect("tempdir");
+	std::fs::write(
+		ctx.path().join("Dockerfile"),
+		b"FROM docker.io/library/alpine:3.20\nCMD [\"echo\",\"hi\"]\n",
+	)
+	.expect("write Dockerfile");
+	let mut engine = Engine::with_base_dir(fake.client(), "proj".into(), ctx.path().to_path_buf());
+	engine.no_warn = true;
+	let compose = crate::parse_str(
+		"services:\n  app:\n    image: localhost/ux-up-build:1\n    build:\n      context: .\n    command: [\"echo\",\"hi\"]\n",
+	)
+	.unwrap();
+
+	let capture = Capture::start();
+	engine
+		.up_with_options(&compose, true, &[], &[], false, false, false)
+		.await
+		.expect("an up that builds its missing image succeeds");
+
+	// The image row's `start_anchored` lands before the container row's
+	// first event, which is the order signal the renderer sees: an `up`
+	// that builds its missing image paints the image row above the
+	// container rows that depend on it. We rely on Capture's per-thread
+	// event log rather than the global session so this test stays
+	// independent of the progress-enabled toggle.
+	let verbs = capture.verbs();
+	let first_image_idx = verbs
+		.iter()
+		.position(|(_, n, _)| n == "localhost/ux-up-build:1");
+	let first_container_idx = verbs.iter().position(|(_, n, _)| n == "proj-app-1");
+	assert!(
+		first_image_idx.is_some() && first_container_idx.is_some(),
+		"both rows see events on the up board: {verbs:?}"
+	);
+	assert!(
+		first_image_idx.unwrap() < first_container_idx.unwrap(),
+		"the image row's first event is before the container row's first: {verbs:?}"
+	);
+	assert!(
+		verbs
+			.iter()
+			.any(|(_, n, v)| n == "localhost/ux-up-build:1" && v == "Building")
+			&& verbs
+				.iter()
+				.any(|(_, n, v)| n == "localhost/ux-up-build:1" && v == "Built"),
+		"the image row went Building -> Built on the same board: {verbs:?}"
+	);
+	assert!(
+		capture.every_board_ended(),
+		"the board closes on the way out, even with a build"
 	);
 }

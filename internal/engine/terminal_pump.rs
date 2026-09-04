@@ -15,7 +15,7 @@ use crate::error::{ComposeError, Result};
 use crate::libpod::client::Hijacked;
 use crate::libpod::API_PREFIX;
 
-use super::query::terminal::{window_size, RawMode, ResizeWatcher};
+use super::query::terminal::{drain_stdin, window_size, RawMode, ResizeWatcher};
 use super::Engine;
 
 impl Engine {
@@ -41,6 +41,15 @@ impl Engine {
 		if let Some((rows, cols)) = window_size() {
 			self.resize_pty(resize_base, rows, cols).await;
 		}
+
+		// Drop any bytes the kernel had queued on stdin before raw mode took
+		// effect. Switching to raw surfaces them immediately to a read, and a
+		// pty-startup NUL has been measured to land here under `script -qfc`
+		// (see #1675): forwarding it would echo back as `^@` from the remote
+		// pty and pollute the output as the first byte. The caller has not
+		// had a chance to type anything yet, so any byte read here is pty
+		// startup and is safe to drop.
+		drain_stdin();
 
 		let (mut server_read, mut server_write) = tokio::io::split(hijacked.stream);
 		let mut stdin = tokio::io::stdin();

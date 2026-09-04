@@ -17,10 +17,11 @@
 
 use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Console::{
-	GetConsoleMode, GetConsoleScreenBufferInfo, GetStdHandle, SetConsoleMode, CONSOLE_MODE,
-	CONSOLE_SCREEN_BUFFER_INFO, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
-	ENABLE_VIRTUAL_TERMINAL_INPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, STD_ERROR_HANDLE,
-	STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+	GetConsoleMode, GetConsoleScreenBufferInfo, GetNumberOfConsoleInputEvents, GetStdHandle,
+	ReadConsoleInputW, SetConsoleMode, CONSOLE_MODE, CONSOLE_SCREEN_BUFFER_INFO, ENABLE_ECHO_INPUT,
+	ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT, ENABLE_VIRTUAL_TERMINAL_INPUT,
+	ENABLE_VIRTUAL_TERMINAL_PROCESSING, INPUT_RECORD, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
+	STD_OUTPUT_HANDLE,
 };
 
 /// A console switched to raw mode, restored on drop.
@@ -240,6 +241,42 @@ fn resize_due(last: &mut Option<(u16, u16)>, current: Option<(u16, u16)>) -> Opt
 	}
 	*last = Some(current);
 	Some(current)
+}
+
+/// Drop every byte the kernel had queued on the console's stdin handle, without
+/// forwarding any of them.
+///
+/// Called once at the start of an interactive exec/run, between enabling raw
+/// mode and entering the byte pump. The console's input queue may carry
+/// startup bytes from before the user could possibly type anything, and a
+/// previously-measured pty artifact echoes back as `^@` (see #1675).
+/// Discarding those bytes before the pump starts keeps the user's first
+/// keystroke from being preceded by a stray character.
+///
+/// A non-console handle is a no-op; the pump does not run on a pipe.
+pub(crate) fn drain_stdin() {
+	// SAFETY: `GetStdHandle` takes no pointers and only returns a handle; a
+	// missing standard handle comes back null or invalid, checked below.
+	let stdin = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+	if stdin.is_null() || stdin == INVALID_HANDLE_VALUE {
+		return;
+	}
+	// SAFETY: `events` is a correctly sized unsigned owned here; the call only
+	// writes into it. A non-console handle returns 0.
+	let mut events: u32 = 0;
+	if unsafe { GetNumberOfConsoleInputEvents(stdin, &mut events) } == 0 {
+		return;
+	}
+	// SAFETY: `INPUT_RECORD` is a plain C struct of integers and unions of
+	// integers; the all-zero bit pattern is a valid value for every field.
+	let empty: INPUT_RECORD = unsafe { std::mem::zeroed() };
+	let mut records = vec![empty; events.max(1) as usize];
+	let mut read: u32 = 0;
+	// SAFETY: `records` is a contiguous, correctly-sized buffer; the call
+	// only writes up to `events` records and reports the count in `read`.
+	// We discard the records (they are bytes from before raw mode took
+	// effect; the user has not had a chance to type anything yet).
+	let _ = unsafe { ReadConsoleInputW(stdin, records.as_mut_ptr(), events, &mut read) };
 }
 
 #[cfg(test)]

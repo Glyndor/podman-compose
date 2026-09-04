@@ -180,9 +180,8 @@ for case in unset empty whitespace; do
 		;;
 	esac
 	[[ $rc -eq 1 ]] || fail "case $case: expected exit 1, got $rc"
-	# The distinctive fragment is the full refusal sentence. The brief
-	# asks for "refusing to publish an unsigned artifact"; assert it
-	# verbatim, not a synonym.
+	# The distinctive fragment is the full refusal sentence, "refusing to
+	# publish an unsigned artifact"; assert it verbatim, not a synonym.
 	grep -q "refusing to publish an unsigned artifact" "$stderr2" \
 		|| fail "case $case: expected 'refusing to publish an unsigned artifact' on stderr, got: $(cat "$stderr2")"
 done

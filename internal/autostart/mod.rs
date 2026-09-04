@@ -457,7 +457,7 @@ fn unit_is_known<S: SystemCtl>(sc: &S, unit: &str) -> bool {
 /// When the auto-update timer pair is present, this removes both: the
 /// `<unit>-update.service` oneshot and the `<unit>-update.timer` schedule that
 /// fires it. Without that, the timer would keep firing `up -d` against a stack
-/// whose main unit had been uninstalled, the exact inconsistency the brief
+/// whose main unit had been uninstalled, the exact inconsistency the issue
 /// calls out.
 pub fn uninstall<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<()> {
 	let unit_name = unit_file_name(project);

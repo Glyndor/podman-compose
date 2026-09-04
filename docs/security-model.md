@@ -127,6 +127,16 @@ individually justified with safety comments, and unit-tested.
 - Releases are Ed25519-signed and carry GitHub build-provenance attestations; a
   CycloneDX SBOM and third-party license attribution are published with each
   release. See [self-update.md](self-update.md) for verification steps.
+- The release reads per-asset hardening off every binary before signing, so a
+  property that rests on a toolchain default is measured per binary rather than
+  asserted: static PIE, full RELRO, NX stack and a stripped symbol table off
+  the four Linux ELF binaries and the binary inside each `.deb`;
+  `DYNAMIC_BASE`, `HIGH_ENTROPY_VA`, `NX_COMPAT` and `GUARD_CF` off each
+  Windows PE's `DllCharacteristics`; `MH_PIE` in `otool -h` and a stripped
+  symbol table off each Mach-O. The scripts are `.github/scripts/check-hardening.sh`
+  (Linux), `.github/scripts/check-hardening.ps1` (Windows) and
+  `.github/scripts/check-hardening-macos.sh` (macOS); each has its own test
+  with one control binary per property.
 - The Debian package can be built fully offline from a vendored crate tree, for
   air-gapped/classified environments.
 - **Image signatures are the host's policy, and podup inherits it.** Every pull

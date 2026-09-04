@@ -55,9 +55,25 @@ fn wait_row(container: &str, code: i64) -> String {
 ///
 /// One helper rather than a literal per command, so the wording cannot drift into
 /// seven dialects of the same sentence.
-fn note_if_idle(acted: &std::sync::atomic::AtomicBool, verb: &str) {
+pub(super) fn note_if_idle(acted: &std::sync::atomic::AtomicBool, verb: &str) {
 	if !acted.load(std::sync::atomic::Ordering::Relaxed) {
 		crate::ui::progress_note(&format!("no containers to {verb}"));
+	}
+}
+
+/// The verb a row shows while the engine is still working, from the verb it
+/// will show when done. The board keeps a spinner and a clock on the row
+/// between the two; a plain sink prints only the final one.
+pub(super) fn working_verb(done: &str) -> &'static str {
+	match done {
+		"Started" => "Starting",
+		"Stopped" => "Stopping",
+		"Restarted" => "Restarting",
+		"Killed" => "Killing",
+		"Paused" => "Pausing",
+		"Unpaused" => "Unpausing",
+		"Removed" => "Removing",
+		_ => "Working",
 	}
 }
 
@@ -86,6 +102,7 @@ impl Engine {
 		done: &str,
 		goal: LifecycleGoal,
 	) -> Result<bool> {
+		crate::ui::progress::start("Container", container, working_verb(done));
 		match self.client.post_empty_ok(path).await {
 			Ok(()) => {
 				crate::ui::progress_line("Container", container, done);
@@ -93,6 +110,7 @@ impl Engine {
 			}
 			Err(e) if e.is_status(304) || e.is_status(404) || e.is_kill_of_stopped() => {
 				tracing::debug!("{container}: {done} skipped ({e})");
+				crate::ui::progress_line("Container", container, "Skipped");
 				Ok(false)
 			}
 			// The server closed before completing the response. That is not an
@@ -125,6 +143,7 @@ impl Engine {
 		container: &str,
 		done: &str,
 	) -> Result<bool> {
+		crate::ui::progress::start("Container", container, working_verb(done));
 		match self.client.post_empty_ok(path).await {
 			Ok(()) => {
 				crate::ui::progress_line("Container", container, done);
@@ -132,6 +151,7 @@ impl Engine {
 			}
 			Err(e) if e.is_status(304) || e.is_status(404) || e.is_state_conflict() => {
 				tracing::debug!("{container}: {done} skipped ({e})");
+				crate::ui::progress_line("Container", container, "Skipped");
 				Ok(false)
 			}
 			Err(e) => Err(ComposeError::Podman(e)),
@@ -162,6 +182,7 @@ impl Engine {
 			crate::libpod::urlencoded(container),
 			stop_timeout_param(grace),
 		);
+		crate::ui::progress::start("Container", container, "Stopping");
 		match self
 			.client
 			.post_empty_ok_within(&path, stop_deadline(grace))
@@ -173,6 +194,7 @@ impl Engine {
 			}
 			Err(e) if e.is_status(304) || e.is_status(404) => {
 				tracing::debug!("{container}: stop skipped ({e})");
+				crate::ui::progress_line("Container", container, "Skipped");
 				Ok(false)
 			}
 			// `stop` is one of the four state-changing calls the drops were
@@ -251,27 +273,43 @@ impl Engine {
 		// the end rather than aborting mid-batch and leaving later services
 		// unrestarted.
 		let acted = std::sync::atomic::AtomicBool::new(false);
-		let mut first_err: Option<ComposeError> = None;
-		for level in &levels {
-			let futs = level.iter().map(|name| {
-				let service = &file.services[name];
-				let grace = self.grace_period_secs(service);
-				let done = if targets.contains(name) {
-					"Restarted"
-				} else {
-					"Restarted (dependency)"
-				};
-				let names = live_by_service.get(name).cloned().unwrap_or_default();
-				self.restart_one_service(names, grace, done, &acted)
-			});
-			if let Some(e) = first_error(join_bounded(futs).await) {
-				first_err.get_or_insert(e);
+		// Seed the board with the containers this restart will walk, in the level
+		// order it walks them, before the first `Restarted` line. The set is
+		// knowable here and nowhere later: every progress event on this path
+		// fires once its own container is already done.
+		crate::ui::progress::begin(super::seed::level_container_resources(
+			&levels,
+			&live_by_service,
+		));
+		let outcome = async {
+			let mut first_err: Option<ComposeError> = None;
+			for level in &levels {
+				let futs = level.iter().map(|name| {
+					let service = &file.services[name];
+					let grace = self.grace_period_secs(service);
+					let done = if targets.contains(name) {
+						"Restarted"
+					} else {
+						"Restarted (dependency)"
+					};
+					let names = live_by_service.get(name).cloned().unwrap_or_default();
+					self.restart_one_service(names, grace, done, &acted)
+				});
+				if let Some(e) = first_error(join_bounded(futs).await) {
+					first_err.get_or_insert(e);
+				}
+			}
+			match first_err {
+				Some(e) => Err(e),
+				None => Ok(()),
 			}
 		}
-
-		if let Some(e) = first_err {
-			return Err(e);
-		}
+		.await;
+		// Close the board on every exit, the way `run_up` does: the region hides
+		// the cursor, so an early return through it would leave the terminal
+		// without a caret. `end` is idempotent.
+		crate::ui::progress::end();
+		outcome?;
 		note_if_idle(&acted, "restart");
 		Ok(())
 	}
@@ -406,16 +444,28 @@ impl Engine {
 		// `Ok(false)` for libpod's 304/404 idempotent no-ops, which is how this
 		// flag stays accurate with the bulk listing.
 		let acted = std::sync::atomic::AtomicBool::new(false);
-		for level in &levels {
-			let futs = level.iter().map(|name| {
-				let grace = self.grace_period_secs(&file.services[name]);
-				let names = live_by_service.get(name).cloned().unwrap_or_default();
-				self.stop_one_service(names, grace, &acted)
-			});
-			if let Some(e) = first_error(join_bounded(futs).await) {
-				return Err(e);
+		// The board over the containers this stop will walk, seeded in the
+		// reversed level order the walk below uses.
+		crate::ui::progress::begin(super::seed::level_container_resources(
+			&levels,
+			&live_by_service,
+		));
+		let outcome = async {
+			for level in &levels {
+				let futs = level.iter().map(|name| {
+					let grace = self.grace_period_secs(&file.services[name]);
+					let names = live_by_service.get(name).cloned().unwrap_or_default();
+					self.stop_one_service(names, grace, &acted)
+				});
+				if let Some(e) = first_error(join_bounded(futs).await) {
+					return Err(e);
+				}
 			}
+			Ok(())
 		}
+		.await;
+		crate::ui::progress::end();
+		outcome?;
 		note_if_idle(&acted, "stop");
 		Ok(())
 	}
@@ -440,20 +490,31 @@ impl Engine {
 		let live_by_service = self.live_project_replicas().await?;
 
 		let any_live = std::sync::atomic::AtomicBool::new(false);
-		let mut first_err: Option<ComposeError> = None;
-		for level in &levels {
-			let futs = level.iter().map(|name| {
-				let names = live_by_service.get(name).cloned().unwrap_or_default();
-				self.start_one_service(names, &any_live)
-			});
-			if let Some(e) = first_error(join_bounded(futs).await) {
-				first_err.get_or_insert(e);
+		// The board over the containers Podman actually has, in the dependency
+		// order the walk below starts them in.
+		crate::ui::progress::begin(super::seed::level_container_resources(
+			&levels,
+			&live_by_service,
+		));
+		let outcome = async {
+			let mut first_err: Option<ComposeError> = None;
+			for level in &levels {
+				let futs = level.iter().map(|name| {
+					let names = live_by_service.get(name).cloned().unwrap_or_default();
+					self.start_one_service(names, &any_live)
+				});
+				if let Some(e) = first_error(join_bounded(futs).await) {
+					first_err.get_or_insert(e);
+				}
+			}
+			match first_err {
+				Some(e) => Err(e),
+				None => Ok(()),
 			}
 		}
-
-		if let Some(e) = first_err {
-			return Err(e);
-		}
+		.await;
+		crate::ui::progress::end();
+		outcome?;
 		// `start`'s flag answers a narrower question than the others' — whether any
 		// container existed at all, not whether anything changed — so it can name
 		// the cause, and the extra clause rides in the verb.
@@ -481,15 +542,26 @@ impl Engine {
 		let live_by_service = self.live_project_replicas().await?;
 
 		let acted = std::sync::atomic::AtomicBool::new(false);
-		for level in &levels {
-			let futs = level.iter().map(|name| {
-				let names = live_by_service.get(name).cloned().unwrap_or_default();
-				self.kill_one_service(names, signal, &acted)
-			});
-			if let Some(e) = first_error(join_bounded(futs).await) {
-				return Err(e);
+		// The board over the containers this signal will reach.
+		crate::ui::progress::begin(super::seed::level_container_resources(
+			&levels,
+			&live_by_service,
+		));
+		let outcome = async {
+			for level in &levels {
+				let futs = level.iter().map(|name| {
+					let names = live_by_service.get(name).cloned().unwrap_or_default();
+					self.kill_one_service(names, signal, &acted)
+				});
+				if let Some(e) = first_error(join_bounded(futs).await) {
+					return Err(e);
+				}
 			}
+			Ok(())
 		}
+		.await;
+		crate::ui::progress::end();
+		outcome?;
 		note_if_idle(&acted, "signal");
 		Ok(())
 	}
@@ -527,83 +599,32 @@ impl Engine {
 		let live_by_service = self.live_project_replicas().await?;
 
 		let acted = std::sync::atomic::AtomicBool::new(false);
-		let mut first_err: Option<ComposeError> = None;
-		for level in &levels {
-			let futs = level.iter().map(|name| {
-				let names = live_by_service.get(name).cloned().unwrap_or_default();
-				self.rm_one_service(names, force, remove_volumes, &acted)
-			});
-			if let Some(e) = first_error(join_bounded(futs).await) {
-				first_err.get_or_insert(e);
+		// The board over the containers this removal will walk, in the reversed
+		// level order it walks them.
+		crate::ui::progress::begin(super::seed::level_container_resources(
+			&levels,
+			&live_by_service,
+		));
+		let outcome = async {
+			let mut first_err: Option<ComposeError> = None;
+			for level in &levels {
+				let futs = level.iter().map(|name| {
+					let names = live_by_service.get(name).cloned().unwrap_or_default();
+					self.rm_one_service(names, force, remove_volumes, &acted)
+				});
+				if let Some(e) = first_error(join_bounded(futs).await) {
+					first_err.get_or_insert(e);
+				}
+			}
+			match first_err {
+				Some(e) => Err(e),
+				None => Ok(()),
 			}
 		}
-		if let Some(e) = first_err {
-			return Err(e);
-		}
+		.await;
+		crate::ui::progress::end();
+		outcome?;
 		note_if_idle(&acted, "remove");
-		Ok(())
-	}
-
-	/// Pause running service containers (SIGSTOP).
-	///
-	/// If `target_services` is empty, all services are paused.
-	pub async fn pause(&self, file: &ComposeFile, target_services: &[String]) -> Result<()> {
-		let levels = crate::compose::resolve_levels(file)?;
-		let levels = filter_levels(file, levels, target_services)?;
-
-		// Prefetch every project container once and group by service (#1363).
-		let live_by_service = self.live_project_replicas().await?;
-
-		// Idempotent + best-effort: re-pausing an already-paused (or stopped)
-		// container is a no-op, and one state-mismatched service must not abort the
-		// batch and leave the rest in an inconsistent partial state. Services in a
-		// level are paused concurrently (#757).
-		let acted = std::sync::atomic::AtomicBool::new(false);
-		let mut first_err: Option<ComposeError> = None;
-		for level in &levels {
-			let futs = level.iter().map(|name| {
-				let names = live_by_service.get(name).cloned().unwrap_or_default();
-				self.idempotent_state_service(names, "pause", "Paused", &acted)
-			});
-			if let Some(e) = first_error(join_bounded(futs).await) {
-				first_err.get_or_insert(e);
-			}
-		}
-		if let Some(e) = first_err {
-			return Err(e);
-		}
-		note_if_idle(&acted, "pause");
-		Ok(())
-	}
-
-	/// Resume paused service containers.
-	///
-	/// If `target_services` is empty, all services are unpaused.
-	pub async fn unpause(&self, file: &ComposeFile, target_services: &[String]) -> Result<()> {
-		let levels = crate::compose::resolve_levels(file)?;
-		let levels = filter_levels(file, levels, target_services)?;
-
-		// Prefetch every project container once and group by service (#1363).
-		let live_by_service = self.live_project_replicas().await?;
-
-		// Idempotent + best-effort, mirroring `pause`: unpausing a not-paused
-		// container is a no-op, and a single mismatch must not abort the batch.
-		// Services in a level are unpaused concurrently (#757).
-		let acted = std::sync::atomic::AtomicBool::new(false);
-		let mut first_err: Option<ComposeError> = None;
-		for level in &levels {
-			let futs = level.iter().map(|name| {
-				let names = live_by_service.get(name).cloned().unwrap_or_default();
-				self.idempotent_state_service(names, "unpause", "Unpaused", &acted)
-			});
-			if let Some(e) = first_error(join_bounded(futs).await) {
-				first_err.get_or_insert(e);
-			}
-		}
-		if let Some(e) = first_err {
-			return Err(e);
-		}
-		note_if_idle(&acted, "unpause");
 		Ok(())
 	}
 
@@ -625,3 +646,7 @@ impl Engine {
 #[cfg(test)]
 #[path = "commands_wait_output_tests.rs"]
 mod wait_output_tests;
+
+#[cfg(all(test, unix))]
+#[path = "commands_board_tests.rs"]
+mod board_tests;

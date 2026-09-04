@@ -231,6 +231,15 @@ impl Engine {
 			}
 			table.push(row);
 		}
+		if table.is_empty() {
+			// An empty volumes table is a legitimate answer, not an absence of
+			// one. Print the explicit "no volumes" line on stderr so a script
+			// capturing stdout (or `--format json`) sees nothing, and the user
+			// gets an unambiguous "no volumes" rather than just a header
+			// (matching `ps`, `images`, `ls`) (#1675).
+			crate::ui::progress_note("no volumes");
+			return Ok(());
+		}
 		table.print();
 		Ok(())
 	}

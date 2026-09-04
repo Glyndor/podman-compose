@@ -9,3 +9,16 @@
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"
 rustflags = ["-C", "link-self-contained=no"]
+
+# Control Flow Guard is opt-in on rustc for both MSVC targets, so enable it
+# in rustflags. rustc's MSVC default leaves GUARD_CF (0x4000) in the
+# optional header's DllCharacteristics unset, and the release-time PE check
+# in .github/scripts/check-hardening.ps1 reads that field and refuses a
+# binary without it; without this flag a passing Windows build would fail
+# the new gate. DYNAMIC_BASE, HIGH_ENTROPY_VA and NX_COMPAT are emitted by
+# the MSVC default and require no rustflag.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "control-flow-guard"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "control-flow-guard"]

@@ -285,6 +285,13 @@ impl Table {
 			println!("{}", self.format_row_keyed(row, &widths, colour, key));
 		}
 	}
+
+	/// Whether the table has any data rows. Callers can use this to print an
+	/// explicit "no X" line on stderr for an empty result (#1675), so a script
+	/// capturing stdout sees nothing for the empty case.
+	pub fn is_empty(&self) -> bool {
+		self.rows.is_empty()
+	}
 }
 
 #[cfg(test)]

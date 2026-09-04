@@ -306,6 +306,7 @@ async fn run() -> podup::Result<()> {
 	} = &cli.command
 	{
 		let compose_files = resolve_compose_files(&cli.file);
+		fail_on_named_file_missing(&cli.file, &compose_files)?;
 		let base_dir = resolve_base_dir(cli.project_directory.as_deref(), &compose_files[0]);
 		// Parse the compose file when it is present and valid so `--services` and a
 		// positional `SERVICE` filter can resolve service names and replicas;
@@ -425,6 +426,9 @@ async fn run() -> podup::Result<()> {
 	// back to an empty compose model; any other parse error (a malformed file
 	// that *does* exist, a missing env file) still surfaces.
 	let label_only = is_label_only(&cli.command);
+	if label_only {
+		fail_on_named_file_missing(&cli.file, &compose_files)?;
+	}
 	let file = if label_only && !compose_files.iter().any(|p| p.is_file()) {
 		podup::compose::types::ComposeFile::default()
 	} else {
@@ -689,3 +693,21 @@ fn first_misused_global(matches: &clap::ArgMatches) -> Option<&'static str> {
 #[cfg(all(test, feature = "update"))]
 #[path = "main_tests.rs"]
 mod tests;
+
+/// The label-only commands (`ps`, `events`) run without a compose file so a
+/// directory that has none still answers by project label. A file the
+/// operator named and that is not there is a different case: answering as if
+/// none were given turns a typo into an empty listing and exit 0 (#1687).
+fn fail_on_named_file_missing(
+	explicit: &[std::path::PathBuf],
+	compose_files: &[std::path::PathBuf],
+) -> Result<(), podup::ComposeError> {
+	if compose_files_were_named(explicit) && !compose_files.iter().any(|p| p.is_file()) {
+		let named = compose_files
+			.first()
+			.map(|p| p.display().to_string())
+			.unwrap_or_default();
+		return Err(podup::ComposeError::FileNotFound(named));
+	}
+	Ok(())
+}

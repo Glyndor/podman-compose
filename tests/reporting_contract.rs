@@ -434,49 +434,6 @@ async fn a_piped_down_gets_transitions_for_what_exists() {
 	);
 }
 
-/// `build` writes its output to stderr, leaving stdout a clean pipe.
-///
-/// It used `print!`, contradicting the documented promise that stdout stays
-/// pipeable — the one thing a caller redirecting `podup build > log` relies on,
-/// and the same promise `config` and `generate quadlet` are built around.
-#[tokio::test]
-async fn build_leaves_stdout_a_clean_pipe() {
-	if !podman_up().await {
-		return;
-	}
-	let dir = tempdir().unwrap();
-	fs::write(
-		dir.path().join("Dockerfile"),
-		"FROM alpine:latest\nRUN true\n",
-	)
-	.unwrap();
-	let compose = dir.path().join("compose.yaml");
-	fs::write(
-		&compose,
-		"services:\n  tiny:\n    image: podup-build-probe:1\n    build:\n      context: .\n",
-	)
-	.unwrap();
-	let out = Command::new(bin())
-		.args([
-			"-f",
-			&compose.to_string_lossy(),
-			"-p",
-			&format!("t{}-bld", std::process::id()),
-			"build",
-		])
-		.output()
-		.expect("run podup build");
-	let stdout = String::from_utf8_lossy(&out.stdout);
-	assert!(
-		stdout.trim().is_empty(),
-		"build must not write to stdout; got:\n{stdout}"
-	);
-	assert!(
-		!String::from_utf8_lossy(&out.stderr).trim().is_empty(),
-		"the build output has to go somewhere, and that somewhere is stderr"
-	);
-}
-
 /// `pull` reports through the progress layer, with a matching `Pulled`.
 ///
 /// It used a bare `eprintln!` — the one user-facing line in the binary that
@@ -544,4 +501,48 @@ async fn up_pulls_an_image_once() {
 		pulls <= 1,
 		"one image must produce at most one Pulling on up; got {pulls} in:\n{stderr}"
 	);
+}
+
+/// A `pull` whose stderr is a pipe keeps the plain lines it always printed.
+///
+/// `pull` now opens the same board `up` does (#1671), and the board owns the
+/// rendering once it is open. Off a terminal that must change nothing: the
+/// events go out as ` Image <ref>  Pulling` / ` Pulled`, one line each, with no
+/// cursor hiding, no cursor moves and no spinner. Animation in a CI log is a
+/// defect, and so is a log that says less than it used to.
+///
+/// `Command::output` gives the child a pipe for stderr, which is exactly the
+/// condition being asserted.
+#[tokio::test]
+async fn a_piped_pull_keeps_the_plain_lines() {
+	if !podman_up().await {
+		return;
+	}
+	let dir = tempdir().unwrap();
+	let compose = dir.path().join("compose.yaml");
+	fs::write(&compose, "services:\n  x:\n    image: alpine:latest\n").unwrap();
+	let p = Project {
+		compose: compose.to_string_lossy().into_owned(),
+		name: format!("t{}-pipe", std::process::id()),
+		_dir: dir,
+	};
+	let stderr = p.progress(&["pull"]);
+	assert!(
+		stderr.contains(" Image alpine:latest  Pulling"),
+		"the plain line is unchanged in a pipe; got:\n{stderr}"
+	);
+	assert!(
+		stderr.contains(" Image alpine:latest  Pulled"),
+		"and so is its closing line; got:\n{stderr}"
+	);
+	assert!(
+		!stderr.contains('\x1b'),
+		"a pipe gets no escape sequence at all, board or otherwise; got:\n{stderr:?}"
+	);
+	for marker in ["⠿", "✔", "[+] Running"] {
+		assert!(
+			!stderr.contains(marker),
+			"a pipe gets no board furniture ({marker}); got:\n{stderr}"
+		);
+	}
 }

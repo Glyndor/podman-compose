@@ -82,6 +82,26 @@ impl Region {
 		Self { painted: 0, target }
 	}
 
+	/// Walk the cursor back over the live region and clear below, without
+	/// re-writing any rows.
+	///
+	/// Used by `progress::end` to leave the rows that were in the live region
+	/// on screen as the permanent record (the cursor ends below them) without
+	/// emitting a second copy of each row. Re-painting via `show(&rows, &[])`
+	/// would walk the cursor up, clear, and write the same bytes again, and a
+	/// `script -qfc` capture would show each row twice: once from the live
+	/// repaint that landed them, once from this final paint that erases and
+	/// rewrites them. Erasing without rewriting keeps the rows on screen
+	/// exactly once (#1675).
+	pub fn close_out(&self) {
+		let mut out = String::new();
+		if self.painted > 0 {
+			out.push_str(&cursor_up(self.painted));
+		}
+		out.push_str(CLEAR_BELOW);
+		self.target.write(&out);
+	}
+
 	/// Walk back over the previous region, emit `scrollback` as permanent
 	/// history, then paint `live` as the new region.
 	///

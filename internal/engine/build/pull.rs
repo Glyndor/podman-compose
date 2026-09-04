@@ -79,6 +79,11 @@ where
 		.await
 }
 
+/// What determines one actual pull request: the image reference, the resolved
+/// pull policy (the `--pull` override applied ahead of the service's own
+/// `pull_policy:`), and the platform. The dedup key of a standalone pull.
+type PullKey<'a> = (&'a str, &'static str, Option<&'a str>);
+
 impl Engine {
 	/// Pull images for all services that declare an `image:` key, concurrently.
 	pub async fn pull(&self, file: &ComposeFile) -> Result<()> {
@@ -139,7 +144,6 @@ impl Engine {
 		// the dedup step below and the final reporting loop agree on exactly
 		// the same value instead of recomputing it (and re-warning on an
 		// unrecognized policy) twice.
-		type PullKey<'a> = (&'a str, &'static str, Option<&'a str>);
 		let candidates: Vec<(&str, &Service, PullKey)> = file
 			.services
 			.iter()
@@ -167,13 +171,45 @@ impl Engine {
 			})
 			.collect::<Result<Vec<_>>>()?;
 
+		// Seed the board with every distinct image this pass will fetch, before
+		// the first `Pulling` line. The set is knowable exactly here: it is the
+		// same `candidates` the dedup below works from, and every progress event
+		// on this path fires once its own pull is over. Two services naming the
+		// same image share one row, since the row is the image.
+		let mut images: Vec<String> = Vec::new();
+		for (_, _, key) in &candidates {
+			if !images.iter().any(|seen| seen == key.0) {
+				images.push(key.0.to_string());
+			}
+		}
+		crate::ui::progress::begin(
+			images
+				.into_iter()
+				.map(|image| (crate::ui::progress::Kind::Image, image)),
+		);
+		let outcome = self.pull_candidates(&candidates, opts).await;
+		// Close the board on every exit, the way `run_up` does: the live region
+		// hides the cursor, so an early return through it would leave the
+		// terminal without a caret. `end` is idempotent.
+		crate::ui::progress::end();
+		outcome
+	}
+
+	/// Issue the deduplicated pulls for `candidates` and report each service's
+	/// outcome. Split out of [`Self::pull_services_with_options`] so the board
+	/// opened over the image set has exactly one exit to close on.
+	async fn pull_candidates<'a>(
+		&self,
+		candidates: &[(&'a str, &'a Service, PullKey<'a>)],
+		opts: PullOptions,
+	) -> Result<()> {
 		// Dedup by that key: 50 services agreeing on image, resolved policy
 		// and platform must issue one pull, not 50. Two services naming the
 		// same image with a different resolved policy or platform get their
 		// own key, and so their own pull — one representative service per
 		// unique key is enough to issue it.
-		let mut representative: HashMap<PullKey, &Service> = HashMap::new();
-		for (_, service, key) in &candidates {
+		let mut representative: HashMap<PullKey<'a>, &'a Service> = HashMap::new();
+		for (_, service, key) in candidates {
 			representative.entry(*key).or_insert(service);
 		}
 
@@ -207,7 +243,7 @@ impl Engine {
 
 		for (name, _service, key) in candidates {
 			let image = key.0;
-			let (present, pull_err) = outcomes.get(&key).cloned().unwrap_or((false, None));
+			let (present, pull_err) = outcomes.get(key).cloned().unwrap_or((false, None));
 			// Presence alone is not success. A stale copy of the image already in
 			// local storage makes the probe pass while the pull actually failed,
 			// so `pull` against an unreachable registry exited 0 and reported
@@ -326,6 +362,15 @@ impl Engine {
 			.map_err(ComposeError::Podman)?;
 		let mut stream = crate::libpod::parse_json_lines::<ImagePullProgress>(resp.into_body());
 
+		// Gate the per-blob `start` calls on the same condition the live region
+		// itself is gated on (#1674). The plain sink writes one line per `start`,
+		// which would put ` Image <ref>  Pulling 1/4` lines into a CI log that
+		// only ever wanted ` Image <ref>  Pulling` and ` Image <ref>  Pulled`.
+		// Reading the predicate through `stderr_colored()` keeps the production
+		// decision and the gate here in sync: coloured-on-tty gets the moving
+		// row, everything else stays a single line.
+		let live_verb = !quiet && stderr_supports_live();
+
 		// libpod reports a failed pull as an in-band `error` line on a 200
 		// response, not as an HTTP status, so the first one has to be kept and
 		// returned. It used to be warned about and dropped, which made every
@@ -335,15 +380,24 @@ impl Engine {
 		// finished-stream-looks-like-an-error ambiguity that #1104 is about, and
 		// unlike the in-band line it is not libpod telling us the pull failed.
 		let mut pull_err: Option<String> = None;
+		let mut progress = PullStreamProgress::new();
 		while let Some(result) = stream.next().await {
 			match result {
-				Ok(progress) => {
-					if !progress.stream.is_empty() {
-						debug!("{}", progress.stream.trim_end());
+				Ok(progress_line) => {
+					if !progress_line.stream.is_empty() {
+						debug!("{}", progress_line.stream.trim_end());
+						// `observe` returns `Some(verb)` only for the line
+						// shapes that imply a row transition (`Copying blob`,
+						// `Copying config`); everything else is debug-only.
+						if let Some(verb) = progress.observe(&progress_line.stream) {
+							if live_verb {
+								crate::ui::progress::start("Image", &image, &verb);
+							}
+						}
 					}
-					if !progress.error.is_empty() {
-						warn!("pull error: {}", progress.error);
-						pull_err.get_or_insert_with(|| progress.error.clone());
+					if !progress_line.error.is_empty() {
+						warn!("pull error: {}", progress_line.error);
+						pull_err.get_or_insert_with(|| progress_line.error.clone());
 					}
 				}
 				Err(e) => warn!("pull warning: {e}"),
@@ -426,6 +480,82 @@ fn pull_dep_closure(file: &ComposeFile, services: &[String]) -> HashSet<String> 
 	set
 }
 
+/// Whether the per-blob `start` calls should fire for this process. Mirrors the
+/// gate `internal::ui::progress::live_terminal_colored` uses to decide whether
+/// to open a live region: stderr must be a tty, and the colour choice must not
+/// be `Never`.
+///
+/// Centralised here so the production predicate and the gate that protects the
+/// plain sink stay in lockstep. A `start` call that goes through when the
+/// live region is off would write one line per blob to a CI log, which is
+/// exactly what `a_piped_pull_prints_only_pulling_and_pulled` says must not
+/// happen.
+fn stderr_supports_live() -> bool {
+	use std::io::IsTerminal;
+	std::io::stderr().is_terminal() && crate::ui::stderr_colored()
+}
+
+/// Parse one libpod pull stream line into the row verb it implies, if any.
+///
+/// On Podman 5.7.0 the `/libpod/images/pull` stream carries no byte counts:
+/// one `{"stream":"Copying blob sha256:<digest>"}` per layer, plus a
+/// `Copying config <digest>` once the manifest has been read. A blob already in
+/// storage is skipped by libpod without a `Copying blob` line, and a blob that
+/// fails mid-transfer is reported again under the same digest on retry, so the
+/// count is of layers that are actually copied.
+///
+/// Kept as a standalone struct so a unit test can feed it three lines and read
+/// the verbs back out, which is the only way to assert what the row actually
+/// said without an end-to-end harness.
+#[derive(Default)]
+struct PullStreamProgress {
+	/// Distinct blob digests seen on `Copying blob` lines, including retries.
+	blobs: HashSet<String>,
+	/// Number of `Copying blob` lines observed (raw count, so retries move this
+	/// while `blobs.len()` stays put).
+	blob_lines: usize,
+	/// Whether the `Copying config` line has arrived, switching the verb from
+	/// the `Pulling N layers` form to `Pulling done/total`.
+	manifest_seen: bool,
+}
+
+impl PullStreamProgress {
+	fn new() -> Self {
+		Self::default()
+	}
+
+	/// Observe one `stream` line. Returns the verb to render on the row, or
+	/// `None` for lines that carry no transition (status text, the
+	/// `Copying config` line carries a transition of its own).
+	fn observe(&mut self, line: &str) -> Option<String> {
+		const BLOB_PREFIX: &str = "Copying blob ";
+		const CONFIG_PREFIX: &str = "Copying config ";
+		let line = line.trim_end();
+		if let Some(rest) = line.strip_prefix(BLOB_PREFIX) {
+			let digest = rest.split_whitespace().next().unwrap_or("");
+			self.blobs.insert(digest.to_string());
+			self.blob_lines += 1;
+			Some(self.format_verb())
+		} else if line.starts_with(CONFIG_PREFIX) {
+			self.manifest_seen = true;
+			Some(self.format_verb())
+		} else {
+			None
+		}
+	}
+
+	fn format_verb(&self) -> String {
+		if self.manifest_seen {
+			format!("Pulling {}/{}", self.blob_lines, self.blobs.len())
+		} else {
+			match self.blobs.len() {
+				1 => "Pulling 1 layer".to_string(),
+				n => format!("Pulling {n} layers"),
+			}
+		}
+	}
+}
+
 /// Map a compose `pull_policy:` value to the libpod images/pull `policy`
 /// parameter. `if_not_present` is the spec alias for `missing`; `build` falls
 /// back to `missing` here (its build behavior is handled by the caller). Returns
@@ -476,3 +606,7 @@ mod tests;
 #[cfg(test)]
 #[path = "pull_typo_tests.rs"]
 mod typo_tests;
+
+#[cfg(all(test, unix))]
+#[path = "pull_board_tests.rs"]
+mod board_tests;
