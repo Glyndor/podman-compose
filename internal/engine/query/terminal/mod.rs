@@ -18,9 +18,9 @@
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]
-pub(crate) use unix::{window_size, RawMode, ResizeWatcher};
+pub(crate) use unix::{drain_stdin, window_size, RawMode, ResizeWatcher};
 
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub(crate) use windows::{window_size, RawMode, ResizeWatcher};
+pub(crate) use windows::{drain_stdin, window_size, RawMode, ResizeWatcher};

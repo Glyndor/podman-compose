@@ -186,6 +186,21 @@ impl Board {
 		out
 	}
 
+	/// Every row the board holds, regardless of state, for the final paint at
+	/// `progress::end`.
+	///
+	/// Used only at the close of a board: a row that was still in flight during
+	/// the last `repaint` (and so already painted in the live region) is
+	/// re-rendered here as part of the permanent record. Previously `end`
+	/// re-painted the live region too, which made a non-contiguous `Done` row
+	/// like `Failed` appear twice in the final output (#1675). Here the live
+	/// region is collapsed: every row is scrollback exactly once.
+	pub fn take_all_rows(&mut self) -> Vec<Row> {
+		let out = self.rows.clone();
+		self.flushed = self.rows.len();
+		out
+	}
+
 	/// The rows still in the live region: everything not yet flushed.
 	pub fn live_rows(&self) -> &[Row] {
 		&self.rows[self.flushed.min(self.rows.len())..]

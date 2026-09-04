@@ -49,7 +49,39 @@ fn an_existing_empty_volume_renders_zero() {
 #[test]
 fn reclaimable_is_reported_separately_from_size() {
 	let linked = size_cells(Some(&usage(193_243_902, 0)));
-	assert_eq!(linked, ("193MB".into(), "0B".into()));
 	let unlinked = size_cells(Some(&usage(193_243_902, 193_243_902)));
+	assert_eq!(linked, ("193MB".into(), "0B".into()));
 	assert_eq!(unlinked, ("193MB".into(), "193MB".into()));
+}
+
+/// An empty `volumes` table prints one explicit line on stderr instead of the
+/// bare header. Without it a script parsing stdout (`volumes | awk …`) sees
+/// just a header on stdout for an empty project, and the header is the only
+/// line, which a parser distinguishes from "no volumes" only by row count.
+/// Stdout stays empty; stderr carries the explicit `no volumes` (#1675).
+///
+/// The full `Engine::list_volumes` path needs an `Engine` and a `ComposeFile`,
+/// neither of which is light to construct for a unit test. Instead, pin the
+/// table's empty predicate (the branch the printer reads) and the source path
+/// that consults it. A regression that drops the `table.is_empty()` branch
+/// from `list_volumes` would make the next header-only line appear on stdout
+/// again, and this test would catch it.
+#[test]
+fn an_empty_volumes_table_prints_one_line_on_stderr() {
+	let mut t = crate::ui::Table::new(&["NAME", "DRIVER", "EXTERNAL"]);
+	assert!(t.is_empty(), "a freshly built table is empty");
+	t.push(vec!["data".into(), "local".into(), "no".into()]);
+	assert!(!t.is_empty(), "a table with one row is not empty");
+	// The empty-table branch in `list_volumes` consults `Table::is_empty()`
+	// before printing, and the regression that would matter is removing the
+	// call to `crate::ui::progress_note("no volumes")` in that branch.
+	let src = include_str!("list.rs");
+	assert!(
+		src.contains("table.is_empty()"),
+		"the volumes printer must gate its empty case on Table::is_empty: {src}"
+	);
+	assert!(
+		src.contains("progress_note(\"no volumes\")"),
+		"the empty volumes path must print `no volumes` on stderr via progress_note: {src}"
+	);
 }

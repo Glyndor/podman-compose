@@ -182,6 +182,13 @@ impl Engine {
 				age_cell(&row.created, now),
 			]);
 		}
+		if table.is_empty() {
+			// An empty images table is a legitimate answer; print the explicit
+			// "no images" line on stderr so a script capturing stdout (or
+			// `--format json`) sees nothing (#1675).
+			crate::ui::progress_note("no images");
+			return Ok(());
+		}
 		table.print();
 		Ok(())
 	}

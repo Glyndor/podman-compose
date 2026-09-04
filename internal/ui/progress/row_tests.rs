@@ -33,7 +33,7 @@ fn plain(line: &str) -> String {
 /// afterwards erases the wrong lines.
 #[test]
 fn a_line_never_exceeds_the_terminal_width() {
-	for width in [10, 20, 40, 80] {
+	for width in [10, 20, 30, 40, 80] {
 		let r = Row {
 			name: "a-very-long-container-name-that-will-not-fit-anywhere".to_string(),
 			..row(State::Working("Creating".into()))
@@ -43,6 +43,47 @@ fn a_line_never_exceeds_the_terminal_width() {
 			line.chars().count() <= width,
 			"width {width}: got {} chars: {line:?}",
 			line.chars().count()
+		);
+	}
+}
+
+/// The named acceptance test: rendered at width 30 and width 20, every row's
+/// visible column count is at most the given width. `…` counts as one column
+/// because `fit_cell` measures in chars, and the existing `plain` helper strips
+/// escapes the same way it always did (#1672).
+#[test]
+fn a_row_never_exceeds_the_measured_width() {
+	for width in [20, 30] {
+		let r = Row {
+			name: "a-very-long-container-name-that-will-not-fit-anywhere".to_string(),
+			..row(State::Working("Creating".into()))
+		};
+		let line = plain(&render(&r, 40, 0, Instant::now(), width));
+		assert!(
+			line.chars().count() <= width,
+			"width {width}: got {} chars: {line:?}",
+			line.chars().count()
+		);
+		// And the truncation actually fired: at width 30 the natural row is
+		// wider, so the line must have been cut.
+		assert!(
+			line.contains('\u{2026}'),
+			"width {width}: name column should be truncated with `…`: {line:?}"
+		);
+	}
+}
+
+/// The summary line is the row the cursor-up arithmetic has to count too, and
+/// the issue names it: a wide summary that wraps makes the repaint
+/// erase the wrong lines on every subsequent frame (#1672).
+#[test]
+fn the_summary_line_never_exceeds_the_measured_width() {
+	for width in [5, 10, 20, 30] {
+		let s = plain(&summary(3, 100, width));
+		assert!(
+			s.chars().count() <= width,
+			"width {width}: got {} chars: {s:?}",
+			s.chars().count()
 		);
 	}
 }
@@ -174,5 +215,5 @@ fn a_name_cannot_drive_the_terminal() {
 
 #[test]
 fn the_summary_counts_done_over_total() {
-	assert_eq!(summary(3, 6), "[+] Running 3/6");
+	assert_eq!(summary(3, 6, 0), "[+] Running 3/6");
 }

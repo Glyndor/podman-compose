@@ -145,6 +145,61 @@ impl ResizeWatcher {
 	}
 }
 
+/// Drop every byte the kernel had queued on stdin, without forwarding any of
+/// them.
+///
+/// Called once at the start of an interactive exec/run, between enabling raw
+/// mode and entering the byte pump. Switching to raw surfaces whatever was
+/// queued, and a pty-startup NUL has been measured to land there under
+/// `script -qfc` (see #1675): forwarding it would echo back as `^@` from the
+/// remote pty and pollute the output as the first byte. The user has not had
+/// a chance to type anything yet, so every byte read here is pty startup and
+/// is safe to discard.
+///
+/// Implemented with `O_NONBLOCK` toggled for the duration of the read so the
+/// call returns immediately on an empty queue. The flag is restored before
+/// returning, so the pump's blocking reads are unaffected. A non-terminal
+/// stdin (a pipe) is a no-op; the pump does not run on a pipe.
+pub(crate) fn drain_stdin() {
+	use std::io::Read;
+	use std::os::fd::AsRawFd;
+
+	let stdin = std::io::stdin();
+	let fd = stdin.as_raw_fd();
+	if fd < 0 {
+		return;
+	}
+	// SAFETY: `fd` is the read side of a tty/pipe; toggling O_NONBLOCK on it
+	// affects only this process and is reverted before returning.
+	let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+	if flags < 0 {
+		return;
+	}
+	if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+		return;
+	}
+	let mut stdin = stdin;
+	let mut sink = [0u8; 256];
+	loop {
+		match stdin.read(&mut sink) {
+			Ok(0) => break,
+			Ok(n) => {
+				// Discard `n` bytes. We could read until EAGAIN, but a tight
+				// loop here is fine: each read on a non-blocking tty returns
+				// the bytes available at that instant, and once drained
+				// subsequent reads return `EAGAIN` (encoded as `Err` with
+				// `WouldBlock`).
+				let _ = n;
+				continue;
+			}
+			Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+			Err(_) => break,
+		}
+	}
+	// SAFETY: same fd, restore the previous flags so the pump reads block.
+	let _ = unsafe { libc::fcntl(fd, libc::F_SETFL, flags) };
+}
+
 #[cfg(test)]
 #[path = "unix_tests.rs"]
 mod tests;

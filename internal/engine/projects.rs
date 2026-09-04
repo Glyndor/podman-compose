@@ -220,6 +220,13 @@ pub async fn list_projects_filtered(
 	for (name, t) in &rows {
 		table.push(vec![name.to_string(), status_label(t)]);
 	}
+	if table.is_empty() {
+		// An empty ls table is a legitimate answer; print the explicit
+		// "no projects" line on stderr so a script capturing stdout (or
+		// `--format json`) sees nothing (#1675).
+		crate::ui::progress_note("no projects");
+		return Ok(());
+	}
 	table.print();
 	Ok(())
 }

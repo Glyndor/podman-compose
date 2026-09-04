@@ -637,6 +637,13 @@ impl Engine {
 			}
 			table.push(row);
 		}
+		if table.is_empty() {
+			// An empty ps table is a legitimate answer; print the explicit
+			// "no containers" line on stderr so a script capturing stdout (or
+			// `--format json`) sees nothing (#1675).
+			crate::ui::progress_note("no containers");
+			return Ok(());
+		}
 		table.print();
 
 		Ok(())
