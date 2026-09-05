@@ -126,13 +126,14 @@ async fn cli_ps_subcommand() {
 	// CREATED sits between the image and STATUS. It is only ever filled by
 	// parsing the RFC 3339 string libpod really sends, so a blank here is the
 	// parser failing against the live server — which no unit test can see,
-	// because every fixture it has was written by hand.
+	// because every fixture it has was written by hand. Since #1699 the cell
+	// is a phrase, `3 seconds ago` or `Less than a second ago`, so it spans
+	// several cells: everything between the image and `Up`.
+	let created = cells[2..up].join(" ");
 	assert!(
-		up >= 3
-			&& cells[up - 1]
-				.chars()
-				.next()
-				.is_some_and(|c| c.is_ascii_digit()),
+		created.ends_with(" ago")
+			&& (created.starts_with("Less than")
+				|| created.starts_with(|c: char| c.is_ascii_digit())),
 		"ps printed no CREATED age, so the timestamp did not parse: {row:?}"
 	);
 
