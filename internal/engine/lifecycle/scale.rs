@@ -160,7 +160,7 @@ impl Engine {
 		// `--scale` override against the last-wins target (so duplicate pairs such
 		// as `svc=1 svc=3` can no longer drive create and prune to disagree).
 		let targets: Vec<String> = pairs.iter().map(|(s, _)| s.clone()).collect();
-		self.up_with_options(file, true, &[], &targets, true, false, true)
+		self.up_with_options(file, true, &[], &targets, true, false, true, false)
 			.await?;
 		Ok(())
 	}

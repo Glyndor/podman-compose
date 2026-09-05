@@ -348,7 +348,7 @@ fn the_created_cell_reports_the_age_of_the_container() {
 		created: "2026-08-01T00:58:45Z".into(),
 		..entry("", "running")
 	};
-	assert_eq!(table_created(&c, NOW), "2d");
+	assert_eq!(table_created(&c, NOW), "2 days ago");
 }
 
 /// A timestamp podup cannot parse leaves the cell blank rather than showing a

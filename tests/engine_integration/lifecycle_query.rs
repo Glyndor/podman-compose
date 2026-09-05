@@ -428,7 +428,7 @@ async fn up_skips_recreate_when_config_unchanged() {
 
 	// force_recreate -> recreate even though config is unchanged.
 	engine
-		.up_with_options(&file, false, &[], &[], false, true, false)
+		.up_with_options(&file, false, &[], &[], false, true, false, false)
 		.await
 		.unwrap();
 	let after_force = engine

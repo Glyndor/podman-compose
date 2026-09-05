@@ -191,9 +191,14 @@ On a terminal `build` draws a board of its own, one row per image, `Building`, t
 itself is folded: while a row builds, its last four lines sit dimmed under
 the row and vanish when it finishes; on failure the whole stream is
 printed once, above the error, so the reason is on screen.
-`up --build` runs that build board first and the `up` board after it; an
-`up` that finds a service's image missing builds it on the `up` board,
-with the image row just above the service's container row.
+`up --build` shares the `up` board with the build phase: the image rows
+sit at the top, in `build`'s order, and the network and container rows
+follow on the same board. The build verbs (`Building`/`Building n/m`/
+`Built`) land on the same rows the rest of `up` is drawing on, so a single
+`[+] Running N/M` count covers everything. An `up` that finds a service's
+image missing builds it on the `up` board too, with the image row just
+above the service's container row, in the missing-image case `up` has
+handled since #1681.
 
 In a pipe every stream line goes to stderr prefixed with `<image-tag> | `,
 the way `logs` prefixes container output. The image id of the freshly built

@@ -9,6 +9,8 @@ use crate::libpod::{urlencoded, API_PREFIX};
 use super::Engine;
 use crate::units::{format_bytes, format_duration, DurationFormat, SizeFormat};
 
+use super::inspect_util::humanize_age;
+
 /// Options for [`Engine::ps_with_options`], mirroring `docker compose ps`.
 ///
 /// `#[non_exhaustive]` since 4.0.0, so a new flag can be added in a minor
@@ -281,9 +283,13 @@ fn table_size(c: &ContainerListEntry) -> String {
 /// says podup could not tell; a cell holding a plausible wrong age does not, and
 /// the wrong age is the one a reader acts on.
 fn table_created(c: &ContainerListEntry, now: i64) -> String {
-	crate::timestamp::parse_rfc3339(&c.created)
-		.and_then(|created| span_since(created, now))
-		.unwrap_or_default()
+	let Some(secs) = crate::timestamp::parse_rfc3339(&c.created) else {
+		return String::new();
+	};
+	if secs <= 0 {
+		return String::new();
+	}
+	humanize_age(now.saturating_sub(secs).max(0))
 }
 
 /// Render the span from `then` to `now`, or `None` when there is nothing to

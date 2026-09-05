@@ -4,9 +4,9 @@ use crate::compose::types::ComposeFile;
 use crate::error::{ComposeError, Result};
 use crate::libpod::types::image::ImageInspect;
 use crate::libpod::{urlencoded, API_PREFIX};
-use crate::units::{format_bytes, format_duration, DurationFormat, SizeFormat};
+use crate::units::{format_bytes, SizeFormat};
 
-use super::inspect_util::split_repo_tag;
+use super::inspect_util::{humanize_age, split_repo_tag};
 use super::Engine;
 
 /// How `images` renders a size: decimal units at three significant digits.
@@ -18,9 +18,6 @@ use super::Engine;
 /// images` rendered `1.01 GB` and `805 kB` on the same host. A fixed decimal
 /// count cannot produce all three.
 const SIZE_FORMAT: SizeFormat = SizeFormat::decimal().with_significant(3);
-
-/// How `images` renders an age: the shared default, three components.
-const AGE_FORMAT: DurationFormat = DurationFormat::default_parts();
 
 /// One row of the `images` table.
 ///
@@ -214,8 +211,7 @@ fn age_cell(created: &str, now: i64) -> String {
 	let Some(built) = crate::timestamp::parse_rfc3339(created) else {
 		return String::new();
 	};
-	let elapsed = now.saturating_sub(built).max(0);
-	format_duration(std::time::Duration::from_secs(elapsed as u64), &AGE_FORMAT)
+	humanize_age(now.saturating_sub(built).max(0))
 }
 
 #[cfg(test)]

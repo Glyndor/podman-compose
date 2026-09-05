@@ -50,7 +50,7 @@ async fn named_volume_created_on_up() {
 		.await
 		.unwrap();
 	engine
-		.up_with_options(&file, false, &[], &[], false, true, false)
+		.up_with_options(&file, false, &[], &[], false, true, false, false)
 		.await
 		.unwrap();
 	let after = engine
@@ -480,7 +480,7 @@ async fn profile_filtered_service_skipped() {
 	.unwrap();
 
 	engine
-		.up_with_options(&file, false, &[], &[], false, false, false)
+		.up_with_options(&file, false, &[], &[], false, false, false, false)
 		.await
 		.unwrap();
 	let mut names = engine

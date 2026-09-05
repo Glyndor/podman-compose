@@ -539,7 +539,7 @@ async fn engine_up_renew_anon_volumes_recreates_cleanly() {
 	engine.up(&file).await.unwrap();
 	// Force recreate: the v=true delete path runs for the existing container.
 	let second = engine
-		.up_with_options(&file, false, &[], &[], false, true, false)
+		.up_with_options(&file, false, &[], &[], false, true, false, false)
 		.await;
 	engine.down(&file).await.unwrap();
 	second.expect("forced re-up with --renew-anon-volumes must succeed");

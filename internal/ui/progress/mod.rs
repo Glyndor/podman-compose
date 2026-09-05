@@ -134,10 +134,7 @@ pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
 	let name_width = board
 		.live_rows()
 		.iter()
-		.map(|r| r.name.chars().count())
-		.max()
-		.unwrap_or(0)
-		.clamp(12, 40);
+		.fold(0, |width, r| name_column_width(width, &r.name));
 	let region = live.then(|| live::Region::new(live::Target::Stderr));
 	if let Ok(mut slot) = SESSION.lock() {
 		*slot = Some(Session {
@@ -213,6 +210,11 @@ pub fn start_anchored(
 				} else {
 					session.board.start(kind, name, verb, Instant::now());
 				}
+				// A row that was not seeded (the image row `up` inserts for a
+				// missing image, #1684) can be wider than the column `begin`
+				// sized from the seeded names; without this it rendered as
+				// `localhost/u…` while every seeded row fit (#1700).
+				session.name_width = name_column_width(session.name_width, name);
 				if session.region.is_some() {
 					Sink::Live
 				} else {
@@ -299,6 +301,23 @@ fn push_note_live(
 
 #[cfg(test)]
 pub(crate) const MAX_NOTES_PER_ROW_FOR_TESTS: usize = MAX_NOTES_PER_ROW;
+
+/// The name column is as wide as the widest name it has seen, never under
+/// 12 or over 40 cells; a name past 40 is cut with an ellipsis by the row
+/// renderer. Applied at `begin` over the seeded rows and again for every row
+/// `start` adds later.
+fn name_column_width(current: usize, name: &str) -> usize {
+	current.max(name.chars().count()).clamp(12, 40)
+}
+
+#[cfg(test)]
+pub(crate) fn name_width_for_tests() -> usize {
+	SESSION
+		.lock()
+		.ok()
+		.and_then(|slot| slot.as_ref().map(|s| s.name_width))
+		.unwrap_or(0)
+}
 
 #[cfg(test)]
 pub(crate) fn push_note_live_for_tests(

@@ -60,9 +60,12 @@ pub(crate) async fn dispatch(
 			} else {
 				engine.warn_orphans(file).await?;
 			}
-			if build {
-				engine.build_all(file, &services).await?;
-			}
+			// `--build` runs the build inside the `up` board (#1700): the image
+			// rows are seeded at the top, built sequentially in `build_all`'s
+			// order, then the network and container rows follow on the same
+			// board. No separate `build_all` call, since that would draw its
+			// own `[+] Running 0/N` board and close it before `up` opened its
+			// own.
 			// `--no-start` creates the containers but never starts them, so the
 			// wait/watch/attach steps below do not apply.
 			if no_start {
@@ -87,6 +90,7 @@ pub(crate) async fn dispatch(
 					no_recreate,
 					force_recreate,
 					no_deps,
+					build,
 				)
 				.await?;
 			if wait {

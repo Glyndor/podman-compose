@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 
 use super::config_normalize::{quote_yaml11_booleans, resolve_bind_sources};
 use crate::cli::ConfigFormat;
+use podup::resolve_network_name;
 
 /// Output selectors for `config`, mirroring the mutually-exclusive `docker
 /// compose config` list modes. The first set selector wins, in the order
@@ -97,6 +98,13 @@ pub(crate) fn render_config(
 	// Surface the resolved project name in the rendered output, like
 	// `docker compose config`, rather than the file's literal `name:` (or none).
 	redacted.name = Some(project.to_string());
+	// Stamp each declared network with the name podup will actually create:
+	// `<project>_<key>` by default, or an explicit `name:` / an `external: true`
+	// network's own key. Without this, `config` left `default:` as `null` while
+	// `up` created `<project>_default`, so a reader of `config` could not tell
+	// what the next `up` would do. The resolution rule is the same `up` uses:
+	// sharing the function keeps the two views from drifting.
+	inject_resolved_network_names(&mut redacted, project);
 	// Don't echo keys the diagnostics pass warned were ignored: the rendered
 	// config should reflect what podup actually applies, and re-feeding it must
 	// not re-trigger the same warning. `x-*` extensions are kept.
@@ -171,6 +179,39 @@ fn render_config_hash(
 		println!("{name} {}", service_config_hash(svc)?);
 	}
 	Ok(())
+}
+
+/// Stamp each declared network with the name podup will create at `up` time,
+/// so `config` shows `<project>_default` (or whatever the resolved name is)
+/// instead of `null`. `file.networks` keeps the same shape (`Some`/`None`),
+/// and a network that already had an explicit `name:` keeps it; this only
+/// fills in the absent case so the two views cannot drift.
+///
+/// The resolution rule is `Engine::resolve_network_name`, called the same way
+/// `up` calls it. Sharing the function is the point: a copy of the rule in this
+/// module would silently disagree the day someone adds a fourth branch.
+fn inject_resolved_network_names(file: &mut podup::compose::types::ComposeFile, project: &str) {
+	// Resolve every name against an immutable borrow of the file first, then
+	// apply under a mutable borrow: `resolve_network_name` reads the file via
+	// shared refs while the loop mutates each network slot.
+	let resolved: Vec<(String, String)> = file
+		.networks
+		.keys()
+		.map(|k| (k.clone(), resolve_network_name(k, file, project)))
+		.collect();
+	for (key, name) in resolved {
+		if let Some(slot) = file.networks.get_mut(&key) {
+			let cfg = slot.get_or_insert_with(Default::default);
+			// `external: true` resolves to the bare key (no project prefix);
+			// an explicit `name:` already pins it. Either way, leave the user's
+			// value alone, since only the implicit-default case writes a name.
+			let user_named = cfg.name.is_some();
+			let external = cfg.external.unwrap_or(false);
+			if !user_named && !external {
+				cfg.name = Some(name);
+			}
+		}
+	}
 }
 
 /// Drop unset keys from a JSON value so `config` output omits them (like

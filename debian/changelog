@@ -1,3 +1,17 @@
+podup (5.9.1) unstable; urgency=medium
+
+  * `up --build` draws one board: the image rows sit at the top and are
+    built one after another before the network and container rows follow
+    on the same board. A row added to a board after it opened widens the
+    name column, so the image row `up` inserts for a missing image is no
+    longer cut short.
+  * `port` on a port the service does not publish says so plainly instead
+    of calling it an unsupported feature; `config` prints the resolved
+    `name:` of every network, the default one included; CREATED in `ps`
+    and `images` reads `3 seconds ago`, not `3s`.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Fri, 04 Sep 2026 23:35:54 -0500
+
 podup (5.9.0) unstable; urgency=medium
 
   * Every command that acts on resources draws the live board: `up`, `down`,
