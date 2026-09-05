@@ -163,13 +163,13 @@ though it waits for the network, and on those versions it does not, with nothing
 anywhere to say so. `podup autostart status` therefore asks:
 
 ```
-network wait  podman-user-wait-network-online.service is loaded
+network wait: podman-user-wait-network-online.service is loaded
 ```
 
 or, when it is not:
 
 ```
-network wait  podman-user-wait-network-online.service is not loadable, so the
+network wait: podman-user-wait-network-online.service is not loadable, so the
               unit's network ordering is dropped silently (Podman ships it from 5.3.0)
 ```
 
