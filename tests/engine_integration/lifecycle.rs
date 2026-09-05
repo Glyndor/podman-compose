@@ -79,7 +79,7 @@ async fn up_no_recreate_skips_running() {
 	)
 	.unwrap();
 	engine
-		.up_with_options(&changed, false, &[], &[], true, false, false)
+		.up_with_options(&changed, false, &[], &[], true, false, false, false)
 		.await
 		.unwrap();
 	let with_flag = engine
@@ -128,7 +128,16 @@ async fn up_target_services_only() {
 
 	// Only start web (and its dep db)
 	engine
-		.up_with_options(&file, false, &[], &["web".to_string()], false, false, false)
+		.up_with_options(
+			&file,
+			false,
+			&[],
+			&["web".to_string()],
+			false,
+			false,
+			false,
+			false,
+		)
 		.await
 		.unwrap();
 	let mut names = engine

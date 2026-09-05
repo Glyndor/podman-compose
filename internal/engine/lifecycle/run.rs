@@ -82,7 +82,7 @@ impl Engine {
 					.map(|set| set.into_iter().filter(|n| n != service_name).collect())
 					.unwrap_or_default();
 			if !deps.is_empty() {
-				self.up_with_options(file, true, &[], &deps, false, false, false)
+				self.up_with_options(file, true, &[], &deps, false, false, false, false)
 					.await?;
 			}
 		}

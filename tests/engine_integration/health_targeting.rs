@@ -49,7 +49,7 @@ fn active_profiles_via_env() {
 			.unwrap();
 			// Pass empty active_profiles slice so it falls back to COMPOSE_PROFILES env
 			engine
-				.up_with_options(&file, false, &[], &[], false, false, false)
+				.up_with_options(&file, false, &[], &[], false, false, false, false)
 				.await
 				.unwrap();
 			let mut names = engine
@@ -297,7 +297,16 @@ async fn target_services_skips_non_dep() {
 	.unwrap();
 
 	engine
-		.up_with_options(&file, false, &[], &["web".to_string()], false, false, false)
+		.up_with_options(
+			&file,
+			false,
+			&[],
+			&["web".to_string()],
+			false,
+			false,
+			false,
+			false,
+		)
 		.await
 		.unwrap();
 	let mut names = engine
@@ -334,7 +343,7 @@ async fn dep_on_profile_filtered_service() {
 	.unwrap();
 
 	engine
-		.up_with_options(&file, false, &[], &[], false, false, false)
+		.up_with_options(&file, false, &[], &[], false, false, false, false)
 		.await
 		.unwrap();
 	let mut names = engine

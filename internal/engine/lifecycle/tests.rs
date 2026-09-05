@@ -90,7 +90,7 @@ async fn up_prefetches_every_levels_image_before_any_container_create() {
 	)
 	.unwrap();
 
-	e.up_with_options(&file, false, &[], &[], false, false, false)
+	e.up_with_options(&file, false, &[], &[], false, false, false, false)
 		.await
 		.expect("a healthy two-level up must succeed");
 
@@ -141,7 +141,7 @@ async fn up_creates_and_starts_every_scaled_replica() {
 
 	let file = crate::parse_str("services:\n  web:\n    image: img\n    scale: 3\n").unwrap();
 
-	e.up_with_options(&file, false, &[], &[], false, false, false)
+	e.up_with_options(&file, false, &[], &[], false, false, false, false)
 		.await
 		.expect("a healthy scaled-up must succeed");
 
@@ -192,7 +192,7 @@ async fn up_replica_fanout_surfaces_deterministic_first_error_after_attempting_t
 	let file = crate::parse_str("services:\n  web:\n    image: img\n    scale: 3\n").unwrap();
 
 	let err = e
-		.up_with_options(&file, false, &[], &[], false, false, false)
+		.up_with_options(&file, false, &[], &[], false, false, false, false)
 		.await
 		.expect_err("a genuine replica start failure must propagate, not exit 0");
 	assert!(
@@ -240,7 +240,7 @@ async fn up_replica_fanout_preserves_the_no_recreate_skip_per_replica() {
 
 	// `no_recreate = true` (docker compose create / the `scale` path): an
 	// already-present replica is left in place instead of being recreated.
-	e.up_with_options(&file, false, &[], &[], true, false, false)
+	e.up_with_options(&file, false, &[], &[], true, false, false, false)
 		.await
 		.expect("a partially-existing scaled up must succeed");
 

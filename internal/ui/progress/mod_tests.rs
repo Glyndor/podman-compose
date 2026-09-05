@@ -300,3 +300,38 @@ fn notes_keep_the_last_four_lines_per_row() {
 		"the cap is enforced on every push"
 	);
 }
+
+/// A row inserted after `begin` widens the name column to fit it. `up`
+/// inserts the image row for a missing image that way (#1684), and the
+/// column had been sized from the seeded rows only, so the image name came
+/// out as `localhost/u…` (#1700).
+#[test]
+fn a_row_added_after_begin_widens_the_name_column() {
+	let _session = hold_session();
+	let prev_progress = super::super::progress_enabled();
+	super::super::set_progress(true);
+	super::super::progress::begin(vec![
+		(Kind::Network, "p_default".to_string()),
+		(Kind::Container, "p-web-1".to_string()),
+	]);
+	assert_eq!(
+		super::super::progress::name_width_for_tests(),
+		12,
+		"the seeded names are shorter than the 12-cell floor"
+	);
+	super::super::progress::start_anchored(
+		"Image",
+		"localhost/a-rather-long-image:1",
+		"Building",
+		Some("Container"),
+		Some("p-web-1"),
+	);
+	assert_eq!(
+		super::super::progress::name_width_for_tests(),
+		"localhost/a-rather-long-image:1".len(),
+		"the inserted row's name sets the column width"
+	);
+	super::super::progress::end();
+	reset_plain_buffer();
+	super::super::set_progress(prev_progress);
+}

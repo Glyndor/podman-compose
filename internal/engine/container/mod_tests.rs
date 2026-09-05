@@ -23,7 +23,7 @@ async fn x_podman_autoupdate_puts_the_label_on_the_container_spec() {
 	let file =
 		crate::parse_str("services:\n  web:\n    image: img\n    x-podman-autoupdate: registry\n")
 			.unwrap();
-	e.up_with_options(&file, false, &[], &[], false, false, false)
+	e.up_with_options(&file, false, &[], &[], false, false, false, false)
 		.await
 		.expect("a healthy up must succeed");
 
@@ -68,7 +68,7 @@ async fn x_podman_autoupdate_rejects_a_bogus_value_at_create_time() {
 		crate::parse_str("services:\n  web:\n    image: img\n    x-podman-autoupdate: always\n")
 			.unwrap();
 	let err = e
-		.up_with_options(&file, false, &[], &[], false, false, false)
+		.up_with_options(&file, false, &[], &[], false, false, false, false)
 		.await
 		.expect_err("a bogus autoupdate value must be rejected at create time");
 	let msg = err.to_string();

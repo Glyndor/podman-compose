@@ -57,9 +57,11 @@ impl Engine {
 		// start the previous image. It also made `--build` look like a no-op,
 		// since the default already always built.
 		//
-		// `--build` is handled before this by an explicit `build_all`, so a forced
-		// rebuild has already happened and the image is present by the time we get
-		// here.
+		// `--build` is handled before this by an inline build pass at the top of
+		// `run_up` (#1700), so a forced rebuild has already happened and the
+		// image is present by the time we get here. The `start_anchored` path
+		// below is the missing-image case: an `up` without `--build` whose
+		// image is absent from the host, built lazily on the `up` board.
 		let needs_build = if service.build.is_some() && !self.no_build {
 			!self
 				.image_present(&self.service_image_tag(name, service))
