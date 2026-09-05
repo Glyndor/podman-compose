@@ -572,7 +572,7 @@ async fn up_keeps_the_image_a_no_cache_build_produced() {
 	let after_build = image_id(&tag);
 
 	engine
-		.up_with_options(&file, true, &[], &[], false, false, false)
+		.up_with_options(&file, true, &[], &[], false, false, false, false)
 		.await
 		.unwrap();
 	let after_up = image_id(&tag);

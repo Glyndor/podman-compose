@@ -46,7 +46,7 @@ async fn warm_up_does_not_pull_an_image_the_host_already_has() {
 	)
 	.unwrap();
 
-	e.up_with_options(&file, false, &[], &[], false, false, false)
+	e.up_with_options(&file, false, &[], &[], false, false, false, false)
 		.await
 		.expect("a warm up on a present image must succeed");
 
@@ -80,7 +80,7 @@ async fn an_always_policy_still_pulls_an_image_another_service_saw_present() {
 	)
 	.unwrap();
 
-	e.up_with_options(&file, false, &[], &[], false, false, false)
+	e.up_with_options(&file, false, &[], &[], false, false, false, false)
 		.await
 		.expect("an always-policy up must succeed");
 
@@ -104,7 +104,7 @@ async fn a_platform_pinned_service_still_pulls_an_image_the_host_already_has() {
 	)
 	.unwrap();
 
-	e.up_with_options(&file, false, &[], &[], false, false, false)
+	e.up_with_options(&file, false, &[], &[], false, false, false, false)
 		.await
 		.expect("a platform-pinned up must succeed");
 
@@ -219,7 +219,7 @@ async fn up_with_a_missing_image_builds_on_the_same_board() {
 
 	let capture = Capture::start();
 	engine
-		.up_with_options(&compose, true, &[], &[], false, false, false)
+		.up_with_options(&compose, true, &[], &[], false, false, false, false)
 		.await
 		.expect("an up that builds its missing image succeeds");
 

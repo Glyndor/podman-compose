@@ -9,12 +9,19 @@ use crate::compose::types::ComposeFile;
 use crate::error::Result;
 
 use crate::libpod::API_PREFIX;
+use crate::ui::progress::Kind;
 
 use super::super::profiles::{active_profiles_set, enabled_profile_services};
 use super::super::Engine;
 
 impl Engine {
 	/// Start services with explicit options. When `no_recreate` is true, running containers are left untouched. On partial failure, staging directories are cleaned up.
+	///
+	/// `build` is the CLI `--build` flag: when set, every service with a
+	/// `build:` block is built before the network/volume/container stages run,
+	/// inside the same `up` board (`#1700`). The image rows are seeded at the
+	/// top so the build verb appears above the container rows that depend on
+	/// it.
 	#[allow(clippy::too_many_arguments)]
 	pub async fn up_with_options(
 		&self,
@@ -25,6 +32,7 @@ impl Engine {
 		no_recreate: bool,
 		force_recreate: bool,
 		no_deps: bool,
+		build: bool,
 	) -> Result<()> {
 		self.run_up(
 			file,
@@ -34,6 +42,7 @@ impl Engine {
 			force_recreate,
 			no_deps,
 			true,
+			build,
 		)
 		.await
 	}
@@ -60,6 +69,7 @@ impl Engine {
 			force_recreate,
 			no_deps,
 			false,
+			false,
 		)
 		.await
 	}
@@ -74,6 +84,7 @@ impl Engine {
 		force_recreate: bool,
 		no_deps: bool,
 		start: bool,
+		build: bool,
 	) -> Result<()> {
 		let result = async {
 			// Reject any volume/network/container name Podman's regex would refuse
@@ -155,7 +166,44 @@ impl Engine {
 			// compose file — while every progress event in the tree fires once
 			// its work is already over. A board grown from those events would be
 			// a transcript with extra steps.
-			crate::ui::progress::begin(self.up_resources(file, &enabled, &target_set));
+			let mut resources = self.up_resources(file, &enabled, &target_set);
+			// `up --build` shares one board with the build phase (#1700): the
+			// image rows are seeded at the top, in `build_all`'s order, so they
+			// read as the prerequisite of the network/container rows that
+			// follow. The loop runs below, inside this same `up` board, so the
+			// build's `Building`/`Built` verbs land on the same rows the rest
+			// of `up` is drawing on.
+			let build_names = if build && !self.no_build {
+				up_build_targets(file, &enabled, &target_set)
+			} else {
+				Vec::new()
+			};
+			let image_tags = crate::engine::build::build_image_tags(self, file, &build_names);
+			if !image_tags.is_empty() {
+				let image_rows = image_tags
+					.iter()
+					.cloned()
+					.map(|tag| (Kind::Image, tag))
+					.collect::<Vec<_>>();
+				resources.splice(0..0, image_rows);
+			}
+			crate::ui::progress::begin(resources);
+
+			// Run the build inline on the same board, right after seeding. A
+			// failed build fails `up` the way a failed network create does
+			// today: the `?` propagates, the outer `end` still runs, the
+			// board closes once. The build itself is unchanged: same requests,
+			// same `Building n/m` verbs, same folded tail and failure replay
+			// as a standalone `build`. Only the surrounding board is now the
+			// one `up` already opened.
+			if !build_names.is_empty() {
+				self.build_images_in_session(
+					file,
+					&build_names,
+					&crate::engine::BuildOptions::default(),
+				)
+				.await?;
+			}
 
 			self.create_networks(file).await?;
 			self.create_volumes(file).await?;
@@ -253,3 +301,39 @@ impl Engine {
 		result
 	}
 }
+
+/// The services `up --build` should build, in the order `build_all` would
+/// iterate them. Filters the file's services through the same profile and
+/// target checks the rest of the `up` walk applies (`#1700`), then keeps
+/// only those that have a `build:` block. With no explicit targets and no
+/// active target set, that is every service with `build:` in the file.
+/// The same "build every service with `build:`" rule the standalone `build`
+/// command follows when called without arguments.
+fn up_build_targets(
+	file: &crate::compose::types::ComposeFile,
+	enabled: &std::collections::HashSet<String>,
+	target_set: &Option<std::collections::HashSet<String>>,
+) -> Vec<String> {
+	file.services
+		.iter()
+		.filter(|(name, service)| {
+			if service.build.is_none() {
+				return false;
+			}
+			if !enabled.contains(*name) {
+				return false;
+			}
+			if let Some(set) = target_set {
+				if !set.contains(*name) {
+					return false;
+				}
+			}
+			true
+		})
+		.map(|(name, _)| name.clone())
+		.collect()
+}
+
+#[cfg(all(test, unix))]
+#[path = "up_build_board_tests.rs"]
+mod up_build_board_tests;

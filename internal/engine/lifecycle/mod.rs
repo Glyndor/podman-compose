@@ -57,7 +57,7 @@ pub(crate) struct ExistingContainer {
 impl Engine {
 	/// Start all services defined in the compose file, creating containers that do not exist.
 	pub async fn up(&self, file: &ComposeFile) -> Result<()> {
-		self.up_with_options(file, false, &[], &[], false, false, false)
+		self.up_with_options(file, false, &[], &[], false, false, false, false)
 			.await
 	}
 
