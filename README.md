@@ -119,6 +119,9 @@ worth checking before installing — and a distribution never changes its Podman
 major version mid-release, so an LTS that shipped below the floor stays below
 it for its whole supported life.
 
+Podman versions as each distribution's package index listed them on 2026-08-24,
+the Ubuntu rows re-read on 2026-09-05; a point release can move them.
+
 | distribution                  | Podman | podup runs |
 |-------------------------------|--------|------------|
 | Debian 12 bookworm            | 4.3.1  | no         |
