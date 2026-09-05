@@ -253,3 +253,72 @@ fn a_bare_network_entry_survives_pruning() {
 	);
 	assert!(out.contains("backend"), "{out}");
 }
+
+/// `config` resolves every declared network's name the same way `up` does, so
+/// the rendered output matches what the next `up` will create. A bare network
+/// (`null` body) and the implicit `default` both pick up `<project>_<key>`;
+/// an explicit `name:` is left alone.
+#[test]
+fn inject_resolved_network_names_fills_in_the_implicit_default() {
+	let mut file =
+		podup::parse_str("services:\n  web:\n    image: alpine\nnetworks:\n  default:\n").unwrap();
+	// The implicit `default` network is synthesized by the real pipeline before
+	// `config` runs; declaring it explicitly here is enough to exercise the same
+	// shape the production code sees.
+	inject_resolved_network_names(&mut file, "myproj");
+	let rendered = serde_yaml::to_string(&file.networks).unwrap();
+	assert!(
+		rendered.contains("name: myproj_default"),
+		"the implicit `default` network must resolve to <project>_default: {rendered}"
+	);
+}
+
+/// A network whose body is just `null` is treated the same way: there is no
+/// `name:` to preserve, so `up` would create `<project>_<key>` and `config`
+/// shows the same.
+#[test]
+fn inject_resolved_network_names_fills_a_bare_network() {
+	let mut file =
+		podup::parse_str("services:\n  web:\n    image: alpine\nnetworks:\n  monitoring: null\n")
+			.unwrap();
+	inject_resolved_network_names(&mut file, "myproj");
+	let cfg = file.networks.get("monitoring").unwrap();
+	let name = cfg
+		.as_ref()
+		.and_then(|c| c.name.as_deref())
+		.expect("bare network must pick up the project-prefixed default");
+	assert_eq!(name, "myproj_monitoring");
+}
+
+/// An explicit `name:` is the user's choice; `config` must not overwrite it
+/// just because it would otherwise match the same rule.
+#[test]
+fn inject_resolved_network_names_keeps_an_explicit_name() {
+	let mut file = podup::parse_str(
+		"services:\n  web:\n    image: alpine\nnetworks:\n  backend:\n    name: my-custom-net\n",
+	)
+	.unwrap();
+	inject_resolved_network_names(&mut file, "myproj");
+	let name = file.networks["backend"]
+		.as_ref()
+		.and_then(|c| c.name.as_deref())
+		.expect("explicit name must survive");
+	assert_eq!(name, "my-custom-net");
+}
+
+/// An `external: true` network keeps its bare key as the runtime name, with no
+/// project prefix; `config` reflects that without writing a `name:` it would
+/// then have to also unset.
+#[test]
+fn inject_resolved_network_names_leaves_external_networks_alone() {
+	let mut file = podup::parse_str(
+		"services:\n  web:\n    image: alpine\nnetworks:\n  shared:\n    external: true\n",
+	)
+	.unwrap();
+	inject_resolved_network_names(&mut file, "myproj");
+	let cfg = file.networks["shared"].as_ref().expect("network slot");
+	assert!(
+		cfg.name.is_none(),
+		"external networks must not get a project-prefixed name: {cfg:?}"
+	);
+}

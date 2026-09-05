@@ -1,8 +1,50 @@
-//! Pure helpers for `inspect`: replica/port selection, image-ref
-//! splitting, and process-table formatting. Kept free of the live Podman
-//! client so each is unit-tested in isolation.
+//! Pure helpers for `inspect` and the read-only query commands: replica/port
+//! selection, image-ref splitting, process-table formatting, and the
+//! shared "N units ago" renderer used by `ps` and `images`. Kept free of the
+//! live Podman client so each is unit-tested in isolation.
 
 use crate::error::{ComposeError, Result};
+
+/// Render an elapsed span as `N units ago`, the same wording `docker compose`
+/// uses for `ps` and `images` CREATED columns.
+///
+/// Largest unit only (so a 90-second row reads `1 minute ago`, not
+/// `1 minute 30 seconds ago`), singular at exactly one (`1 day ago`, not
+/// `1 days ago`), and `Less than a second ago` under one second, since an
+/// elapsed timer like `6s` reads as *how long since*, not *how long ago*,
+/// and the `_ago` wording is what fixes that.
+///
+/// `seconds` is clamped to zero on a negative argument (clock skew between
+/// this process and libpod is not a future age). Pure so the boundaries
+/// (`0 s`, `1 s`, `59 s`, `60 s`, `59 min`, `60 min`, `23 h`, `24 h`) are
+/// pinned without a live socket.
+pub(super) fn humanize_age(seconds: i64) -> String {
+	if seconds < 1 {
+		return "Less than a second ago".to_string();
+	}
+	let s = seconds as u64;
+	if s < 60 {
+		return format_age(s, "second");
+	}
+	if s < 3600 {
+		return format_age(s / 60, "minute");
+	}
+	if s < 86_400 {
+		return format_age(s / 3600, "hour");
+	}
+	format_age(s / 86_400, "day")
+}
+
+/// `1 second ago` at one, `N seconds ago` afterwards (same shape for
+/// minute/hour/day). Kept tiny so the singular/plural rule is a one-line
+/// change instead of a duplicated format string.
+fn format_age(n: u64, unit: &str) -> String {
+	if n == 1 {
+		format!("1 {unit} ago")
+	} else {
+		format!("{n} {unit}s ago")
+	}
+}
 
 /// Pick a service's target replica container from its live container names.
 ///

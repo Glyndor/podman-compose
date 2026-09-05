@@ -196,8 +196,16 @@ impl Engine {
 			// and exiting 0 made `HOST=$(podup port web 80)` yield an empty string
 			// with a success status, so a script cannot tell "not published" from
 			// "published at ''". docker compose exits 1 with a message here.
-			None => Err(ComposeError::Unsupported(format!(
-				"no host binding for {service_name} port {port}/{proto}"
+			//
+			// The variant is `StreamTruncated` rather than `Unsupported` on
+			// purpose: `Unsupported` renders as `unsupported feature: ...`, the
+			// label reserved for compose features podup does not implement.
+			// "this service does not publish that port" is not such a feature,
+			// it is a property of the running service, and labelling it
+			// `unsupported feature:` read as a podup limitation. The variant
+			// renders the sentence verbatim under the CLI's own prefix (#1697).
+			None => Err(ComposeError::PortNotPublished(format!(
+				"{service_name} publishes no host port for {port}/{proto}"
 			))),
 		}
 	}

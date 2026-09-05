@@ -277,7 +277,13 @@ fn resolve_target_container_name(svc_name: &str, service: &Service, project: &st
 }
 
 /// Resolve the actual network name on the host for a compose network key.
-pub(super) fn resolve_network_name(network: &str, file: &ComposeFile, project: &str) -> String {
+///
+/// `pub` so `startup::config_render` (in the binary crate) can call the same
+/// function `up` uses, rather than duplicating the resolution rule. The rule
+/// is small but every branch (explicit `name:`, `external: true`, the
+/// `<project>_<key>` default) has a footgun if a second copy drifts. The
+/// crate-level docs (`podup::resolve_network_name`) call out the reuse intent.
+pub fn resolve_network_name(network: &str, file: &ComposeFile, project: &str) -> String {
 	match file.networks.get(network).and_then(|c| c.as_ref()) {
 		Some(cfg) => {
 			if let Some(name) = cfg.name.as_deref() {
