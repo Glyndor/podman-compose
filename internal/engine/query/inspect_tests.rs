@@ -1,7 +1,12 @@
 use super::attach_log_query;
 use crate::compose::parse_str;
+// The fake Podman speaks over a unix socket and exists on unix only, like the
+// test below that drives it.
+#[cfg(unix)]
 use crate::engine::fake_podman;
+#[cfg(unix)]
 use crate::engine::Engine;
+#[cfg(unix)]
 use crate::error::ComposeError;
 
 #[test]
