@@ -266,7 +266,7 @@ there is no complete set to size against). `--format json` prints no header.
 
 `--json` is a hidden deprecated alias for `--format json`.
 
-**Bounding a feed needs both flags.** Measured against Podman 5.4.2:
+**Bounding a feed needs both flags.** Measured against Podman 5.4.2 on 2026-07-29:
 `--since -2h --until -1h` ends the feed; `--until` alone, `--since` alone, and
 any `--until` in the future all leave it following indefinitely. podup warns
 when `--until` is given without `--since`. This also decides the exit code — see
@@ -314,8 +314,8 @@ Print the public binding for a port.
 ### `images`
 List images used by services.
 
-`CREATED` is how long ago the image was built, largest-first and up to three
-components (`2mo 27d 10h`). `SIZE` is the image's on-disk size, rendered in decimal units at three
+`CREATED` is how long ago the image was built, as a moment (`2 hours ago`,
+`81 days ago`). `SIZE` is the image's on-disk size, rendered in decimal units at three
 significant digits (`98.2MB`, `805kB`) so the column lines up with what `podman
 images` and `docker compose images` print. An image that is not present locally
 has an empty `SIZE` and an empty `IMAGE ID`. Under `--format json` the size is
@@ -337,7 +337,7 @@ stopped container reports its exit code instead (`Exited (7)`).
 
 `CREATED` is how long ago the container was made. It differs from `STATUS` after
 a restart, which is the point of having both: a container created three days ago
-and started four seconds ago reads `3d` / `Up 4s`.
+and started four seconds ago reads `3 days ago` / `Up 4s`.
 
 `SIZE` appears only with `-s/--size`. It reads `143kB (virtual 225MB)`: the bytes
 the container has written on top of its image, then the image's own size — the
@@ -346,13 +346,15 @@ size rather than the total of the two.
 
 It is opt-in because libpod has to walk each container's writable layer to
 answer, which costs real time as a project grows: measured across 59 containers
-on Podman 5.7.0, asking for it took the underlying call from 21 ms to 109 ms. On
+on Podman 5.7.0 on 2026-08-03, asking for it took the underlying call from 21 ms to 109 ms. On
 a small project the difference is below noise. Under `--format json` the field is
 `null` when the size was not requested, so a consumer can tell "not asked" from
 "empty".
 
-Both spans are largest-first and up to three components, skipping units that are
-empty — `1y 2mo 3d`, `1h 5m 3s`, `5s`. A year is 365 days and a month is 30.
+`CREATED` reads as a moment, one unit, the largest that fits: `3 seconds ago`,
+`1 minute ago`, `2 hours ago`, `3 days ago`. The `STATUS` span is largest-first
+and up to three components, skipping units that are empty (`1h 5m 3s`, `5s`).
+A year is 365 days and a month is 30.
 Under `--format json` the raw wire values are passed through instead: `Created`
 is the RFC 3339 string and `StartedAt` is Unix seconds.
 
@@ -370,7 +372,7 @@ exists and holds nothing.
 **It is opt-in because it is slow, not because it is verbose.** No libpod
 endpoint reports a single volume's size; the only one that knows is `system/df`,
 which accounts for every image, container and volume on the host. Measured on
-Podman 5.7.0 with 46 volumes: 1.2 s, against 10 ms for the plain list. podup
+Podman 5.7.0 with 46 volumes, 2026-08-03: 1.2 s, against 10 ms for the plain list. podup
 makes that call once per table, never once per row.
 
 Under `--format json` each entry gains a `Usage` object with the raw byte counts
@@ -665,9 +667,9 @@ The default output is a table:
 
 ```
 $ podup audit
-SERVICE  FINDINGS
-api      writable_root no_new_privileges_off secret_in_environment
-db       -
+SERVICE FINDINGS
+api     writable_root no_new_privileges_off secret_in_environment
+db      -
   api: writable_root: read_only is not true: the container's root filesystem is writable
   api: no_new_privileges_off: security_opt is missing no-new-privileges:true: setuid binaries may regain privileges
   api: secret_in_environment: environment: DB_PASSWORD carries a hard-coded value; move it to secrets:
@@ -680,7 +682,7 @@ with no findings at all prints `no findings` and nothing else.
 shape and grep the `check` ids:
 
 ```
-{"findings":[{"service":"api","check":"writable_root","reason":"..."}, ...]}
+{"findings":[{"check":"writable_root","reason":"...","service":"api"}, ...]}
 ```
 
 The keys are alphabetically ordered; an empty list is `{"findings":[]}`,
@@ -1115,7 +1117,7 @@ asked for answers it instead:
   invented.
 
 Note that a window needs **both** ends and both must already have elapsed.
-Measured against Podman 5.4.2: `--since -2h --until -1h` closes the feed, while
+Measured against Podman 5.4.2 on 2026-07-29: `--since -2h --until -1h` closes the feed, while
 either flag alone leaves it open, as does any `--until` in the future. So
 `--until 5m` follows indefinitely rather than stopping in five minutes. podup
 warns when `--until` is passed without `--since`.

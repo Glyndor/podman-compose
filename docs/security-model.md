@@ -146,7 +146,8 @@ individually justified with safety comments, and unit-tested.
   `registries.d`. A host that requires signatures for a registry gets that
   enforcement on `podup up` with nothing added on podup's side; the default
   shipped by most distributions, `insecureAcceptAnything`, enforces nothing.
-  Measured on Podman 5.7.0 with a `reject` rule scoped to one repository:
+  Measured on Podman 5.7.0 with a `reject` rule scoped to one repository,
+  2026-09-03:
   `up` fails at the pull with libpod's own message, `Source image rejected:
   Running image docker://... is rejected by policy.`, and creates no
   container. The policy is consulted at pull time only: an image already in
