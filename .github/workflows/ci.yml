@@ -65,7 +65,15 @@ jobs:
       # coverage rises, never lower it to make a red build green. See
       # standards/testing, "An inline test module is counted as covered
       # production code".
-      coverage-threshold: 72
+      #
+      # 76 from 72 on 2026-09-04: the Coverage job on develop at a57e846 (run
+      # 33916825387) read 76.44%, after the board, pull, build and rm work of
+      # 2026-09-03/04 landed with their tests. The same command on a machine
+      # with Podman reachable reads 86.99%, since the integration tests then
+      # cover the engine; the number that gates is the job's, so the floor is
+      # the integer under the job's. Same rule as above: raise when real
+      # coverage rises, never lower to make a red build green. #1696.
+      coverage-threshold: 76
       # This number is inside the check name `rust / MSRV (1.85)`. Bumping it
       # emits `rust / MSRV (<new>)` while the ruleset still requires the old
       # string, so the PR carrying the bump blocks itself. A ruleset should
