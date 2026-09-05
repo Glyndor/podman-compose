@@ -57,12 +57,12 @@ pub use compose::{
 /// through.
 pub use engine::{
 	is_safe_project_name, list_projects, list_projects_filtered, resolve_image_digests,
-	retain_active_profiles, retain_active_profiles_with_targets, surface_host_modes,
-	validate_stop_timeout, AttachOptions, AttachOutcome, AttachSummary, BuildOptions,
-	CommitOptions, CpOptions, Engine, EventsOptions, ExecOptions, ImagesOptions, LogsDisplay,
-	LogsOptions, LsOptions, ProjectLock, PsDisplayOptions, PsFilterOptions, PsOptions, PullOptions,
-	PushOptions, RunOptions, RunOverrides, StatsOptions, VolumesDisplayOptions, VolumesOptions,
-	DEFAULT_LOG_TAIL,
+	resolve_network_name, retain_active_profiles, retain_active_profiles_with_targets,
+	surface_host_modes, validate_stop_timeout, AttachOptions, AttachOutcome, AttachSummary,
+	BuildOptions, CommitOptions, CpOptions, Engine, EventsOptions, ExecOptions, ImagesOptions,
+	LogsDisplay, LogsOptions, LsOptions, ProjectLock, PsDisplayOptions, PsFilterOptions, PsOptions,
+	PullOptions, PushOptions, RunOptions, RunOverrides, StatsOptions, VolumesDisplayOptions,
+	VolumesOptions, DEFAULT_LOG_TAIL,
 };
 /// The crate's error type and `Result` alias, surfaced so callers handle one
 /// error enum across parsing and engine calls.

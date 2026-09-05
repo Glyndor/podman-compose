@@ -235,3 +235,36 @@ fn running_status_detected_case_insensitively() {
 	assert!(!is_running_status("paused"));
 	assert!(!is_running_status(""));
 }
+
+/// The CREATED column of `ps` and `images` reads as `N units ago`, the same
+/// wording docker compose uses. The boundaries below are exactly the ones the
+/// issue pinned: 0 s, 1 s, 59 s, 60 s, 59 min, 60 min, 23 h, 24 h, plus a
+/// 1-vs-2 check at every unit so the singular/plural rule is also pinned.
+#[test]
+fn humanize_age_covers_the_pinned_boundaries() {
+	assert_eq!(super::humanize_age(0), "Less than a second ago");
+	assert_eq!(super::humanize_age(-3), "Less than a second ago");
+	assert_eq!(super::humanize_age(1), "1 second ago");
+	assert_eq!(super::humanize_age(2), "2 seconds ago");
+	assert_eq!(super::humanize_age(59), "59 seconds ago");
+	assert_eq!(super::humanize_age(60), "1 minute ago");
+	assert_eq!(super::humanize_age(61), "1 minute ago");
+	assert_eq!(super::humanize_age(2 * 60), "2 minutes ago");
+	assert_eq!(super::humanize_age(59 * 60), "59 minutes ago");
+	assert_eq!(super::humanize_age(60 * 60), "1 hour ago");
+	assert_eq!(super::humanize_age(60 * 60 + 1), "1 hour ago");
+	assert_eq!(super::humanize_age(2 * 60 * 60), "2 hours ago");
+	assert_eq!(super::humanize_age(23 * 60 * 60), "23 hours ago");
+	assert_eq!(super::humanize_age(24 * 60 * 60), "1 day ago");
+	assert_eq!(super::humanize_age(24 * 60 * 60 + 1), "1 day ago");
+	assert_eq!(super::humanize_age(2 * 24 * 60 * 60), "2 days ago");
+}
+
+/// The snapshot the issue was filed against: `6s` and `3m 19s` read as elapsed
+/// timers, not as points in the past. The fix uses the same wording for both
+/// columns of both commands.
+#[test]
+fn humanize_age_matches_the_docker_compose_wording() {
+	assert_eq!(super::humanize_age(6), "6 seconds ago");
+	assert_eq!(super::humanize_age(3 * 60 + 19), "3 minutes ago");
+}

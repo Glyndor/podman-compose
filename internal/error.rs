@@ -73,6 +73,13 @@ pub enum ComposeError {
 	/// (#1104). Carries a short description of which, since the detail (the
 	/// container, the transport error) is already warned as it happens.
 	StreamTruncated(String),
+	/// `port` asked for a container port the service does not publish to
+	/// the host. Carries the rendered sentence, `<service> publishes no host
+	/// port for <port>/<proto>`; the CLI adds its own `error:` prefix. Its own
+	/// variant so the message is not filed under a feature podup lacks
+	/// (`Unsupported`) or a stream that ended early (`StreamTruncated`)
+	/// (#1697).
+	PortNotPublished(String),
 	/// `podup update` (self-update) failed.
 	Update(String),
 	/// An `external: true` secret/config/network/volume is absent.
@@ -271,6 +278,7 @@ impl fmt::Display for ComposeError {
 			Self::RunExited(code) => write!(f, "run container exited with code {code}"),
 			Self::Interrupted => write!(f, "interrupted"),
 			Self::StreamTruncated(what) => write!(f, "{what}"),
+			Self::PortNotPublished(what) => write!(f, "{what}"),
 			Self::Update(s) => write!(f, "update error: {s}"),
 			Self::ExternalNotFound(s) => write!(f, "external resource not found: {s}"),
 			Self::ScalePortConflict {

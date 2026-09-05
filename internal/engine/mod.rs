@@ -34,6 +34,9 @@ mod lifecycle;
 mod lock;
 mod names;
 mod network;
+/// Re-exported so `startup::config_render` (in the binary crate) can call the
+/// same function `up` uses, instead of duplicating the resolution rule.
+pub use network::resolve_network_name;
 mod pod;
 mod profiles;
 pub use profiles::{retain_active_profiles, retain_active_profiles_with_targets};
