@@ -406,5 +406,11 @@ fn finding(name: &str, check: &'static str, reason: &str) -> Finding {
 #[path = "checks_more_tests.rs"]
 mod more_tests;
 #[cfg(test)]
+#[path = "checks_secret_env_tests.rs"]
+mod secret_env_tests;
+#[cfg(test)]
 #[path = "checks_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "checks_unpinned_image_tests.rs"]
+mod unpinned_image_tests;
