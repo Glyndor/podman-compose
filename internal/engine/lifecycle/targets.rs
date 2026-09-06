@@ -10,7 +10,7 @@ use crate::error::{ComposeError, Result};
 /// Extra wall-clock slack, beyond the grace period, before podup gives up on a
 /// stalled libpod `stop` and escalates to a client-side `SIGKILL`. Podman stops
 /// a container by sending `SIGTERM`, waiting the grace window, then `SIGKILL`
-/// itself — so a healthy stop returns at most ~`grace` seconds in. The buffer
+/// itself, so a healthy stop returns at most ~`grace` seconds in. The buffer
 /// absorbs daemon/reap latency so a slow-but-working stop is never escalated;
 /// anything past it means the libpod call is wedged and we kill independently.
 const STOP_GRACE_BUFFER_SECS: u64 = 30;
@@ -96,7 +96,7 @@ pub(super) fn filter_services(
 ///
 /// The up/create path expands targets into a set without checking membership, so
 /// a bogus name would silently match nothing and exit 0. This validates the list
-/// up front — matching docker-compose and the stop/start/kill commands, which
+/// up front, matching docker-compose and the stop/start/kill commands, which
 /// already reject unknown services via [`filter_services`].
 pub(super) fn validate_targets(file: &ComposeFile, target_services: &[String]) -> Result<()> {
 	for name in target_services {
@@ -114,7 +114,7 @@ pub(super) fn validate_targets(file: &ComposeFile, target_services: &[String]) -
 /// contains the targets plus, unless `no_deps` is set, their transitive
 /// `depends_on` services. Callers must validate `target_services` up front via
 /// [`validate_targets`] so a typo'd/unknown name fails loudly instead of being
-/// silently skipped — mirroring [`filter_services`] (and docker compose's "no
+/// silently skipped, mirroring [`filter_services`] (and docker compose's "no
 /// such service").
 pub(super) fn expand_targets(
 	file: &ComposeFile,
@@ -149,7 +149,7 @@ pub(super) fn expand_targets(
 /// service is in scope, so the answer is always `true`). Otherwise a name is
 /// "started" only if it is present in the set. Under `up --no-deps`,
 /// [`expand_targets`] omits the targets' dependencies, so this returns `false`
-/// for an intentionally-excluded dependency — letting the caller skip its
+/// for an intentionally-excluded dependency, letting the caller skip its
 /// `depends_on` readiness wait, matching docker-compose.
 pub(super) fn in_started_set(target_set: &Option<HashSet<String>>, name: &str) -> bool {
 	match target_set {

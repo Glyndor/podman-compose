@@ -252,7 +252,7 @@ fn missing_subcommand_exits_non_zero() {
 	);
 	// The group's own usage, not the root's. Until #1293 this printed
 	// `Usage: podup [OPTIONS] <COMMAND>` and listed every top-level command,
-	// withholding the one thing the user needed — what `generate` accepts —
+	// withholding the one thing the user needed, what `generate` accepts,
 	// which its own `--help` had been answering correctly all along.
 	let gen_err = String::from_utf8_lossy(&gen.stderr);
 	assert!(
@@ -383,10 +383,10 @@ fn config_projections_render_lists() {
 /// that a script written against docker compose runs unchanged. Docker declares
 /// it as a bare boolean; podup declared it as one that demands a value, so
 /// `docker compose attach --sig-proxy web` came back as a usage error and exit
-/// 2 — a no-op flag rejecting the command it was supposed to tolerate.
+/// 2, a no-op flag rejecting the command it was supposed to tolerate.
 ///
 /// Asserted as "not a clap error": these never reach Podman, so the run fails
-/// later on the missing compose file, which is exactly the point — parsing got
+/// later on the missing compose file, which is exactly the point: parsing got
 /// past the flag.
 #[test]
 fn sig_proxy_accepts_dockers_bare_form_and_an_explicit_value() {
@@ -405,14 +405,14 @@ fn sig_proxy_accepts_dockers_bare_form_and_an_explicit_value() {
 }
 
 /// Bare `podup` is the first screen anyone sees after installing, and it was
-/// the one help path that rendered without colour — every other screen had it,
+/// the one help path that rendered without colour, while every other screen had it,
 /// so podup looked like a tool that does not colourise at all.
 ///
 /// This checks the piped side, which is what a test harness can observe: the
 /// help must reach **stderr** (it is a usage error, not output), carry no
 /// escape codes when stderr is not a terminal, and stay on exit 2. The coloured
 /// side is verified by running it under a pty, which no `Command::output()`
-/// test can do — 50 escapes against 0 before.
+/// test can do: 50 escapes against 0 before.
 #[test]
 fn bare_podup_prints_help_to_stderr_and_stays_plain_when_piped() {
 	let out = Command::new(bin())
@@ -440,7 +440,7 @@ fn bare_podup_prints_help_to_stderr_and_stays_plain_when_piped() {
 /// of podup's env-backed globals.
 ///
 /// `arg_required_else_help` only fires when there are NO arguments at all, and
-/// an env-sourced one counts — so with `COMPOSE_PROJECT_NAME` or
+/// an env-sourced one counts, so with `COMPOSE_PROJECT_NAME` or
 /// `PODMAN_SOCKET` exported, which is the normal state of a real deployment,
 /// bare `podup` printed a wall of forty-five subcommand names instead of its
 /// help. This is how CI found it: the runner had one of them set and my first
@@ -475,7 +475,7 @@ fn bare_podup_prints_the_same_help_with_env_globals_set() {
 /// colour in the test harness anyway, so a weaker version of this test would
 /// pass without proving anything. Only stdout is checked: a connection
 /// failure prints its `error:` banner to stderr, which is a human diagnostic
-/// and is allowed to be coloured like any other podup error — the guarantee
+/// and is allowed to be coloured like any other podup error; the guarantee
 /// under test is about the machine-parseable stream, not every byte podup
 /// writes.
 #[test]

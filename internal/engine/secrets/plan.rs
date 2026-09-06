@@ -21,15 +21,15 @@ pub(super) const MAX_SECRET_BYTES: usize = 512_000;
 /// mapping unit-testable, so the read happens in the effectful layer that creates
 /// the secret.
 pub(super) enum Payload {
-	/// Inline `content:`/`environment:` — the bytes, already resolved.
+	/// Inline `content:`/`environment:`: the bytes, already resolved.
 	Inline(SecretBytes),
-	/// `file:` — the resolved host path to read at creation time.
+	/// `file:` is the resolved host path to read at creation time.
 	File(PathBuf),
 }
 
 /// A planned native secret for a service: the Podman secret `source` to attach,
-/// the in-container `target`, optional permissions, and — for every source podup
-/// creates itself — the `payload` to create under `source`. `external: true`
+/// the in-container `target`, optional permissions, and, for every source podup
+/// creates itself, the `payload` to create under `source`. `external: true`
 /// references carry no payload (the secret must pre-exist).
 pub(super) struct NativePlan {
 	pub(super) source: String,
@@ -53,11 +53,11 @@ struct SourceDef<'a> {
 
 /// Where a secret/config's bytes come from once the compose def is resolved.
 enum Source {
-	/// Inline `content:`/`environment:` — `(scoped podman name, payload bytes)`.
+	/// Inline `content:`/`environment:`: `(scoped podman name, payload bytes)`.
 	Inline(String, SecretBytes),
-	/// `file:` — `(scoped podman name, resolved host path)`.
+	/// `file:`: `(scoped podman name, resolved host path)`.
 	File(String, PathBuf),
-	/// `external: true` — name of the pre-existing podman secret.
+	/// `external: true`: name of the pre-existing podman secret.
 	External(String),
 }
 
@@ -119,7 +119,7 @@ pub(super) fn collect_native_plans(
 				},
 				base_dir,
 			)?;
-			// Configs default to an absolute container-root path — `/name`, not
+			// Configs default to an absolute container-root path: `/name`, not
 			// `/run/secrets/name`. That is what separates a config from a secret
 			// here, and it is the path a `file:` config landed on when it was a
 			// bind mount.
@@ -132,8 +132,8 @@ pub(super) fn collect_native_plans(
 }
 
 /// Resolve a secret/config definition to its native [`Source`]. `external`
-/// wins (it may also carry a custom `name:`); every other populated source —
-/// inline `content:`/`environment:` and `file:` alike — becomes a project-scoped
+/// wins (it may also carry a custom `name:`); every other populated source,
+/// inline `content:`/`environment:` and `file:` alike, becomes a project-scoped
 /// native secret. An empty def yields `None` and contributes no plan.
 fn resolve_source(
 	project: &str,
@@ -183,7 +183,7 @@ fn resolve_source(
 	}
 	if let Some(host_path) = file_source {
 		// Resolve like a bind-mount source: a relative `file:` is anchored to the
-		// project dir (not the Podman service's cwd) and `~` is expanded — the same
+		// project dir (not the Podman service's cwd) and `~` is expanded, the same
 		// handling `volumes:` gets, and the same this had when it was a bind.
 		return Ok(Some(Source::File(
 			scoped_name(project, kind, name),
@@ -220,7 +220,7 @@ fn push_plan(
 	//
 	// A `file:` source is the exception: it is left unset here so the effectful
 	// layer can mirror the host file's own permission bits. That keeps what the
-	// container sees identical to the bind this used to be — a `0600` secret stays
+	// container sees identical to the bind this used to be: a `0600` secret stays
 	// unreadable to a non-root container user instead of being widened to `0444`.
 	let mode = if from_file {
 		mode
@@ -260,7 +260,7 @@ pub(super) fn check_secret_size(name: &str, len: usize) -> Result<()> {
 }
 
 /// Whether a secret/config def is one podup creates as a project-scoped native
-/// secret — inline `content:`/`environment:` or a `file:` source. `external:`
+/// secret, inline `content:`/`environment:` or a `file:` source. `external:`
 /// wins and is never created (nor removed) by podup.
 pub(super) fn is_podup_created_source(
 	external: Option<bool>,
@@ -272,7 +272,7 @@ pub(super) fn is_podup_created_source(
 }
 
 /// The permission bits to mount a `file:` secret with when the compose file
-/// names no `mode:` — the host file's own, so the container sees what it saw
+/// names no `mode:`: the host file's own, so the container sees what it saw
 /// when this was a bind mount.
 ///
 /// Execute and the special bits are masked off: a secret holds data, never code,

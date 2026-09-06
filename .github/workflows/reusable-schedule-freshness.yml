@@ -8,7 +8,7 @@ name: Schedule freshness (reusable)
 # workflow in the org stopped. podup and apt recovered on 07-15 because they
 # happened to get activity and a disable/enable cycle; authcore, epistle, unitpm
 # and glyndor.net stayed dark for four more weeks, all of them reporting
-# `active` the whole time. It cost a real finding — authcore's GO-2026-5856 was
+# `active` the whole time. It cost a real finding: authcore's GO-2026-5856 was
 # caught by a hand-run of govulncheck, not by the weekly audit that exists for
 # exactly that.
 #
@@ -21,8 +21,8 @@ name: Schedule freshness (reusable)
 # workflow cannot elevate beyond the permissions of the workflow that calls it,
 # and reading run history needs that scope. Without it the run does not start.
 #
-# Add the check only once the schedule has fired successfully at least once —
-# with no successful run on record there is nothing to measure and the job
+# Add the check only once the schedule has fired successfully at least once.
+# With no successful run on record there is nothing to measure and the job
 # reports that as a failure, which for an established workflow is exactly right.
 
 on:

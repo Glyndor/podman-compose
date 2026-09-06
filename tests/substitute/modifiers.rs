@@ -206,7 +206,7 @@ fn empty_vs_unset_for_colon_dash() {
 
 #[test]
 fn empty_vs_unset_for_dash() {
-	// - treats empty as "use the empty string" — different from :-
+	// - treats empty as "use the empty string", different from :-
 	assert_eq!(substitute("${V-def}", &vars(&[])).unwrap(), "def");
 	assert_eq!(substitute("${V-def}", &vars(&[("V", "")])).unwrap(), "");
 }

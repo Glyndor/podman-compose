@@ -1,6 +1,6 @@
 use super::*;
 
-/// Cell contents come from outside podup — an image tag, a container name, a
+/// Cell contents come from outside podup: an image tag, a container name, a
 /// volume driver, a process argv. A raw escape sequence in one repaints the
 /// caller's terminal and desynchronises podup's own colour resets, so every
 /// row after it inherits whatever was injected.
@@ -21,7 +21,7 @@ fn a_cell_cannot_drive_the_terminal() {
 #[test]
 fn caution_style_distinguishes_yes_from_no() {
 	assert_ne!(caution_style("yes"), caution_style("no"));
-	// Padding must not change the answer — cells reach it already padded.
+	// Padding must not change the answer; cells reach it already padded.
 	assert_eq!(caution_style("yes  "), caution_style("yes"));
 }
 
@@ -45,7 +45,7 @@ fn caution_col_survives_rendering() {
 
 /// A table whose only marker is `caution_col` still colours. The gate in
 /// `print` listed `status_col` and `identity_col` only, and the first caution
-/// caller set `identity_col` too — so the omission was invisible.
+/// caller set `identity_col` too, so the omission was invisible.
 #[test]
 fn a_caution_only_table_still_colours() {
 	let t = Table::new(&["NAME", "EXTERNAL"]).caution_col(1);
@@ -68,7 +68,7 @@ fn a_printable_cell_passes_through() {
 }
 
 /// Escaping happens before padding, so the width a column reserves is the
-/// width actually printed — otherwise an escaped cell overflows its column
+/// width actually printed; otherwise an escaped cell overflows its column
 /// and breaks alignment on every row.
 #[test]
 fn escaping_happens_before_padding() {

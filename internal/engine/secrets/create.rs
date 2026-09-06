@@ -17,7 +17,7 @@ use super::{collect_payload_union, Engine};
 impl Engine {
 	/// Create the union of the `content:`/`environment:`/`file:` secrets and
 	/// configs declared across *all* services in the project, once, before the
-	/// per-level start loop — mirroring how [`Engine::create_networks`] and
+	/// per-level start loop, mirroring how [`Engine::create_networks`] and
 	/// [`Engine::create_volumes`] pre-create their resources.
 	///
 	/// Doing this up front fixes the race in which two services in the same
@@ -64,7 +64,7 @@ impl Engine {
 		// `join_bounded`, and that is a compiler limitation rather than a
 		// preference. `join_bounded` is built on `buffer_unordered`, whose
 		// `FuturesUnordered` is `Send` only if its future is `Send` for *every*
-		// lifetime. Reaching it from here — where the futures borrow `self` —
+		// lifetime. Reaching it from here, where the futures borrow `self`,
 		// makes that bound higher-ranked and propagates out through `up` until an
 		// unrelated `tokio::spawn(engine.watch(…))` stops compiling with
 		// "implementation of `Send` is not general enough", reported in a test
@@ -76,7 +76,7 @@ impl Engine {
 		//
 		// Note the behaviour change this carries: previously the first failing
 		// secret aborted before the rest were touched, and now every secret in
-		// its chunk is attempted. Nothing leaks — `down` sweeps by label — but a
+		// its chunk is attempted. Nothing leaks (`down` sweeps by label) but a
 		// failed `up` can leave later secrets created where it used to leave none.
 		let mut results: Vec<Result<()>> = Vec::with_capacity(work.len());
 		for chunk in work.chunks(crate::engine::lifecycle::parallel::MAX_LIFECYCLE_CONCURRENCY) {
@@ -100,11 +100,11 @@ impl Engine {
 	/// is checked up front to turn Podman's opaque 500 into a clear message.
 	///
 	/// Idempotent across re-`up`s: rather than `replace=true` (which some Podman
-	/// 5.x builds reject when the secret does not yet exist — the internal delete
+	/// 5.x builds reject when the secret does not yet exist: the internal delete
 	/// fails with "no secret data with ID"), the existing secret of this name is
 	/// removed first (a 404 is fine) and then created fresh.
 	///
-	/// # Concurrency contract — read before touching the inspect → delete → create sequence
+	/// # Concurrency contract: read before touching the inspect → delete → create sequence
 	///
 	/// The inspect-then-delete-then-create is **not** atomic at the libpod wire
 	/// level, so a race in the window could delete something the caller does
@@ -119,7 +119,7 @@ impl Engine {
 	///    naming. Every secret created here has a name of the form
 	///    `<project>_...`, which is unique to this `Engine` instance, and the
 	///    inspect rejects any name that does not carry `podup.project=<proj>`
-	///    — so a foreign secret of the same literal name is refused rather
+	///    so a foreign secret of the same literal name is refused rather
 	///    than clobbered. A race with the same project therefore cannot
 	///    happen in the same process.
 	///
@@ -128,7 +128,7 @@ impl Engine {
 	/// claims a project-scoped name in the window between inspect and create.
 	/// That falls through to a `500 from libpod`, which this function
 	/// recognises and rewraps into a legible "something else created a secret
-	/// of that name in between" message — the operator can act on it without
+	/// of that name in between" message, so the operator can act on it without
 	/// having to read the libpod error verbatim.
 	async fn create_secret(&self, name: &str, payload: &SecretBytes) -> Result<()> {
 		check_secret_size(name, payload.byte_len())?;
@@ -147,7 +147,7 @@ impl Engine {
 				if !owned {
 					return Err(ComposeError::Unsupported(format!(
 						"a secret named '{name}' already exists and is not labelled \
-						 podup.project={} — refusing to overwrite a secret podup did \
+						 podup.project={}; refusing to overwrite a secret podup did \
 						 not create",
 						self.project
 					)));
@@ -185,13 +185,13 @@ impl Engine {
 			.map_err(|e| {
 				// Skipping the delete opens a window: the inspect said the name was
 				// free, and something claimed it before the create landed. `up` now
-				// fails there instead of clobbering whatever arrived — the better
+				// fails there instead of clobbering whatever arrived, the better
 				// outcome, but only if it is legible. Podman's own message for this
 				// is an opaque 500, so it is named here rather than passed through.
 				if !existed {
 					ComposeError::Unsupported(format!(
 						"secret '{name}' did not exist when podup checked but could not \
-						 be created: {e} — something else created a secret of that name \
+						 be created: {e}. Something else created a secret of that name \
 						 in between. Re-run `up`, or remove it if it is not wanted."
 					))
 				} else {

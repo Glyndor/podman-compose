@@ -45,7 +45,7 @@ endif
 
 # Drop the self-update stack (ureq + TLS + Ed25519) from the packaged binary:
 # apt owns upgrades on Debian, so `podup update` is disabled here. `completions`
-# stays on — the install step below generates the shell scripts from the binary.
+# stays on: the install step below generates the shell scripts from the binary.
 CARGO_FEATURES = --no-default-features --features watch,completions
 
 %:

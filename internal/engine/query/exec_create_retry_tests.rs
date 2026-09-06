@@ -35,7 +35,7 @@ fn fake_dropping_creates(drops: usize) -> (fake_podman::FakePodman, Arc<AtomicUs
 }
 
 /// Drive the real `exec` entry point, detached so the hijacked streaming path
-/// is out of the picture — the retry under test is on the CREATE, which both
+/// is out of the picture: the retry under test is on the CREATE, which both
 /// paths share. Driving `test_exec_capture` instead would have measured
 /// nothing: it builds its own request and never reaches this code.
 async fn run_exec(fake: &fake_podman::FakePodman) -> crate::error::Result<()> {

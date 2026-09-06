@@ -108,7 +108,7 @@ fn replica_name_at_out_of_range_is_rejected() {
 fn replica_name_at_none_is_first_replica() {
 	let e = engine("proj");
 	// Single replica: the first index-suffixed name (always-suffix parity
-	// with docker/podman — there is no bare, unnumbered container).
+	// with docker/podman: there is no bare, unnumbered container).
 	assert_eq!(
 		e.replica_name_at("web", &Service::default(), None).unwrap(),
 		"proj-web-1"

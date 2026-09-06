@@ -4,7 +4,7 @@
 //! hard cap enforced by the org's `line-limit` reusable. The decision is
 //! small but tightly constrained: it has to match `docker compose run` exactly
 //! (an interactive `run` only allocates a pty when stdin AND stdout are both
-//! terminals — the famous redirect-test case, where the user pipes the
+//! terminals: the famous redirect-test case, where the user pipes the
 //! output to a file but leaves the keyboard attached), and the wrong answer
 //! silently corrupts every script that already calls `podup run`.
 

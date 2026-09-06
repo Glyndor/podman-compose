@@ -2,7 +2,7 @@
 //!
 //! The single-service `attach` / `attach_with_index` commands and the
 //! `attach_log_query` helper that backs them stay in `inspect.rs`; this file
-//! holds everything that follows the multi-service streams — the public
+//! holds everything that follows the multi-service streams: the public
 //! `AttachOutcome` / `AttachOptions` / `AttachSummary` types, the abort
 //! plumbing (`Phase`, `StreamEnd`, `wait_for_phase`, `container_exit_code`)
 //! and the `Engine::attach_logs*` methods that produce them. Split out of
@@ -61,7 +61,7 @@ pub enum AttachOutcome {
 	Aborted,
 }
 
-/// Options that go with [`Engine::attach_logs_with`] — every flag `podup up`
+/// Options that go with [`Engine::attach_logs_with`]: every flag `podup up`
 /// exposes that affects what an attached stream does or how it ends.
 ///
 /// `#[non_exhaustive]` since 4.1.0, so the next flag is not a breaking change
@@ -124,7 +124,7 @@ impl AttachOptions {
 /// `service` and `exit_code` are only meaningful when `outcome` is
 /// [`AttachOutcome::Aborted`]; they are `None` for the other three endings.
 /// The two-abort-fields split off into this struct is what keeps the enum
-/// `Copy` (and keeps its discriminant values defined) — putting a `String`
+/// `Copy` (and keeps its discriminant values defined); putting a `String`
 /// next to an `i64` inside the variant would have broken both, and the
 /// caller still needs to read them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,7 +162,7 @@ impl Engine {
 		timestamps: bool,
 	) -> Result<AttachOutcome> {
 		// Delegate with the abort set fully off, so the call path the rest of
-		// the 4.0.0 callers still take is exercised by the wrapper itself —
+		// the 4.0.0 callers still take is exercised by the wrapper itself,
 		// not just by the underlying method when the new flags are turned on.
 		self.attach_logs_with(
 			file,
@@ -188,7 +188,7 @@ impl Engine {
 	/// container exits, with the propagating service name and exit code in
 	/// the sibling fields of the returned [`AttachSummary`]. On that path the
 	/// remaining containers are stopped before the function returns, so the
-	/// caller does not need to call [`Engine::stop`] — and `dispatch.rs` skips
+	/// caller does not need to call [`Engine::stop`], and `dispatch.rs` skips
 	/// its own stop call on that outcome for the same reason.
 	///
 	/// The two abort-specific fields live on [`AttachSummary`] rather than as
@@ -314,7 +314,7 @@ impl Engine {
 							}
 						}
 					}
-					// Clean end of the stream — the container stopped and the
+					// Clean end of the stream: the container stopped and the
 					// transport delivered its terminator.
 					(svc, cname, StreamEnd::ContainerStopped)
 				}
@@ -322,7 +322,7 @@ impl Engine {
 			.collect();
 
 		// Which arm wins is the whole point: `docker compose up` exits 130 on both
-		// SIGINT and SIGTERM (measured against v5.1.3, not assumed — it is 130 for
+		// SIGINT and SIGTERM (measured against v5.1.3, not assumed: it is 130 for
 		// SIGTERM too, not the 143 the signal number would suggest), and podup
 		// exited 0 for both. A CI job that runs `up` in the foreground and is
 		// cancelled therefore reported success.
@@ -370,7 +370,7 @@ impl Engine {
 
 				// Pick the exit code to propagate. With `--exit-code-from`,
 				// the named service's code wins even if some other container
-				// exited first — and that container may have been SIGKILLed
+				// exited first, and that container may have been SIGKILLed
 				// during the `stop` above (docker compose v5.1.3 prints 137
 				// for that case, measured). Otherwise the trigger's code is the
 				// one podup returns.
@@ -422,7 +422,7 @@ impl Engine {
 /// How one stream of `attach_logs_with_options` ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamEnd {
-	/// The stream's transport died while its container was still running — a
+	/// The stream's transport died while its container was still running: a
 	/// truncated live read, not a finished one (#1104).
 	Broke,
 	/// The container is stopped (clean end or transport died *because* the
@@ -439,7 +439,7 @@ enum Phase {
 	/// than `StreamsEnded`.
 	AllEnded { saw_break: bool },
 	/// `abort_on_container_exit` is set and the named stream finished while
-	/// its container was stopped — the first container to exit. The outer
+	/// its container was stopped, the first container to exit. The outer
 	/// code stops the rest and reports the exit code.
 	FirstExited {
 		trigger_service: String,

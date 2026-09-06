@@ -1,6 +1,6 @@
 use super::{wants_interactive, ExecOptions};
 
-/// #1079: `-T` opts out, matching `docker compose exec` — which has no `-i`
+/// #1079: `-T` opts out, matching `docker compose exec`, which has no `-i`
 /// because a TTY on both ends is the default.
 #[test]
 fn no_tty_flag_disables_the_pty() {
@@ -15,8 +15,8 @@ fn detach_disables_the_pty() {
 	assert!(!wants_interactive(&opts, true));
 }
 
-/// The decisive one for existing users: with stdin not a terminal — any
-/// script or pipeline — `exec` stays on the unchanged streaming path.
+/// The decisive one for existing users: with stdin not a terminal (any
+/// script or pipeline) `exec` stays on the unchanged streaming path.
 /// Allocating a pty there would change output framing for every script that
 /// already calls `podup exec`.
 #[test]

@@ -1,7 +1,7 @@
 //! Output-fidelity normalizers for the `config` render path: resolving relative
 //! bind-mount sources to absolute paths, and quoting YAML 1.1 boolean-like
 //! scalars. Split out of `config_render` so each file stays within the source
-//! line limit. None of this changes runtime behaviour — it only shapes the
+//! line limit. None of this changes runtime behaviour; it only shapes the
 //! rendered `config` output to match `docker compose config`.
 
 use std::path::{Component, Path, PathBuf};
@@ -10,7 +10,7 @@ use podup::compose::types::{ComposeFile, VolumeMount, VolumeType};
 
 /// Rewrite each service's relative bind-mount source to an absolute path,
 /// resolved against the project directory (matching `docker compose config`).
-/// Only `.`-prefixed host paths are resolved — absolute paths, `~`, named
+/// Only `.`-prefixed host paths are resolved: absolute paths, `~`, named
 /// volumes, and Windows drive paths are left untouched, mirroring how the engine
 /// classifies a short-form source. Mount semantics are unchanged; this only
 /// affects the rendered output's source field.
@@ -41,7 +41,7 @@ pub(super) fn resolve_bind_sources(file: &mut ComposeFile, base_dir: &Path) {
 /// Resolve the source of a short-form `source:target[:options]` bind mount,
 /// returning the rewritten spec when the source is a relative host path. A spec
 /// with no `:` separator is a single in-container target (anonymous volume), and
-/// a non-`.` source is absolute or a named volume — both are left as-is.
+/// a non-`.` source is absolute or a named volume; both are left as-is.
 fn rewrite_short_bind(spec: &str, base_dir: &Path) -> Option<String> {
 	let (src, rest) = spec.split_once(':')?;
 	let abs = absolute_bind_source(src, base_dir)?;

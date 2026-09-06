@@ -53,7 +53,7 @@ async fn down_uses_the_list_and_inspects_no_secret_individually() {
 }
 
 /// The guard the batch has to keep: a secret carrying another project's label
-/// is not in the owned set, so it is neither inspected nor removed — even
+/// is not in the owned set, so it is neither inspected nor removed, even
 /// though the compose file names it.
 #[tokio::test]
 #[cfg(unix)]
@@ -88,7 +88,7 @@ async fn down_never_deletes_a_secret_labelled_for_another_project() {
 }
 
 /// A secret podup created whose compose key was since renamed or removed is
-/// still swept, because the labelled list — not the compose file — is what
+/// still swept, because the labelled list, not the compose file, is what
 /// teardown walks.
 #[tokio::test]
 #[cfg(unix)]
@@ -116,7 +116,7 @@ async fn down_sweeps_an_orphan_the_compose_file_no_longer_names() {
 }
 
 /// The failure mode worth more than the saving. Since the list *is* the
-/// ownership check now, a failed list must not read as "nothing is ours" —
+/// ownership check now, a failed list must not read as "nothing is ours":
 /// that would delete nothing and report a clean `down`. It falls back to the
 /// per-secret guarded path instead.
 #[tokio::test]

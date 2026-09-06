@@ -80,7 +80,7 @@ fn config_surfaces_every_active_host_binding_mode() {
 	let stderr = String::from_utf8_lossy(&out.stderr);
 
 	// Each declared mode produces its own `podup: warning:` line at default log
-	// level — the `config` surface is independent of `--no-warn`, so an
+	// level: the `config` surface is independent of `--no-warn`, so an
 	// operator who never runs `up` still sees the modes in CI logs.
 	for (service, field) in [
 		("net", "network_mode: host"),
@@ -99,7 +99,7 @@ fn config_surfaces_every_active_host_binding_mode() {
 		);
 	}
 
-	// The plain service must NOT warn — pin that the detector does not
+	// The plain service must NOT warn; pin that the detector does not
 	// over-trigger.
 	let plain_warning = stderr
 		.lines()
@@ -161,7 +161,7 @@ fn config_with_no_active_modes_is_silent() {
 fn generate_quadlet_warns_on_host_network_and_privileged() {
 	// Quadlet has no Podman client to surface warnings through, so it must
 	// emit them at generate time. The mode stays emitted in the unit file
-	// (Network=host, PodmanArgs=--privileged) — the warning is alongside, not
+	// (Network=host, PodmanArgs=--privileged); the warning is alongside, not
 	// instead of, the mapping.
 	let (_dir, file) = compose_file(
 		"compose.yaml",
@@ -226,7 +226,7 @@ fn generate_quadlet_warns_on_container_namespace_sharing() {
 #[test]
 fn no_warn_drops_the_host_binding_warnings_at_config_parse() {
 	// The `config` command goes through the same detector path. `--no-warn`
-	// must still suppress the per-service warning *at config time*? No —
+	// must still suppress the per-service warning *at config time*? No:
 	// `config` ignores `--no-warn` by design (the surface is the whole point
 	// of the command). This test pins that decision so a future refactor
 	// cannot silently change it: a compose with no host modes + `--no-warn`
@@ -296,7 +296,7 @@ fn generate_quadlet_no_warn_suppresses_the_warnings() {
 		!stderr.contains("podup: warning: privileged: true"),
 		"--no-warn must silence the privileged warning; got stderr:\n{stderr}"
 	);
-	// The unit still carries the modes — suppression is the per-line warning,
+	// The unit still carries the modes; suppression is the per-line warning,
 	// not the emitted directive.
 	let stdout = String::from_utf8_lossy(&out.stdout);
 	assert!(
@@ -313,7 +313,7 @@ fn generate_quadlet_no_warn_suppresses_the_warnings() {
 fn generate_quadlet_no_warn_without_modes_is_silent() {
 	// Sanity: `--no-warn` against a clean compose file produces no
 	// host-binding / privilege-escalation warning. (The Quadlet path also
-	// emits an unrelated platform advisory on non-Linux hosts — that is not
+	// emits an unrelated platform advisory on non-Linux hosts, and that is not
 	// gated on `--no-warn` and is intentionally left alone, so the assertion
 	// filters to the host-binding lines only.)
 	let (_dir, file) = compose_file(

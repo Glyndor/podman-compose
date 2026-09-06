@@ -18,7 +18,7 @@
 # client to the long-running Podman service, so engine-side work is not charged
 # to it; podman-compose shells out to the `podman` binary per call, whose work it
 # waits on and is charged for. The columns therefore measure client-side cost per
-# command — what running the tool costs on your machine — not engine work.
+# command, what running the tool costs on your machine, not engine work.
 #
 # Usage: bench/run.sh [--iters N] [--warmup W] [--cores CPUSET] [--smoke]
 set -u
@@ -76,7 +76,7 @@ declare -A OP=(
 # Every scenario must have an op, or the run dies partway through with an
 # unbound-variable error under `set -u`. deep-chain and wide-level were added to
 # SCENARIOS in #1123 and never added here, so the suite has been unable to
-# complete since — nobody noticed because those two were only ever run by hand,
+# complete since; nobody noticed because those two were only ever run by hand,
 # one at a time, to measure the scheduler change that introduced them.
 for _s in "${SCENARIOS[@]}"; do
 	[ -n "${OP[$_s]:-}" ] || { echo "bench: scenario '$_s' has no entry in OP" >&2; exit 2; }
@@ -85,11 +85,11 @@ if [ "$SMOKE" -eq 1 ]; then SCENARIOS=(single running-ops); fi
 
 TOOLS=(podup podman-compose)
 # docker compose is the tool podup targets for parity, so it is the comparison
-# that matters most — but WHICH engine it drives changes what the numbers mean.
+# that matters most, but WHICH engine it drives changes what the numbers mean.
 #
 #   against Podman  a pure tool comparison: same engine, so the difference is
 #                   the orchestrator and nothing else. This is the fair one, and
-#                   it needs no Docker installed — only DOCKER_HOST pointed at
+#                   it needs no Docker installed, only DOCKER_HOST pointed at
 #                   the Podman socket.
 #   against dockerd a whole-stack comparison: engine differences are folded in,
 #                   so it cannot be read as "tool A is faster than tool B".
@@ -99,7 +99,7 @@ TOOLS=(podup podman-compose)
 # Which engine docker-compose drove is written NEXT TO THE RESULTS, not only
 # exported. An env var dies with this process, and the documented flow is two
 # commands (`bash bench/run.sh`, then `python3 bench/aggregate.py`), so the
-# aggregator never saw it and fell back to assuming dockerd — printing a
+# aggregator never saw it and fell back to assuming dockerd, printing a
 # same-engine measurement under a heading that says "different daemon". The file
 # travels with raw.csv, which is the only thing that can still be read afterwards.
 ENGINE_FILE="$OUT_DIR/engine"
@@ -109,19 +109,19 @@ if command -v docker-compose >/dev/null 2>&1; then
 		TOOLS+=(docker-compose)
 		export BENCH_DOCKER_ENGINE=docker
 		echo docker > "$ENGINE_FILE"
-		echo "note: Docker Engine present — docker-compose measured as a CROSS-ENGINE (whole-stack) run."
+		echo "note: Docker Engine present; docker-compose measured as a CROSS-ENGINE (whole-stack) run."
 	elif [ -n "${DOCKER_HOST:-}" ] && docker-compose ls >/dev/null 2>&1; then
 		TOOLS+=(docker-compose)
 		# Recorded so the report puts these rows under the right heading; the
 		# tool's name does not say which engine it drove.
 		export BENCH_DOCKER_ENGINE=podman
 		echo podman > "$ENGINE_FILE"
-		echo "note: docker-compose driving Podman via DOCKER_HOST — measured as a SAME-ENGINE (pure tool) run."
+		echo "note: docker-compose driving Podman via DOCKER_HOST; measured as a SAME-ENGINE (pure tool) run."
 	else
-		echo "note: docker-compose found but no reachable engine — NOT measured. Set DOCKER_HOST to the Podman socket to include it."
+		echo "note: docker-compose found but no reachable engine; NOT measured. Set DOCKER_HOST to the Podman socket to include it."
 	fi
 else
-	echo "note: docker-compose not installed — NOT measured."
+	echo "note: docker-compose not installed; NOT measured."
 fi
 
 run() { # tool, compose-file, project, op-args...
@@ -209,7 +209,7 @@ for tool in "${TOOLS[@]}"; do
 				parse)
 					# The only op with no engine on the other side: read, interpolate,
 					# merge and re-render. No containers means no daemon variance, so
-					# this is the least noisy number the suite produces — and it is
+					# this is the least noisy number the suite produces, and it is
 					# what CI runs most, to validate a file before deploying it.
 					row config "$(timed "$tool" "$file" "$proj" config)"
 					;;

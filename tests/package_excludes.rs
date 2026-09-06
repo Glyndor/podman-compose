@@ -23,14 +23,14 @@ const PUBLISHED: &[&str] = &["internal"];
 
 /// Top-level directories that carry their own manifest at the top level.
 /// `cargo package` does not descend into a nested package, so these are absent
-/// from the crate whether or not `exclude` names them — which is why adding
+/// from the crate whether or not `exclude` names them, which is why adding
 /// `fuzz` to `exclude` closed nothing when it was tried.
 ///
 /// `bench` is deliberately NOT here. Its manifest is one level down, at
 /// `bench/timeit/Cargo.toml`, so `cargo package` descends into `bench/` and
 /// publishes everything beside that nested package: 30 files, measured. Listing
 /// it here was the first version of this file, and deleting `/bench` from the
-/// manifest left the test green — a control that can be removed without the
+/// manifest left the test green: a control that can be removed without the
 /// test noticing is not a control.
 const NESTED_PACKAGES: &[&str] = &["fuzz"];
 
@@ -85,7 +85,7 @@ fn every_top_level_directory_is_a_decision() {
 
 	// Ask git, not the filesystem. Inside a checkout `cargo package` takes its
 	// file list from git, so an untracked build directory in the working tree is
-	// never published — and reading `read_dir` here would fail the test on every
+	// never published, and reading `read_dir` here would fail the test on every
 	// machine that has one, which is the instrument measuring something other
 	// than the question.
 	let listing = Command::new("git")

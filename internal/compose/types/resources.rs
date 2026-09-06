@@ -1,12 +1,12 @@
 //! Resource limit and device types shared across service and deploy configuration.
 //!
-//! [`UlimitConfig`] maps to the `ulimits:` map — either a single value (soft==hard)
+//! [`UlimitConfig`] maps to the `ulimits:` map: either a single value (soft==hard)
 //! or an explicit soft/hard pair. [`BlkioConfig`] covers block I/O weight and rate
 //! limits. [`GpuSpec`] handles the `gpus:` shorthand (`"all"` or a count).
 
 use serde::{Deserialize, Serialize};
 
-/// `ulimits:` entry — either a single integer (soft == hard) or an explicit `{soft, hard}` pair.
+/// `ulimits:` entry: either a single integer (soft == hard) or an explicit `{soft, hard}` pair.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum UlimitConfig {
@@ -39,7 +39,7 @@ impl UlimitConfig {
 	}
 }
 
-/// `blkio_config:` service field — controls I/O weight and per-device rate limits.
+/// `blkio_config:` service field: controls I/O weight and per-device rate limits.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct BlkioConfig {
 	/// Default block I/O weight for the service (10-1000).
@@ -71,7 +71,7 @@ pub struct BlkioWeightDevice {
 	pub weight: u16,
 }
 
-/// Per-device rate limit under `blkio_config` — used for both bps and iops limits.
+/// Per-device rate limit under `blkio_config`, used for both bps and iops limits.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BlkioRateDevice {
 	/// Host device path the limit applies to.

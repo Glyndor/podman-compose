@@ -3,7 +3,7 @@
 //! Podman enforces an object-name regex (`[a-zA-Z0-9][a-zA-Z0-9_.-]*`) on
 //! volumes, networks, and containers, rejecting anything else with an opaque
 //! HTTP 500 ("names must match …"). [`Engine::validate_object_names`] applies
-//! the same check up front — before a single create is issued — so a bad name
+//! the same check up front, before a single create is issued, so a bad name
 //! (typically an explicit `name:` on a top-level volume/network, or an explicit
 //! `container_name:`) surfaces as a clear error naming the offending object,
 //! and nothing is created.

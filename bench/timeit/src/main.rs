@@ -1,12 +1,12 @@
 //! Times one command for the benchmark harness.
 //!
-//! Prints a single line — `wall_s max_rss_kb cpu_s rc` — which `bench/run.sh`
+//! Prints a single line (`wall_s max_rss_kb cpu_s rc`) which `bench/run.sh`
 //! appends to `raw.csv` in that field order.
 //!
 //! This replaces `/usr/bin/time -v`, whose `Elapsed` field is `h:mm:ss.SS`. At
 //! hundredths of a second the two fastest rows in the suite (`running-ops ps`
 //! and `config-heavy config`, both under 10 ms) published as `0.000`, while
-//! `raw.csv` stored them as `%.6f` seconds — precision the instrument did not
+//! `raw.csv` stored them as `%.6f` seconds, precision the instrument did not
 //! have.
 //!
 //! Everything else about the measurement is unchanged. `ru_maxrss` is already
@@ -33,7 +33,7 @@
 //! to `/proc/self/clear_refs` in the child before the exec does not help: the
 //! child's resident set at that moment is still the interpreter's.
 //!
-//! The same run showed the interpreter inflating the clock on short commands —
+//! The same run showed the interpreter inflating the clock on short commands:
 //! `/bin/true` timed at 1.0 ms through `posix_spawnp` against 0.50 ms here.
 //!
 //! Usage: `timeit COMMAND [ARG...]`

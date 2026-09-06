@@ -29,8 +29,8 @@ in who owns the containers, and in whether the boot path reconciles.
 
 | Mode | What it installs | Choose it when |
 |---|---|---|
-| `service` (default) | One `Type=oneshot` unit that runs `podup up -d` at boot and `podup stop` on shutdown. | You want the whole stack managed as a unit, the simplest option — one thing to enable, one to remove. |
-| `quadlet` | One native Podman Quadlet unit per service (`.container`/`.build`/`.volume`/`.network`), which systemd owns directly. | You want per-container supervision — systemd restarts, ordering and status for each service independently. |
+| `service` (default) | One `Type=oneshot` unit that runs `podup up -d` at boot and `podup stop` on shutdown. | You want the whole stack managed as a unit, the simplest option: one thing to enable, one to remove. |
+| `quadlet` | One native Podman Quadlet unit per service (`.container`/`.build`/`.volume`/`.network`), which systemd owns directly. | You want per-container supervision: systemd restarts, ordering and status for each service independently. |
 | `start` | One `Type=oneshot` unit whose `ExecStart` is `podman start`. Single-service projects only. | You want the boot to resume the container that already exists, with nothing else on the path. |
 
 ### Reconcile or restore
@@ -68,7 +68,7 @@ container was created, a boot would resume the old configuration. `podup` compar
 the container's `podup.config-hash` label against what the file renders and refuses
 to install over a mismatch, or over a container that does not exist yet.
 
-That check runs when you install, because there is no `podup` at boot to run it —
+That check runs when you install, because there is no `podup` at boot to run it,
 which is the point of the mode, and therefore also its limit. Editing the compose
 file after installing leaves the unit starting the old container silently. Run
 `podup up -d` after any change to the file, exactly as you would to deploy it.
@@ -120,7 +120,7 @@ the feature existed. The timer pair only appears when the flag is given, and
 `uninstall` detects which mode is installed and removes that one; you never pass
 `--mode` to it. `rebuild` applies to quadlet mode: a Quadlet `.build` unit is
 `Type=oneshot`, so an image only rebuilds when its build service is restarted, and
-the container is then restarted to pick it up. Service mode has no `rebuild` — it
+the container is then restarted to pick it up. Service mode has no `rebuild`; it
 builds at deploy time, whenever you run `podup up`.
 
 ## Why `--user` and `default.target`
@@ -182,7 +182,7 @@ the shim as present in exactly the case it is missing.
 ## Running `systemctl --user` for a login-less account
 
 An isolated service account has no login shell, so you cannot open a session for
-it — `su - appuser` and `machinectl shell appuser@` both bounce, because they try
+it: `su - appuser` and `machinectl shell appuser@` both bounce, because they try
 to launch a login shell that does not exist. With no session there is no D-Bus
 session bus, and `systemctl --user` without a bus fails:
 
@@ -213,10 +213,10 @@ a non-login SSH command has no runtime dir set, so export it before running
 For a dedicated service account the account itself needs the usual rootless
 Podman groundwork, done once:
 
-- **Subordinate UID/GID ranges** — rootless Podman maps container users into the
+- **Subordinate UID/GID ranges.** Rootless Podman maps container users into the
   host user's subordinate ranges. Ensure the account has entries in
   `/etc/subuid` and `/etc/subgid` (e.g. `appuser:100000:65536`).
-- **`podman system migrate` as the user** — run it **as the account**, never via
+- **`podman system migrate` as the user.** Run it **as the account**, never via
   `sudo` as root, so the migration writes the account's own storage config rather
   than root's:
 
@@ -225,7 +225,7 @@ Podman groundwork, done once:
        podman system migrate
   ```
 
-- **The Podman API socket** — `podman` is daemonless and needs no socket, so a
+- **The Podman API socket.** `podman` is daemonless and needs no socket, so a
   fresh account can run `podman` fine and still have every `podup` command fail
   with a connection error. podup speaks the libpod API, so the socket has to be
   listening:

@@ -58,7 +58,7 @@ fn directories_needing_an_entry() -> Vec<String> {
 
 	// Anchored to the `[workspace]` table on purpose. `Cargo.toml` carries a
 	// second `exclude`, under `[package]`, listing what `cargo package` leaves
-	// out of the crate archive — and the file says so in a comment right above
+	// out of the crate archive, and the file says so in a comment right above
 	// it: "Not to be confused with `[workspace] exclude`". Matching the first
 	// `exclude` in the file finds that one, whose entries are not crates, so the
 	// derived list comes back as just `/` and the coverage test passes by having
@@ -118,11 +118,11 @@ fn every_cargo_lockfile_has_a_dependabot_entry() {
 	// least the entry for it.
 	assert!(
 		present.contains(&"/".to_string()),
-		"no workspace entry derived — the scanner is reading the wrong tree: {present:?}"
+		"no workspace entry derived; the scanner is reading the wrong tree: {present:?}"
 	);
 	// The floor that matters, and the one the first version of this test did not
 	// have. `Cargo.toml` excludes two crates, so a derived list of just `/` means
-	// the parser broke rather than that there is nothing to cover — and with
+	// the parser broke rather than that there is nothing to cover, and with
 	// nothing to cover, the comparison below passes while checking nothing. That
 	// is exactly how the first version passed against the wrong `exclude` key.
 	assert!(
@@ -133,14 +133,14 @@ fn every_cargo_lockfile_has_a_dependabot_entry() {
 	);
 	assert!(
 		declared.contains(&"/".to_string()),
-		"no cargo entry for / — the parser is not reading dependabot.yml: {declared:?}"
+		"no cargo entry for /; the parser is not reading dependabot.yml: {declared:?}"
 	);
 
 	let missing: Vec<&String> = present.iter().filter(|d| !declared.contains(d)).collect();
 	assert!(
 		missing.is_empty(),
 		"these crates are excluded from the workspace, so they carry their own Cargo.lock, \
-		 and no Dependabot cargo entry names them — nothing ever updates them: {missing:?}. \
+		 and no Dependabot cargo entry names them, so nothing ever updates them: {missing:?}. \
 		 Declared: {declared:?}"
 	);
 }

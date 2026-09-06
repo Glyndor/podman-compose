@@ -8,7 +8,7 @@
 //!
 //! Both are configurable, and the defaults belong to the caller rather than to
 //! this module: a table cell has a width budget a summary line does not, and
-//! the right base depends on what the reader is comparing against — podman and
+//! the right base depends on what the reader is comparing against: podman and
 //! docker print decimal, while `free` and `htop` are binary.
 
 mod bytes;

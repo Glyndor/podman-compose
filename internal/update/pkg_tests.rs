@@ -28,7 +28,7 @@ fn the_configuration_our_keyring_writes_reads_as_permitted() {
 
 /// The case the first draft of this check would have got wrong. The package's
 /// own README documents `Allowed-Origins` **or** `Origins-Pattern`, so an
-/// operator using the second is covered — and a check that knew only about
+/// operator using the second is covered, and a check that knew only about
 /// the first would have told them nothing will ever update them while their
 /// machine updated itself fine.
 #[test]
@@ -200,7 +200,7 @@ fn test_binary_is_not_package_managed() {
 /// #1360 (L10): `dpkg-query` is the only source of truth for whether apt
 /// owns the running binary. The previous implementation fell back to
 /// reading `/var/lib/dpkg/info/*.list` directly when `dpkg-query` could
-/// not be spawned — a directory owned by another package, with no mode
+/// not be spawned: a directory owned by another package, with no mode
 /// or ownership guarantees. The fix is fail-closed: when `dpkg-query` is
 /// unavailable, report `false` and skip the scan entirely. We exercise
 /// the `Err` arm by removing `dpkg-query` from PATH via

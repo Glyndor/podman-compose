@@ -56,7 +56,7 @@ pub(super) fn ignored_service_fields(file: &ComposeFile, out: &mut Vec<String>) 
 	}
 }
 
-/// Top-level `models:` (Compose v2.38) — podup runs no model runner, so any
+/// Top-level `models:` (Compose v2.38): podup runs no model runner, so any
 /// declared model is parsed for fidelity but not honored.
 pub(super) fn ignored_models(file: &ComposeFile, out: &mut Vec<String>) {
 	for name in file.models.keys() {
@@ -85,8 +85,8 @@ pub(super) fn ignored_port_fields(file: &ComposeFile, out: &mut Vec<String>) {
 /// compose-spec short form (`"5432:5432"`) and the long form with no
 /// `host_ip` both bind on all interfaces, which exposes services the
 /// operator thought were local-only (databases, admin UIs) to anything
-/// reachable on the host's network. An explicit `host_ip` — including
-/// `0.0.0.0` — is a decision taken and is not flagged, so flagging it
+/// reachable on the host's network. An explicit `host_ip`, including
+/// `0.0.0.0`, is a decision taken and is not flagged, so flagging it
 /// would only train the reader to ignore the warning.
 pub(super) fn port_published_on_all_interfaces(file: &ComposeFile, out: &mut Vec<String>) {
 	for (service, def) in &file.services {
@@ -269,9 +269,9 @@ pub(super) fn ignored_service_network_fields(file: &ComposeFile, out: &mut Vec<S
 }
 
 /// Top-level secret/config driver fields. An external secret-store driver
-/// (Vault, AWS SM, etc.) on a non-`external` definition is not honored — podup
+/// (Vault, AWS SM, etc.) on a non-`external` definition is not honored: podup
 /// only stages `file`/`content`/`environment` sources and routes `external:
-/// true` to Podman-native secrets — so warn rather than mount nothing silently.
+/// true` to Podman-native secrets, so warn rather than mount nothing silently.
 pub(super) fn ignored_secret_config_drivers(file: &ComposeFile, out: &mut Vec<String>) {
 	for (name, cfg) in &file.secrets {
 		if cfg.external != Some(true) {

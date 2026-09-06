@@ -168,7 +168,7 @@ impl Engine {
 				failed += 1;
 			}
 			// `build.tags` is locally retagged by `apply_extra_tags` after the
-			// build. Push each one too — the registry would otherwise end up
+			// build. Push each one too; the registry would otherwise end up
 			// with only the primary `image`, and the other refs a user expects
 			// to deploy would never be published (#1476).
 			if let Some(build) = &service.build {
@@ -218,7 +218,7 @@ impl Engine {
 	///
 	/// The two user-facing lines go through `ui::progress_line`, not `tracing`.
 	/// They were `info!` until #1248, and the CLI floors tracing at `warn`
-	/// everywhere except `watch` — so a successful `podup push` wrote **zero
+	/// everywhere except `watch`, so a successful `podup push` wrote **zero
 	/// bytes** to stdout and stderr while the image really did land in the
 	/// registry, and `--quiet` suppressed output that never appeared. Routing
 	/// through the progress layer also honours `PROGRESS_ENABLED`, which is the

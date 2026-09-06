@@ -5,13 +5,13 @@
 //! service's image acquisition does not even begin until every level-1 service
 //! is fully up. This stage collects every image the upcoming `up`/`create` pass will
 //! pull and warms the local Podman cache for all of them up front,
-//! concurrently, before the first level barrier — instead of one at a time as
+//! concurrently, before the first level barrier, instead of one at a time as
 //! each level's services reach their turn.
 //!
 //! Best-effort only for prefetch *misses*: an unreachable socket or a registry
 //! that 500s is logged at debug and otherwise swallowed. `up_one_service`'s
 //! own pull call is unchanged and remains the sole source of a real pull
-//! failure — this stage can only make `up` faster, never change whether it
+//! failure: this stage can only make `up` faster, never change whether it
 //! succeeds.
 //!
 //! An invalid `pull_policy:` (or `--pull`) is **not** a prefetch miss. It is
@@ -50,7 +50,7 @@ impl Engine {
 		target_set: &Option<HashSet<String>>,
 	) -> Result<()> {
 		// One representative service per unique image reference is enough to
-		// issue the pull — this is what dedupes 50 services on one image down
+		// issue the pull; this is what dedupes 50 services on one image down
 		// to a single request instead of 50. The service *name* travels with
 		// the representative so the pull / policy error can name it, instead
 		// of using the image as a stand-in for the originating service.
@@ -92,13 +92,13 @@ impl Engine {
 				Ok(p) => p,
 				// Propagate the validation error out of the prefetch join via a
 				// shared poison cell. The prefetch stage itself is best-effort
-				// for *I/O*, but a configuration error must surface loud — the
+				// for *I/O*, but a configuration error must surface loud: the
 				// outer `join_bounded` join collapses every concurrent task into
 				// one result, and there is no other channel back (#1443).
 				Err(e) => return Err(e),
 			};
 			// `missing` (and its aliases, already normalized by
-			// `pull_policy_checked`) only pulls when the image is absent —
+			// `pull_policy_checked`) only pulls when the image is absent, so
 			// checking first turns a warm cache into a cheap presence check
 			// instead of a redundant pull request. `always`/`newer` mean to
 			// hit the registry regardless, so skip the check and prefetch
@@ -108,7 +108,7 @@ impl Engine {
 				// Record what this check just observed, so the per-service pull
 				// site does not repeat it: without this the stage returns having
 				// learned the image is here, and `acquire_service_image` pulls it
-				// once per service anyway — 42 of the 88 requests a 42-service
+				// once per service anyway: 42 of the 88 requests a 42-service
 				// warm `up` used to issue.
 				//
 				// Not recorded for a service pinning `platform:`. Presence is
@@ -126,7 +126,7 @@ impl Engine {
 			// own pull below is the authoritative one. Reporting from both is
 			// what made `Pulling` appear twice per image on `up` while a
 			// standalone `pull` printed it once. A prefetch I/O miss is still
-			// debug-only — only the validation error above escapes.
+			// debug-only; only the validation error above escapes.
 			if let Err(e) = self.pull_image_quietly(name, service).await {
 				tracing::debug!("prefetch miss for {image}: {e}");
 			}

@@ -32,17 +32,17 @@ pub(super) fn collect_var_name(chars: &mut std::iter::Peekable<std::str::Chars<'
 #[derive(Debug)]
 pub(super) enum Modifier {
 	None,
-	/// `${VAR:-default}` — use default if unset or empty
+	/// `${VAR:-default}`: use default if unset or empty
 	DefaultIfUnsetOrEmpty(String),
-	/// `${VAR-default}` — use default if unset (empty value is OK)
+	/// `${VAR-default}`: use default if unset (empty value is OK)
 	DefaultIfUnset(String),
-	/// `${VAR:+value}` — use value if set and non-empty
+	/// `${VAR:+value}`: use value if set and non-empty
 	AltIfSetAndNonEmpty(String),
-	/// `${VAR+value}` — use value if set (even if empty)
+	/// `${VAR+value}`: use value if set (even if empty)
 	AltIfSet(String),
-	/// `${VAR:?error}` — error if unset or empty
+	/// `${VAR:?error}`: error if unset or empty
 	ErrorIfUnsetOrEmpty(String),
-	/// `${VAR?error}` — error if unset
+	/// `${VAR?error}`: error if unset
 	ErrorIfUnset(String),
 }
 

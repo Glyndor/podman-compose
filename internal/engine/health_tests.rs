@@ -28,7 +28,7 @@ fn poll_plan_uses_interval_and_honors_start_period() {
 
 /// A sub-second interval used to be discarded and replaced by the 2s
 /// default, so asking for 500ms polling produced *slower* polling than
-/// asking for 1s — the opposite of the request (#1147). It is honoured now,
+/// asking for 1s, the opposite of the request (#1147). It is honoured now,
 /// with a floor so `10ms` cannot become a hundred check executions a second.
 #[test]
 fn poll_plan_honours_a_sub_second_interval() {

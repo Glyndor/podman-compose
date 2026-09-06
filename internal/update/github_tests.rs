@@ -1,6 +1,6 @@
 use super::*;
 
-/// A reader that yields zero bytes forever — used to exercise the cap.
+/// A reader that yields zero bytes forever, used to exercise the cap.
 struct Endless;
 impl Read for Endless {
 	fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -69,7 +69,7 @@ fn latest_version_maps_transport_error() {
 	// https so the request reaches a socket. Port 1 is closed, so the failure
 	// is a connection refusal: offline, deterministic, and genuinely the
 	// transport path this test is named for. An http base would never get
-	// that far — the agent rejects the scheme first, which is what this test
+	// that far: the agent rejects the scheme first, which is what this test
 	// used to measure while claiming to measure the socket.
 	use crate::update::ReleaseSource;
 	let src = GitHubSource::with_bases(REPO, "https://127.0.0.1:1", "https://127.0.0.1:1");

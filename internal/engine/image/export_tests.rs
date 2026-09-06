@@ -78,7 +78,7 @@ fn io_to_err_with_output_path_wraps_as_iopath() {
 	let e = Error::new(ErrorKind::PermissionDenied, "denied");
 	let mapped = io_to_err(&Some(p.clone()), e);
 
-	// The variant must be IoPath with the path attached — a bare
+	// The variant must be IoPath with the path attached; a bare
 	// `ComposeError::Io(_)` would drop the destination the user just
 	// asked us to write to, and is the regression this variant exists to
 	// prevent.

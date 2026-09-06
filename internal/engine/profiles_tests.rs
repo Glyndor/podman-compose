@@ -76,7 +76,7 @@ fn retain_active_profiles_keeps_unprofiled_and_active() {
 		debugger:\n    image: x\n    profiles: [debug]\n  \
 		db:\n    image: x\n    profiles: [prod]\n";
 	// With `debug` active: the unprofiled `web` and the `debug` service stay,
-	// the `prod`-only `db` is dropped — exactly what `up --profile debug` runs.
+	// the `prod`-only `db` is dropped, exactly what `up --profile debug` runs.
 	let mut file = crate::parse_str(yaml).unwrap();
 	retain_active_profiles(&mut file, &["debug".to_string()]);
 	assert!(file.services.contains_key("web"));
@@ -114,7 +114,7 @@ fn wildcard_enables_all_profiles() {
 #[test]
 fn implicit_activation_keeps_profiled_dependency() {
 	// `app` (active) depends on `db` (profiles: [storage]). With no profile
-	// active, `db` is implicitly enabled so `app` keeps a satisfiable dep —
+	// active, `db` is implicitly enabled so `app` keeps a satisfiable dep:
 	// no dangling reference, matching docker compose.
 	let yaml = "services:\n  \
 		app:\n    image: x\n    depends_on: [db]\n  \
@@ -147,7 +147,7 @@ fn implicit_activation_is_transitive() {
 
 #[test]
 fn unrelated_profiled_service_still_dropped() {
-	// Implicit activation only reaches dependencies — an unrelated profiled
+	// Implicit activation only reaches dependencies; an unrelated profiled
 	// service is still removed.
 	let yaml = "services:\n  \
 		app:\n    image: x\n    depends_on: [db]\n  \
@@ -166,7 +166,7 @@ fn enabled_set_activates_profiled_dependency_for_up() {
 	// The `up`/`create` lifecycle path consults this set directly. `app`
 	// (unprofiled, started) depends on `db` (profiles: [storage]). With no
 	// profile active, `db` must be in the enabled set so `up` actually
-	// creates it — otherwise `app` runs with an unsatisfied dependency.
+	// creates it; otherwise `app` runs with an unsatisfied dependency.
 	let yaml = "services:\n  \
 		app:\n    image: x\n    depends_on: [db]\n  \
 		db:\n    image: x\n    profiles: [storage]\n";
@@ -182,7 +182,7 @@ fn enabled_set_activates_profiled_dependency_for_up() {
 
 #[test]
 fn enabled_set_excludes_unrelated_profiled_service() {
-	// Only dependencies are pulled in — an unrelated profiled service stays
+	// Only dependencies are pulled in; an unrelated profiled service stays
 	// out of the started set, so `up` does not over-activate it.
 	let yaml = "services:\n  \
 		app:\n    image: x\n    depends_on: [db]\n  \

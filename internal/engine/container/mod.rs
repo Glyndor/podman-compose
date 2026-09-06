@@ -52,7 +52,7 @@ impl Engine {
 		let image: &str = if let Some(img) = service.image.as_deref() {
 			img
 		} else if let Some(build) = service.build.as_ref() {
-			// No `image:` — reference the exact tag the build step produced for this
+			// No `image:`, so reference the exact tag the build step produced for this
 			// build-only service (project-scoped `{project}-{service}:latest`, or
 			// the first `build.tags` entry). Must stay in lockstep with
 			// `primary_build_tag`, or `up --build` creates the container against a
@@ -77,7 +77,7 @@ impl Engine {
 			})
 			.collect();
 
-		// Every secret/config source — inline, `file:` and `external: true` — is
+		// Every secret/config source (inline, `file:` and `external: true`) is
 		// injected as a Podman-native secret, never a bind mount. The ones podup
 		// owns are created up front by `create_project_secrets`; here we only build
 		// the references and preflight external ones for existence.
@@ -206,7 +206,7 @@ impl Engine {
 		// Surface every active host-binding / privilege-escalation mode the
 		// compose file declared. The warning is emitted *before* the spec is
 		// POSTed so a host-mode the operator did not intend never reaches the
-		// daemon — the log line is the only signal they get, and it has to
+		// daemon: the log line is the only signal they get, and it has to
 		// arrive before the API call succeeds. `--no-warn` is the escape
 		// hatch for operators who wrote the compose file deliberately.
 		if !self.no_warn {

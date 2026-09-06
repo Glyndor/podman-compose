@@ -8,7 +8,7 @@ mod parts;
 pub use parts::*;
 
 // ---------------------------------------------------------------------------
-// SpecGenerator — container create request
+// SpecGenerator: container create request
 // ---------------------------------------------------------------------------
 
 /// Full container specification sent to `POST /libpod/containers/create`.

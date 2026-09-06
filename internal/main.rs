@@ -1,4 +1,4 @@
-//! `podup` — docker-compose to Podman translator CLI.
+//! `podup` is the docker-compose to Podman translator CLI.
 
 // The binary carries no `unsafe`; deny it so any future addition is caught.
 #![deny(unsafe_code)]
@@ -73,7 +73,7 @@ fn run_to_exit() {
 	// Shut the runtime down without waiting for its blocking pool. An
 	// interactive exec/run always leaves one stdin read in flight there
 	// (tokio's stdin reads on a blocking thread), and a plain drop waits for
-	// it — so a session that ended with code 0 hung until the next keypress,
+	// it, so a session that ended with code 0 hung until the next keypress,
 	// while any other code left through `process::exit` below and never
 	// noticed (#1161). Everything user-visible is written and flushed by the
 	// time `block_on` returns.
@@ -150,7 +150,7 @@ fn down_by_label_path(command: &Commands, project: Option<&str>, compose_present
 }
 
 /// Orchestrate one CLI invocation: parse args, then short-circuit the commands
-/// that need neither a compose file nor (for some) Podman — `completions`,
+/// that need neither a compose file nor (for some) Podman: `completions`,
 /// `update`, `ls`, `ps`, and `config`. Otherwise resolve and parse the compose
 /// file(s), settle the project name and base directory (validating the name at
 /// the trust boundary), acquire the per-project lock, and dispatch the
@@ -229,7 +229,7 @@ async fn run() -> podup::Result<()> {
 		// The compose-only global value-flags (--socket/--profile/--env-file/
 		// --project-directory) never reach the binary-only self-update, so accepting
 		// them silently is a misleading no-op. Reject any that were passed on the
-		// command line (env-sourced values are left alone — they are not a misuse).
+		// command line (env-sourced values are left alone; they are not a misuse).
 		if let Some(flag) = misused_update_global() {
 			use clap::CommandFactory;
 			Cli::command()
@@ -361,7 +361,7 @@ async fn run() -> podup::Result<()> {
 	let compose_files = resolve_compose_files(&cli.file);
 
 	// `down -p NAME` must tear a running project down purely from its
-	// `podup.project` label when no compose file is present — matching `docker
+	// `podup.project` label when no compose file is present, matching `docker
 	// compose -p NAME down`. The startup flow otherwise parses the compose file
 	// before dispatch, so a label-only teardown by project name fails on the
 	// missing file. Handle it here, before that parse, but only when an explicit
@@ -420,7 +420,7 @@ async fn run() -> podup::Result<()> {
 		}
 	);
 	// `events` and `ps` are scoped purely by the `podup.project` label and never
-	// read service definitions, so — like `docker compose -p NAME events`/`ps` —
+	// read service definitions, so, like `docker compose -p NAME events`/`ps`,
 	// they must work against a running project even when no compose file is
 	// present. Tolerate a missing file for these label-only commands by falling
 	// back to an empty compose model; any other parse error (a malformed file
@@ -565,7 +565,7 @@ async fn run() -> podup::Result<()> {
 
 	// `autostart` manages a rootless `systemctl --user` unit that brings the stack
 	// up at boot. Like `generate` it works from the compose file alone and never
-	// contacts Podman — except `uninstall --purge`, which tears the stack's volumes
+	// contacts Podman, except `uninstall --purge`, which tears the stack's volumes
 	// down and so connects only in that branch.
 	if let Commands::Autostart { kind } = &cli.command {
 		let env = autostart_cmd::AutostartEnv {

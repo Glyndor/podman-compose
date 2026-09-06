@@ -22,7 +22,7 @@ fn no_healthcheck_emits_nothing() {
 fn disabled_healthcheck_emits_none() {
 	let (body, warnings) = render("image: x\nhealthcheck:\n  disable: true\n");
 	assert!(body.contains("HealthCmd=none"));
-	// A disabled check short-circuits — no timing keys follow.
+	// A disabled check short-circuits, so no timing keys follow.
 	assert!(!body.contains("HealthInterval"));
 	assert!(warnings.is_empty());
 }

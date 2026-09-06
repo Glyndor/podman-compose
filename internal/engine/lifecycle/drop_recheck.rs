@@ -3,7 +3,7 @@
 //! The transport cannot answer it. A libpod call that is severed before its
 //! response completes looks identical whether the operation ran or not (#1104),
 //! and on Podman 6 under concurrency that happens on exactly the state-changing
-//! calls — `exec`, `restart`, `stop`, container `DELETE` — after a slow one
+//! calls (`exec`, `restart`, `stop`, container `DELETE`) after a slow one
 //! (#1339). It is not a client deadline and not a pooled-connection race; both
 //! were ruled out by measurement.
 //!
@@ -18,15 +18,15 @@ use crate::libpod::API_PREFIX;
 /// What a lifecycle operation was trying to achieve.
 ///
 /// The transport cannot say whether a dropped response means the operation
-/// failed or completed and lost only its reply — the two are indistinguishable
+/// failed or completed and lost only its reply; the two are indistinguishable
 /// at HTTP (#1104). This names the observable that answers it out of band.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum LifecycleGoal {
-	/// `start`, `restart` — the container should be running afterwards.
+	/// `start`, `restart`: the container should be running afterwards.
 	Running,
-	/// `kill`, `stop` — the container should not be running afterwards.
+	/// `kill`, `stop`: the container should not be running afterwards.
 	NotRunning,
-	/// `rm` — the container should not exist afterwards. Distinct from
+	/// `rm`: the container should not exist afterwards. Distinct from
 	/// [`Self::NotRunning`]: a stopped-but-present container satisfies that one
 	/// and would read a failed removal as a success.
 	Gone,
@@ -34,11 +34,11 @@ pub(super) enum LifecycleGoal {
 
 impl LifecycleGoal {
 	/// Whether libpod's `State` satisfies this goal. `None` means the container
-	/// no longer exists — which reaches `NotRunning` and `Gone`, and fails
+	/// no longer exists, which reaches `NotRunning` and `Gone`, and fails
 	/// `Running`.
 	///
 	/// The state field is currently always lowercase (validated against
-	/// `libpod/define/containerstate.go::ContainerStatus.String()` — returns
+	/// `libpod/define/containerstate.go::ContainerStatus.String()`, which returns
 	/// `"unknown"|"created"|...|"stopping"`) but the test is case-insensitive so
 	/// a future libpod returning `Running` or `RUNNING` does not produce a
 	/// false negative (#1369).
@@ -56,7 +56,7 @@ impl Engine {
 	/// Decide whether an operation whose response was dropped actually landed.
 	///
 	/// Shared by every state-changing call that can lose its reply, so they
-	/// cannot drift into different answers to the same question — the way the
+	/// cannot drift into different answers to the same question, the way the
 	/// lane's retry list and its flake counter drifted apart in #1104.
 	///
 	/// Success requires the container to have reached `goal`. Both other shapes

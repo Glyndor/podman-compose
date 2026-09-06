@@ -40,8 +40,8 @@ fn install_at_replaces_contents() {
 ///
 /// `write_temp` copies the target's permissions so an install keeps whatever
 /// mode the operator chose, and masks with `& 0o777` on the way. Without the
-/// mask, a target that had been made setuid — by tampering, or by an
-/// operator who did it on purpose once — would hand the freshly installed
+/// mask, a target that had been made setuid (by tampering, or by an
+/// operator who did it on purpose once) would hand the freshly installed
 /// podup the same bit, on a binary that has just been fetched over the
 /// network. That is a privilege-escalation footgun, and it is the one
 /// property of this function a test can actually observe.
@@ -134,7 +134,7 @@ fn install_at_fails_when_target_dir_is_missing() {
 	assert!(!missing.exists(), "must not create the missing parent dir");
 }
 /// #1360 (L5): the L5 swap window. The previous in-memory `Vec<u8>` backup
-/// was one-shot — a kill between the swap and the self-test dropped the
+/// was one-shot: a kill between the swap and the self-test dropped the
 /// in-memory copy and the user was left without a working binary. The
 /// fix is `move_target_aside` before the swap: the `.old` sibling survives
 /// any kill in the window, so the self-test has a recoverable copy on disk.
@@ -192,7 +192,7 @@ fn restore_from_backup_round_trips_the_old_binary() {
 fn move_target_aside_is_a_no_op_when_the_target_does_not_exist() {
 	let dir = tempfile::tempdir().unwrap();
 	let target = dir.path().join("podup");
-	// No target to begin with — the move-aside must still return a
+	// No target to begin with, so the move-aside must still return a
 	// backup path (the caller always has a place to roll back to / from).
 	let backup = move_target_aside(&target).expect("the move-aside must succeed");
 	assert!(
@@ -207,7 +207,7 @@ fn move_target_aside_is_a_no_op_when_the_target_does_not_exist() {
 /// target is replaced atomically. The L5 swap path adds a `move_target_aside`
 /// *before* `install_at`, but the public surface (`install_at`) is the
 /// building block tested here. The new `.old` sibling should not leak
-/// to a directory that did not previously have one — the `.old` belongs
+/// to a directory that did not previously have one: the `.old` belongs
 /// to the L5 caller, not to `install_at`.
 #[test]
 fn install_at_does_not_leave_an_old_sibling() {
@@ -218,7 +218,7 @@ fn install_at_does_not_leave_an_old_sibling() {
 	let old_sibling = dir.path().join("podup.old");
 	assert!(
 		!old_sibling.exists(),
-		"install_at must not create a .old sibling — that is the L5 caller's job"
+		"install_at must not create a .old sibling; that is the L5 caller's job"
 	);
 }
 /// #1367 (L5): the chmod-0000 case the issue's test plan calls out. A binary
@@ -244,7 +244,7 @@ fn install_binary_rolls_back_when_the_target_is_unreadable() {
 	std::fs::write(&target, b"the new binary").unwrap();
 	std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o000)).unwrap();
 
-	// Spawning a chmod-0000 file is a hard PermissionDenied — the self-test
+	// Spawning a chmod-0000 file is a hard PermissionDenied: the self-test
 	// must surface that as a failure, and the rollback must restore the
 	// previous binary. Mirrors the real `install_binary` failure path.
 	let err = self_test(&target, "9.9.9").expect_err("a chmod-0000 binary must fail its self-test");
@@ -292,16 +292,16 @@ fn self_test_passes_for_a_zero_exit_and_fails_otherwise() {
 }
 /// The classification that silently did not work.
 ///
-/// A real executable held open for writing cannot be run — the kernel
-/// returns ETXTBSY — so this produces the genuine errno rather than a
+/// A real executable held open for writing cannot be run (the kernel
+/// returns ETXTBSY) so this produces the genuine errno rather than a
 /// hand-built error, and asserts the predicate the retry depends on. The
 /// previous version of this check ran on an error already formatted into a
 /// `String`, where the errno no longer exists: it returned false every time,
 /// the retry never fired, and the flake it was written to prevent stayed.
 ///
 /// Linux only, deliberately. Whether a given kernel refuses to exec a file
-/// held open for writing — and for a script, whether the check lands on the
-/// script or on its interpreter — is that kernel's business, verified on
+/// held open for writing, and for a script whether the check lands on the
+/// script or on its interpreter, is that kernel's business, verified on
 /// Linux. Asserting it elsewhere tests the platform rather than the
 /// classifier, and writing the test so it passes vacuously where ETXTBSY
 /// never fires would repeat the mistake this whole change is about. The
@@ -337,7 +337,7 @@ fn a_binary_open_for_writing_is_classified_as_text_file_busy() {
 fn self_test_rejects_a_version_mismatch() {
 	let dir = tempfile::tempdir().unwrap();
 	// A genuinely-signed but *older* replayed release exits 0 yet reports the
-	// wrong version — the rollback gate must reject it.
+	// wrong version, so the rollback gate must reject it.
 	let p = write_stub(
 		dir.path(),
 		"older",

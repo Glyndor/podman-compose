@@ -117,16 +117,16 @@ jobs:
       # A script invoked as `./path` needs the executable bit recorded IN GIT.
       # `chmod +x` in a working tree is local state; the mode git stores is what
       # reaches the runner, and when it disagrees the job dies with exit 126 and
-      # "Permission denied" — a message about the file, not about the mode, which
+      # "Permission denied", a message about the file, not about the mode, which
       # is why it costs a round trip to diagnose every time.
       #
       # This happened twice in one day in Glyndor/apt (2026-08-23): once on
       # scripts/build-installers.sh, once on tests/build-installers.test.sh.
       #
-      # Deliberately narrow. It does NOT assert that every `.sh` is 0755 — that
+      # Deliberately narrow. It does NOT assert that every `.sh` is 0755; that
       # would be wrong. `apt/scripts/install-template.sh` is a template that is
       # read and substituted, never executed, and is correctly 0644; and repos
-      # that invoke their scripts as `bash path` (podup, helmly, unitpm — 21
+      # that invoke their scripts as `bash path` (podup, helmly, unitpm, with 21
       # non-executable scripts between them) have nothing to fix. The check is
       # derived from how the workflows actually call each script, so a repo that
       # never uses `./path` finds nothing and passes.

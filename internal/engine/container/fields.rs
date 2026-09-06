@@ -198,9 +198,9 @@ pub(super) enum SanitizeError {
 /// Sanitize a single key/value pair parsed from a `label_file:` line and insert
 /// it into `labels`, enforcing:
 ///
-/// * per-pair constraints on the key — non-empty, no ASCII control characters,
+/// * per-pair constraints on the key: non-empty, no ASCII control characters,
 ///   length ≤ [`MAX_LABEL_KEY_LEN`];
-/// * per-pair constraints on the value — no ASCII control characters, length ≤
+/// * per-pair constraints on the value: no ASCII control characters, length ≤
 ///   [`MAX_LABEL_VALUE_LEN`];
 /// * the per-file entry cap [`MAX_LABEL_FILE_ENTRIES`] on distinct keys.
 ///
@@ -223,7 +223,7 @@ pub(super) fn sanitize_kv_pair(
 	if value.len() > MAX_LABEL_VALUE_LEN || value.chars().any(|c| c.is_control()) {
 		return Err(SanitizeError::InvalidValue);
 	}
-	// Overwrite of an existing key is allowed even at the cap — the cap bounds
+	// Overwrite of an existing key is allowed even at the cap: the cap bounds
 	// the number of distinct keys, not total insertions.
 	if !labels.contains_key(key) && labels.len() >= MAX_LABEL_FILE_ENTRIES {
 		return Err(SanitizeError::TooManyEntries);
@@ -238,7 +238,7 @@ pub(super) fn sanitize_kv_pair(
 /// `podup.config-files` label. A `,` in a path would visually merge with the
 /// next entry when the label is split back on `,`; `%2C` round-trips through
 /// that split unambiguously. Newlines are not produced by `Path::display` on
-/// any supported platform and are left as-is — the libpod JSON encoding would
+/// any supported platform and are left as-is; the libpod JSON encoding would
 /// re-escape them anyway. The underlying `PathBuf` is unaffected: this is a
 /// render-side concern only.
 pub(super) fn encode_path_for_label(path_str: &str) -> String {

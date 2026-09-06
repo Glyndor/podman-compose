@@ -12,7 +12,7 @@ pub(super) fn rootless_caveat_warnings(name: &str, service: &Service) -> Vec<Str
 	let mut out = Vec::new();
 	if service.privileged == Some(true) {
 		out.push(format!(
-			"service \"{name}\": privileged has reduced effect under rootless Podman — a \
+			"service \"{name}\": privileged has reduced effect under rootless Podman: a \
 			container cannot gain more privileges than the user that launched it"
 		));
 	}
@@ -36,13 +36,13 @@ pub(super) fn rootless_caveat_warnings(name: &str, service: &Service) -> Vec<Str
 	}
 	if !service.links.is_empty() {
 		out.push(format!(
-			"service \"{name}\": links has no effect under rootless Podman networking — put the \
+			"service \"{name}\": links has no effect under rootless Podman networking; put the \
 			services on a shared network and reach them by service name instead"
 		));
 	}
 	if !service.external_links.is_empty() {
 		out.push(format!(
-			"service \"{name}\": external_links has no effect under rootless Podman networking — \
+			"service \"{name}\": external_links has no effect under rootless Podman networking; \
 			attach the target container to a shared network and reach it by service name instead"
 		));
 	}

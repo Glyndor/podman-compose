@@ -12,13 +12,13 @@ use std::fmt;
 /// [`ComposeError`] carries a `String`, so any error built on this path is one
 /// `format!` away from putting a secret into a public CI log. Keeping that from
 /// happening was, until this type existed, a property of nobody having written
-/// it — not of anything stopping them.
+/// it, not of anything stopping them.
 ///
 /// So the guarantee is moved into the type. `SecretBytes` implements neither
 /// `Display` nor a derived `Debug`: `format!("{payload}")` does not compile at
 /// all, and `format!("{payload:?}")` prints the length instead of the contents.
 /// Those two are how every message in this module is built, which leaves exactly
-/// one way for the bytes to get out — [`SecretBytes::expose_secret`], named after
+/// one way for the bytes to get out: [`SecretBytes::expose_secret`], named after
 /// the `secrecy` crate's convention so that grepping for it enumerates the
 /// audit surface. It has one caller: the body of the `secrets/create` request.
 pub(super) struct SecretBytes(Vec<u8>);

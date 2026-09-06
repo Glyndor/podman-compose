@@ -405,7 +405,7 @@ impl Serialize for HealthCheckOnFailureAction {
 /// Podman's `define.StartupHealthCheck` embeds `Schema2HealthConfig` and adds a
 /// `Successes` count; the embedded probe fields are flattened to the top level of
 /// the `startupHealthConfig` object with their PascalCase keys (`Test`,
-/// `Interval`, …), which is exactly [`HealthConfig`]'s wire shape — so it is
+/// `Interval`, …), which is exactly [`HealthConfig`]'s wire shape, so it is
 /// reused here via `#[serde(flatten)]`.
 #[derive(Serialize, Default)]
 pub struct StartupHealthCheck {

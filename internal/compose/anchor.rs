@@ -3,7 +3,7 @@
 //! A service pulled in via `include:` or an external `extends: { file: ... }`
 //! carries paths (build context, env_file, bind-mount sources, secret/config
 //! files) that the compose spec resolves relative to the directory of the file
-//! that defined them — not the top-level project directory. The engine resolves
+//! that defined them, not the top-level project directory. The engine resolves
 //! every relative path against a single project base directory, so before such
 //! content is merged we rewrite its relative paths to absolute paths anchored at
 //! the imported file's directory. Absolute paths then pass through the engine's

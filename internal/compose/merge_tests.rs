@@ -88,7 +88,7 @@ fn guard_allows_normal_anchored_file() {
 
 #[test]
 fn guard_rejects_linear_alias_amplification() {
-	// Many references to one anchor — the OOM vector serde_yaml_ng does not bound.
+	// Many references to one anchor: the OOM vector serde_yaml_ng does not bound.
 	let mut yaml = String::from("anchor: &a [x, y, z]\nlist:\n");
 	for _ in 0..(MAX_ALIAS_REFS + 50) {
 		yaml.push_str("  - *a\n");
@@ -140,7 +140,7 @@ fn needs_interp(yaml: &str) -> bool {
 
 #[test]
 fn needs_interp_detects_scalar_key_or_value() {
-	// A `$` in any leaf — including a key — flips the gate to true.
+	// A `$` in any leaf, including a key, flips the gate to true.
 	assert!(!needs_interp("foo: bar"));
 	assert!(needs_interp("foo: $bar"));
 	assert!(needs_interp("$foo: bar"));
@@ -165,7 +165,7 @@ fn needs_interp_ignores_non_string_leaves() {
 /// round-trips through `deserialize_with_merge_interp` with the same
 /// content, and the parent mapping is not rebuilt (no allocations beyond
 /// the original parse). Asserted by counting scalar-string equality
-/// post-interpolation — a rebuild that mutated the document would still
+/// post-interpolation: a rebuild that mutated the document would still
 /// pass equality, so this also pins the no-mutation invariant.
 #[test]
 fn mapping_rebuild_is_skipped_when_nothing_needs_interpolation() {

@@ -62,7 +62,7 @@ async fn ensure_started_tolerates_404_and_304() {
 }
 
 /// #6.3 regression: before this fix, each service's image was pulled inside
-/// `up_one_service`, gated behind the level barrier — so a level-2 service's
+/// `up_one_service`, gated behind the level barrier, so a level-2 service's
 /// pull never even started until level 1 finished. `web depends_on db` puts
 /// db alone in level 1 and web alone in level 2; both images must now be
 /// pulled by the up-front prefetch stage, before the very first container is
@@ -161,8 +161,8 @@ async fn up_creates_and_starts_every_scaled_replica() {
 }
 
 /// A genuine per-replica create/start failure must still surface as `Err`
-/// (not be swallowed into an exit-0 `up`), and — since replicas 1 and 3 both
-/// fail with distinct statuses — the reported error must deterministically be
+/// (not be swallowed into an exit-0 `up`) and, since replicas 1 and 3 both
+/// fail with distinct statuses, the reported error must deterministically be
 /// replica 1's (earliest in the fixed replica-index order `join_bounded`
 /// preserves), never replica 3's, regardless of which one's future actually
 /// completes first. Every replica must still have been attempted: a failing
@@ -214,7 +214,7 @@ async fn up_replica_fanout_surfaces_deterministic_first_error_after_attempting_t
 
 /// The per-replica `no_recreate` skip logic must survive the concurrent
 /// fan-out: an already-present replica is left alone (`ensure_started`, no
-/// create) while its sibling — not yet present — is still created and
+/// create) while its sibling, not yet present, is still created and
 /// started, matching what the pre-parallel serial loop did for each replica
 /// in turn.
 #[tokio::test]

@@ -3,8 +3,8 @@
 //! The rest of the client is connection-per-request through hyper, which is the
 //! right shape for a CLI: send, read, done. An interactive exec is not that
 //! shape. `POST /exec/{id}/start` with a TTY keeps the connection open in both
-//! directions for as long as the command runs — the caller's keystrokes go up
-//! while the command's output comes down — so there is no response to read and
+//! directions for as long as the command runs (the caller's keystrokes go up
+//! while the command's output comes down) so there is no response to read and
 //! return.
 //!
 //! Rather than teach the hyper path to hijack a connection, this writes the
@@ -28,7 +28,7 @@ const MAX_HEAD_BYTES: usize = 16 * 1024;
 /// Bytes written go to the command's stdin; bytes read are its output. With a
 /// TTY the stream is raw (no 8-byte frame headers) because the pty merges
 /// stdout and stderr, which is also why an interactive exec cannot separate
-/// them — the same is true of `podman exec -it`.
+/// them; the same is true of `podman exec -it`.
 #[derive(Debug)]
 pub(crate) struct Hijacked {
 	pub(crate) stream: SocketStream,
@@ -39,7 +39,7 @@ impl Client {
 	///
 	/// Returns once the response head is read, so a rejected exec (404, 409)
 	/// surfaces as an error instead of hanging with the terminal already in raw
-	/// mode — which would leave the user's shell unusable.
+	/// mode, which would leave the user's shell unusable.
 	pub(crate) async fn post_hijack(&self, path: &str, body: &[u8]) -> Result<Hijacked> {
 		let mut stream = SocketStream::connect(&self.socket_path).await?;
 
@@ -114,7 +114,7 @@ async fn read_response_head<S: AsyncRead + Unpin>(stream: &mut S) -> Result<u16>
 
 	let text = String::from_utf8_lossy(&head);
 	let status_line = text.lines().next().unwrap_or_default();
-	// `HTTP/1.1 200 OK` — the code is the second token.
+	// `HTTP/1.1 200 OK`: the code is the second token.
 	status_line
 		.split_whitespace()
 		.nth(1)

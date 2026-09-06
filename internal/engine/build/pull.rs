@@ -104,8 +104,8 @@ impl Engine {
 	/// the engine's pull-policy override (see [`Engine::with_up_overrides`]).
 	///
 	/// Services that agree on every field that shapes the actual pull
-	/// request — the image reference, the *resolved* pull policy (override
-	/// applied), and the platform — pull it once, not once per service. Two
+	/// request (the image reference, the *resolved* pull policy with the
+	/// override applied, and the platform) pull it once, not once per service. Two
 	/// services naming the same image but differing on the resolved policy
 	/// or the platform each get their own pull, so per-service intent (e.g.
 	/// one `never`, one `always`) is never silently collapsed onto whichever
@@ -135,8 +135,8 @@ impl Engine {
 			(false, false) => Some(services.iter().cloned().collect()),
 		};
 
-		// Every service this pull pass covers, in file order — kept so the
-		// per-service reporting loop below stays deterministic — paired with
+		// Every service this pull pass covers, in file order, kept so the
+		// per-service reporting loop below stays deterministic, paired with
 		// the key that determines its actual pull request: the image
 		// reference, the *resolved* pull policy (the `--pull` override
 		// applied ahead of the service's own `pull_policy:`, see
@@ -206,14 +206,14 @@ impl Engine {
 		// Dedup by that key: 50 services agreeing on image, resolved policy
 		// and platform must issue one pull, not 50. Two services naming the
 		// same image with a different resolved policy or platform get their
-		// own key, and so their own pull — one representative service per
+		// own key, and so their own pull; one representative service per
 		// unique key is enough to issue it.
 		let mut representative: HashMap<PullKey<'a>, &'a Service> = HashMap::new();
 		for (_, service, key) in candidates {
 			representative.entry(*key).or_insert(service);
 		}
 
-		// Pull each unique key once, bounded, and record its outcome — the
+		// Pull each unique key once, bounded, and record its outcome: the
 		// same present/error pair the per-service loop used to compute for
 		// itself, now shared by every service that agrees on image, resolved
 		// policy and platform.
@@ -247,7 +247,7 @@ impl Engine {
 			// Presence alone is not success. A stale copy of the image already in
 			// local storage makes the probe pass while the pull actually failed,
 			// so `pull` against an unreachable registry exited 0 and reported
-			// nothing — the same way `up --pull always` did (#1076). The pull
+			// nothing, the same way `up --pull always` did (#1076). The pull
 			// having reported an error is decisive; the probe only covers the
 			// case where it reported nothing and the image still is not there.
 			if present && pull_err.is_none() {
@@ -255,8 +255,8 @@ impl Engine {
 			}
 			if opts.ignore_failures {
 				match &pull_err {
-					Some(e) => tracing::warn!("pull {name} ({image}) failed — ignored: {e}"),
-					None => tracing::warn!("pull {name} ({image}) failed — ignored"),
+					Some(e) => tracing::warn!("pull {name} ({image}) failed, ignored: {e}"),
+					None => tracing::warn!("pull {name} ({image}) failed, ignored"),
 				}
 			} else {
 				let detail = pull_err.map(|e| format!(": {e}")).unwrap_or_default();
@@ -301,7 +301,7 @@ impl Engine {
 	/// value is rejected via [`pull_policy_checked`]. Shared by
 	/// [`Self::pull_image`] and by the standalone-pull fan-out's dedup key
 	/// ([`Self::pull_services_with_options`]), so both agree on exactly the
-	/// same resolved value — an override collapses the dedup (every service
+	/// same resolved value: an override collapses the dedup (every service
 	/// resolves to the same policy), while differing per-service policies
 	/// (no override set) keep it split.
 	///
@@ -323,8 +323,8 @@ impl Engine {
 
 	/// Issue the actual pull request for `service` against an
 	/// already-resolved `pull_policy` (see [`Self::resolved_pull_policy`]).
-	/// Split out of [`Self::pull_image`] so the standalone-pull fan-out —
-	/// which must resolve the policy anyway to compute its dedup key — can
+	/// Split out of [`Self::pull_image`] so the standalone-pull fan-out,
+	/// which must resolve the policy anyway to compute its dedup key, can
 	/// reuse that value instead of resolving (and potentially re-warning
 	/// about an unrecognized one) a second time.
 	async fn pull_image_with_policy(
@@ -341,7 +341,7 @@ impl Engine {
 		// Through the progress layer, not a bare `eprintln!`. This was the one
 		// user-facing line in the binary that bypassed `ui` entirely, so it
 		// ignored `PROGRESS_ENABLED` and an embedder that asked podup to stay
-		// silent got it anyway — and there was never a matching `Pulled`, so a
+		// silent got it anyway, and there was never a matching `Pulled`, so a
 		// pull that finished looked exactly like one that hung.
 		if quiet {
 			debug!("pulling {image}");
@@ -580,7 +580,7 @@ pub(in crate::engine) fn libpod_pull_policy(policy: Option<&str>) -> Option<&'st
 /// `--pull` override (no service context). The rejected value lands in the
 /// error so a typo'd `pull_policy: alaways` on a specific service is reported
 /// as `service.<name>: pull_policy: unknown pull policy "alaways" (value:
-/// alaways)` — the actionable bit is which service and which value, not the
+/// alaways)`: the actionable bit is which service and which value, not the
 /// abstract policy name.
 pub(in crate::engine) fn pull_policy_checked(
 	policy: Option<&str>,

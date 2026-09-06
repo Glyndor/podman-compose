@@ -42,7 +42,7 @@ fn active_profiles_via_env() {
 			};
 			let proj = proj("apv");
 			let engine = Engine::new(client, proj.clone());
-			// "debug" service has profile "debug" — not in "prod" → skipped
+			// "debug" service has profile "debug", not in "prod" → skipped
 			let file = parse_str(
 				"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n  debug:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    profiles: [\"debug\"]\n",
 			)
@@ -108,7 +108,7 @@ async fn wait_completed_polling() {
 	// init takes a while before exiting, so the first poll sees it running and the
 	// polling loop is exercised rather than short-circuited. The delay has to beat
 	// the cost of creating app's container, or `up` would appear ordered even with
-	// the wait removed — the reason 2s was not enough in
+	// the wait removed, the reason 2s was not enough in
 	// resources_health::depends_on_service_completed.
 	// The bind uses an absolute path, so no base_dir is needed.
 	let dir = tempfile::tempdir().unwrap();
@@ -155,7 +155,7 @@ async fn external_config_injected_into_container() {
 	}
 
 	// A long-form absolute target must land the config at that exact path, not
-	// under /run/secrets — the config-specific behaviour.
+	// under /run/secrets, the config-specific behaviour.
 	let yaml = format!(
 		"services:\n  app:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    configs:\n      - source: cfg\n        target: /etc/app.conf\nconfigs:\n  cfg:\n    external: true\n    name: {secret_name}\n"
 	);
@@ -334,7 +334,7 @@ async fn dep_on_profile_filtered_service() {
 	// podup ACTIVATES a profile-filtered service when a service that is running
 	// depends on it, transitively, so a retained service never points at a dropped
 	// one. The rationale is in internal/engine/profiles.rs. This comment used to
-	// say the opposite — that db is skipped and its dep wait skipped with it —
+	// say the opposite (that db is skipped and its dep wait skipped with it)
 	// which is what a deliberate design looks like when nothing pins it: the next
 	// reader believes the comment over the code.
 	let file = parse_str(
@@ -356,7 +356,7 @@ async fn dep_on_profile_filtered_service() {
 	// This is a DELIBERATE divergence from docker compose, pinned here so it
 	// cannot be reverted by accident. Measured 2026-08-02 against docker-compose
 	// v5.1.3 on the same Podman socket: it refuses the project with
-	// `service "web" depends on undefined service "db"` — a misleading message,
+	// `service "web" depends on undefined service "db"`, a misleading message,
 	// since db is defined and filtered, not undefined.
 	//
 	// podup is not departing from a standard. The Compose Specification says only
@@ -403,7 +403,7 @@ fn build_with_env_arg() {
 			// Same two traps as the build-arg tests in build_images.rs, and this one
 			// is the sharper case. A valueless `args: FROM_ENV:` entry is supposed to
 			// take its value from the environment, and the single-dollar form the old
-			// version used made compose substitute FROM_ENV in the YAML instead — so
+			// version used made compose substitute FROM_ENV in the YAML instead, so
 			// the value arrived by a completely different route than the one under
 			// test, and the ARG never mattered. `RUN echo` then left nothing to
 			// contradict it.

@@ -9,7 +9,7 @@ use crate::quadlet::generate_at;
 
 /// #1095: the `x-podman-on-failure` extension reaches the Quadlet unit as
 /// `HealthOnFailure=`, so `generate quadlet` and `autostart --mode quadlet`
-/// carry it too — not just the live `up` path.
+/// carry it too, not just the live `up` path.
 #[test]
 fn health_on_failure_extension_reaches_the_quadlet_unit() {
 	let yaml = r#"
@@ -28,7 +28,7 @@ services:
 
 /// An invalid value warns instead of being emitted. Quadlet drops the whole unit
 /// at daemon-reload on an unrecognised key, which is a far worse failure than
-/// the key being absent — and generation has no error channel to refuse in.
+/// the key being absent, and generation has no error channel to refuse in.
 #[test]
 fn an_invalid_health_on_failure_warns_rather_than_emitting() {
 	let yaml = r#"

@@ -98,7 +98,7 @@ async fn cli_top_covers_every_replica_of_a_scaled_service() {
 }
 
 /// `logs_with_stderr_output` names the stderr path and cannot read it. Measured
-/// while writing this: podup keeps the streams apart — the container's stdout
+/// while writing this: podup keeps the streams apart, so the container's stdout
 /// reaches podup's stdout and its stderr reaches podup's stderr, both carrying
 /// the service prefix. That separation is the contract, and it is finer than
 /// "the line appears somewhere": folding stderr into stdout would satisfy a
@@ -204,7 +204,7 @@ async fn cli_attached_up_carries_the_container_output() {
 	let compose = dir.path().join("docker-compose.yml");
 	let proj = format!("t{}-attach", std::process::id());
 	// The command exits on its own, so the attached `up` returns without needing
-	// a signal — no timeout standing in for synchronisation.
+	// a signal, with no timeout standing in for synchronisation.
 	fs::write(
 		&compose,
 		"services:\n  chatty:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"echo attached-output; sleep 2\"]\n",

@@ -13,13 +13,13 @@
 #   level 3:  chain3      ->  chain2
 #
 # Under barriers, `after_fast` cannot start until `slow` is healthy, even though
-# it does not depend on it — and everything behind it inherits that wait. Under a
+# it does not depend on it, and everything behind it inherits that wait. Under a
 # DAG the whole chain runs while `slow` is still coming up.
 #
 # NOTE: this file does NOT show the scheduler cost, and that is worth knowing
 # before reading a run of it. Readiness is gated per dependency, so `after_fast`
 # starts while `slow` is still `starting` even under level barriers, and the
-# barrier looks free. The cost lives in level WIDTH, not depth — see the
+# barrier looks free. The cost lives in level WIDTH, not depth; see the
 # `wide-level` scenario. This one stays as the readiness-ordering case, which is
 # what it actually measures.
 services:

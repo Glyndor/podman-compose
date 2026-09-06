@@ -4,7 +4,7 @@ use crate::engine::fake_podman;
 use crate::engine::secrets::tests_support::{engine_on, file_with_content_secrets};
 
 /// #1219: on a first `up` every secret inspect is a 404, so there is nothing
-/// to remove — the delete-then-create was spending a round trip per secret
+/// to remove: the delete-then-create was spending a round trip per secret
 /// deleting a secret that does not exist. Measured on the six-secret bench
 /// scenario, this is what takes a cold `up` from 25 requests to 19.
 #[tokio::test]
@@ -72,7 +72,7 @@ async fn create_still_deletes_a_secret_that_already_exists() {
 /// The behaviour change the fan-out carries, stated in #1219 and asserted
 /// here rather than left to the reader: the pass no longer stops at the
 /// first failure, so every secret is attempted, and the error that surfaces
-/// is the first *by name* — not whichever chain happened to lose the race.
+/// is the first *by name*, not whichever chain happened to lose the race.
 #[tokio::test]
 #[cfg(unix)]
 async fn fan_out_attempts_every_secret_and_reports_the_first_by_name() {
@@ -107,7 +107,7 @@ async fn fan_out_attempts_every_secret_and_reports_the_first_by_name() {
 
 /// Skipping the delete opens a window between the inspect and the create.
 /// If something claims the name in it, `up` fails rather than clobbering
-/// what arrived — but Podman's own message for that is an opaque 500, so
+/// what arrived, but Podman's own message for that is an opaque 500, so
 /// the failure has to name the race or the operator cannot act on it.
 #[tokio::test]
 #[cfg(unix)]
@@ -135,7 +135,7 @@ async fn a_name_claimed_after_the_inspect_fails_with_a_legible_message() {
 		err.contains("proj_secret_s1"),
 		"the message must name which secret, got: {err}"
 	);
-	// The engine's own error is kept as the cause — it is useful — but it must
+	// The engine's own error is kept as the cause, since it is useful, but it must
 	// not be the whole of what the operator is handed, which is what the bare
 	// `ComposeError::Podman` passthrough would have given them.
 	assert!(

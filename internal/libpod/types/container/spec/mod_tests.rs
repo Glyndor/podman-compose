@@ -15,7 +15,7 @@ fn security_fields_serialize_decomposed_not_as_security_opt() {
 		..Default::default()
 	};
 	let v = serde_json::to_value(&spec).unwrap();
-	// SpecGenerator has no `security_opt` field — the value must arrive decomposed.
+	// SpecGenerator has no `security_opt` field, so the value must arrive decomposed.
 	assert!(
 		v.get("security_opt").is_none(),
 		"stale security_opt key: {v}"
@@ -105,7 +105,7 @@ fn health_on_failure_and_startup_use_podman_wire_names() {
 	let v = serde_json::to_value(&spec).unwrap();
 
 	// `--health-on-failure` rides as Podman's integer action code (restart = 3),
-	// under the snake_case key — not as a string and not as `none`(0).
+	// under the snake_case key, not as a string and not as `none`(0).
 	assert_eq!(v["health_check_on_failure_action"], 3);
 
 	// The startup probe nests under the PascalCase `startupHealthConfig` key,
@@ -115,7 +115,7 @@ fn health_on_failure_and_startup_use_podman_wire_names() {
 	assert_eq!(startup["Test"][1], "true");
 	assert_eq!(startup["Interval"], 1_000_000_000_i64);
 	assert_eq!(startup["Successes"], 3);
-	// Flattened — there is no nested `health_config` wrapper key.
+	// Flattened: there is no nested `health_config` wrapper key.
 	assert!(startup.get("health_config").is_none(), "not flattened: {v}");
 }
 

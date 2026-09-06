@@ -9,7 +9,7 @@ fn argv(args: &[&str]) -> impl Iterator<Item = String> + use<> {
 
 /// clap renders help before the parsed `--ansi` is applied, so the flag has
 /// to be read straight off argv or `podup --ansi never --help` comes out
-/// coloured — which it did, while `NO_COLOR=1 podup --help` did not.
+/// coloured, which it did, while `NO_COLOR=1 podup --help` did not.
 #[test]
 fn ansi_is_found_before_the_subcommand() {
 	assert_eq!(

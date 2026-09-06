@@ -56,7 +56,7 @@ fn includes_profiles_and_env_files() {
 #[test]
 fn boot_neither_builds_nor_destroys() {
 	// The contract, pinned. `--build` on ExecStart puts an image build on the
-	// boot path of an unattended machine — it needs the network and a briefly
+	// boot path of an unattended machine: it needs the network and a briefly
 	// unreachable registry leaves the stack down. `down` on ExecStop removes
 	// the containers, so a clean shutdown would delete the stack and every
 	// boot would recreate it. Both shipped in 1.9.0; neither may come back
@@ -177,7 +177,7 @@ fn quote_arg_escapes_quotes_and_backslashes() {
 
 #[test]
 fn quote_arg_doubles_percent_even_in_a_bare_looking_token() {
-	// `50%off` has no space/quote/control byte — the only reason it must be
+	// `50%off` has no space/quote/control byte; the only reason it must be
 	// quoted at all is the `%`, and the `%` itself must be doubled so systemd's
 	// specifier expansion collapses it back to one literal `%` instead of
 	// trying to expand `%o` as a specifier.
@@ -225,7 +225,7 @@ fn render_service_unit_escapes_percent_in_project_description() {
 	// `Description=` interpolates `opts.project` directly; a literal `%` in
 	// it must be doubled exactly like every other in-unit value, so systemd's
 	// specifier expansion does not treat e.g. `%h` as a specifier. This holds
-	// regardless of the external `is_safe_project_name` gate — the module's
+	// regardless of the external `is_safe_project_name` gate: the module's
 	// own %-invariant should not depend on it.
 	let mut o = opts_single();
 	o.project = "50%h".to_string();
@@ -250,7 +250,7 @@ fn validate_accepts_percent_in_paths() {
 /// #1093: systemd bounds `ExecStop` independently of what podup does inside
 /// it, at a 90s default. A stack whose slowest container needs longer stops
 /// cleanly when a human runs `podup stop` and gets killed mid-stop at
-/// reboot — the difference only appears during an unattended shutdown,
+/// reboot; the difference only appears during an unattended shutdown,
 /// which is the worst version of it.
 #[test]
 fn render_service_unit_bounds_stop_above_the_longest_grace_period() {

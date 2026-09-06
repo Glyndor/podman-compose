@@ -3,7 +3,7 @@ name: PowerShell CI (reusable)
 # PSScriptAnalyzer lint for repositories shipping .ps1 scripts (podup's
 # install.ps1 today; unitpm and klyradb are expected to gain their own
 # PowerShell installers later). Replaces podup's inline
-# .github/workflows/lint-powershell.yml with one reviewed implementation —
+# .github/workflows/lint-powershell.yml with one reviewed implementation;
 # the swap itself is Phase 4.2, not part of this change.
 #
 # Runner is windows-latest and `defaults: run: shell: pwsh` is deliberate, not
@@ -12,19 +12,19 @@ name: PowerShell CI (reusable)
 # PowerShell variable, not the environment, so env-passed values silently
 # become empty strings. That trap only bites a job whose *content* is meant to
 # be POSIX shell running on Windows. This job's content IS PowerShell, so pwsh
-# is the correct shell, not the thing being guarded against — and every input
+# is the correct shell, not the thing being guarded against, and every input
 # below is still read via `$env:VAR` (pwsh's real environment-variable syntax)
 # rather than a bare `$VAR`, for the same reason the standard calls out.
 #
 # pssa-version's default was checked against the live PowerShell Gallery
-# (podup's own lint-powershell.yml has no pin at all — floats on whatever
+# (podup's own lint-powershell.yml has no pin at all, floating on whatever
 # `Install-Module PSScriptAnalyzer -Force` resolves to that day); 1.25.0 was
 # the current non-prerelease release at the time this default was set.
 #
 # `paths` is a "<dir>/**/<pattern>"-shaped glob (default "**/*.ps1"), but the
 # **-segment is stripped rather than handed to Get-ChildItem: its own docs
 # warn against combining -Path with -Recurse for wildcard matching and confirm
-# there is no "**" arbitrary-depth token at all — the documented way to match
+# there is no "**" arbitrary-depth token at all: the documented way to match
 # a pattern at every depth is -LiteralPath (a plain directory) + -Recurse +
 # -Include, which is what the step below builds from this input.
 
@@ -46,7 +46,7 @@ on:
         description: >-
           Comma-separated PSScriptAnalyzer rule names to exclude from the
           gate (passed to -ExcludeRule), for rules a script violates on
-          purpose — e.g. PSAvoidUsingWriteHost in an installer that talks to
+          purpose, e.g. PSAvoidUsingWriteHost in an installer that talks to
           a human over stdout. Empty excludes nothing.
         type: string
         default: ""

@@ -48,7 +48,7 @@ pub enum ComposeError {
 	InvalidSignal(String),
 	/// Image build failed (context assembly or the Podman build step).
 	Build(String),
-	/// A `cp` (copy between a container and the host) operation failed — a missing
+	/// A `cp` (copy between a container and the host) operation failed: a missing
 	/// destination directory, a non-directory path component, an unsupported
 	/// endpoint, or a host-side packing/extraction error.
 	Copy(String),
@@ -92,7 +92,7 @@ pub enum ComposeError {
 		/// The replica count that made the binding impossible; always above one.
 		replicas: usize,
 		/// The host ports the service pins, in the order compose declared them.
-		/// Only fixed ports appear — a range or an unspecified host port cannot
+		/// Only fixed ports appear; a range or an unspecified host port cannot
 		/// collide this way.
 		ports: Vec<u16>,
 	},
@@ -172,11 +172,11 @@ pub enum ComposeError {
 	/// rather than forwarded to libpod as a raw `HTTP 400`.
 	InvalidTimeout(i32),
 	/// An explicitly requested env file (`--env-file` or a service `env_file:`)
-	/// could not be read or parsed — a missing/unreadable path or a malformed
+	/// could not be read or parsed: a missing/unreadable path or a malformed
 	/// entry such as an unterminated quoted value. The string is a ready-to-print
 	/// message.
 	EnvFile(String),
-	/// A `podup autostart` operation failed — a `systemctl --user`/`loginctl`
+	/// A `podup autostart` operation failed: a `systemctl --user`/`loginctl`
 	/// command could not run or returned non-zero, a unit file could not be
 	/// written/removed, or the requested mode is not yet available. The string is
 	/// a ready-to-print message.

@@ -214,7 +214,7 @@ fn uninstall_stops_removes_and_reloads() {
 /// An earlier version probed `is-active` first and skipped the stop when it
 /// failed. Measured against real systemd, that is wrong twice over: `stop` on a
 /// unit whose fragment is on disk exits 0 in *every* state (running, inactive,
-/// never started), so the probe bought nothing — and a service still coming up
+/// never started), so the probe bought nothing, and a service still coming up
 /// reports `activating`, which `is-active` calls a failure, so a stack caught
 /// mid-start would have been skipped and left running while its units were
 /// deleted.
@@ -250,7 +250,7 @@ fn uninstall_stops_unconditionally_without_probing_is_active() {
 }
 
 /// #1080: a running service that refuses to stop was swallowed by `let _ =`, so
-/// uninstall exited 0 with the container still up. It must now report — while
+/// uninstall exited 0 with the container still up. It must now report, while
 /// still removing the unit files and reloading, so the uninstall is not left
 /// half-done.
 #[test]
@@ -334,7 +334,7 @@ fn uninstall_scoped_by_ownership_label_leaves_sibling_project_untouched() {
 // `app-extra` declaring `labels: {podup.project: app}` therefore produces a
 // unit whose FIRST `Label=podup.project=` line reads `app` (forged) and
 // whose SECOND reads `app-extra` (the real stamp). A scope check that reads
-// the first `Label=podup.project=` match — the old behaviour — resolves this
+// the first `Label=podup.project=` match (the old behaviour) resolves this
 // unit's owner as `app`, so `uninstall -p app` deletes a sibling project's
 // unit again, through a different door than the filename-prefix bug above.
 // The `# podup-owner:` marker closes this because compose `labels:` can
@@ -355,7 +355,7 @@ fn uninstall_ignores_forged_project_label_from_sibling_compose_file() {
 		)
 		.unwrap();
 		// `app-extra`'s own service labels forge a `Label=podup.project=app`
-		// line ahead of its real `Label=podup.project=app-extra` stamp — the
+		// line ahead of its real `Label=podup.project=app-extra` stamp, the
 		// exact shape a hostile or careless compose file can produce.
 		let forged = "services:\n  web:\n    image: nginx\n    labels:\n      podup.project: app\n";
 		install_quadlet(

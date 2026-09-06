@@ -14,15 +14,15 @@
 //!
 //! 1. **podup's parsing is not the ambiguity.** A properly terminated chunked body
 //!    reaches the caller as a clean end, every time. So when a *finished* stream
-//!    arrives as an error on some Podman version, the framing came that way — no
+//!    arrives as an error on some Podman version, the framing came that way: no
 //!    predicate on `hyper::Error` can invent a difference the server did not send.
 //!    That is the case for the out-of-band re-check `logs` and `stats` already use,
 //!    and for `events` needing one of its own.
 //! 2. **A severed stream is not `IncompleteMessage`.** That predicate is about the
 //!    message head. Both places a cut can land in a body arrive as a hyper Body
 //!    error wrapping `io::ErrorKind::UnexpectedEof`, which used to fall through to
-//!    `hyper-other`. Anything keyed on the `IncompleteMessage` text — including the
-//!    lane's own flake counter — cannot see them.
+//!    `hyper-other`. Anything keyed on the `IncompleteMessage` text, including the
+//!    lane's own flake counter, cannot see them.
 
 #![cfg(unix)]
 
@@ -38,7 +38,7 @@ async fn read_stream(reply: FakeReply) -> (Vec<serde_json::Value>, Option<String
 		FakeReply::ChunkedEnd(c) => FakeReply::ChunkedEnd(c.clone()),
 		FakeReply::ChunkedTruncated(c) => FakeReply::ChunkedTruncated(c.clone()),
 		FakeReply::ChunkedCutMidPayload(c) => FakeReply::ChunkedCutMidPayload(c.clone()),
-		// Not a stream *ending* — it never becomes a stream. `get_stream` fails
+		// Not a stream *ending*; it never becomes a stream. `get_stream` fails
 		// at the response head rather than reaching the parser this measures, so
 		// this shape belongs to the lifecycle re-check tests instead.
 		FakeReply::ClosedWithoutResponse => FakeReply::ClosedWithoutResponse,
@@ -70,7 +70,7 @@ fn frame(action: &str) -> String {
 }
 
 /// A stream that ends the way HTTP says it should reaches the caller as a clean
-/// end — no error at all. Every frame written arrives first.
+/// end, with no error at all. Every frame written arrives first.
 #[tokio::test]
 async fn a_properly_terminated_stream_ends_clean() {
 	let (frames, ended_as) =
@@ -83,7 +83,7 @@ async fn a_properly_terminated_stream_ends_clean() {
 	);
 }
 
-/// A body cut off between chunks — the connection closes where the next chunk
+/// A body cut off between chunks: the connection closes where the next chunk
 /// header should begin.
 #[tokio::test]
 async fn a_cut_between_chunks_is_a_body_eof() {
@@ -102,7 +102,7 @@ async fn a_cut_between_chunks_is_a_body_eof() {
 	);
 }
 
-/// And a body cut mid-payload — the chunk header promises bytes that never come.
+/// And a body cut mid-payload: the chunk header promises bytes that never come.
 /// hyper words it differently (`IncompleteBody`) but the io kind is the same, and
 /// the kind is what podup keys on.
 #[tokio::test]
@@ -138,7 +138,7 @@ async fn neither_cut_is_an_incomplete_message() {
 /// The crux of #1104, as a test rather than a comment: the payload delivered is
 /// identical either way, so a caller that only looks at whether an error arrived
 /// cannot tell a finished stream from a severed one. Telling them apart needs a
-/// second, out-of-band observation — is the thing this stream was following still
+/// second, out-of-band observation: is the thing this stream was following still
 /// alive?
 #[tokio::test]
 async fn the_two_shapes_carry_the_same_payload() {

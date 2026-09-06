@@ -37,7 +37,7 @@ pub fn parse_file(path: &Path) -> Result<ComposeFile> {
 /// effect for the top-level file and any included files.
 ///
 /// They **replace** a project `.env` rather than adding to it: when `env_files`
-/// is non-empty, `.env` is not read. That is docker-correct — and the opposite
+/// is non-empty, `.env` is not read. That is docker-correct, and the opposite
 /// of what this comment used to claim, which also reached docs.rs readers. The
 /// process environment still takes precedence over both.
 pub fn parse_file_with_env_files(path: &Path, env_files: &[String]) -> Result<ComposeFile> {
@@ -85,7 +85,7 @@ pub fn parse_file_with_env_files_interp(
 			// including file and treats `../` as canonical (monorepos routinely use
 			// `include: ../shared/compose.yaml`). An absolute path is used as given.
 			// This matches docker-compose and the trusted-input policy already
-			// applied to `extends.file` and `env_file` — the compose file is
+			// applied to `extends.file` and `env_file`: the compose file is
 			// trusted input, like a Makefile.
 			let inc_path = if rel_path.is_absolute() {
 				rel_path.to_path_buf()
@@ -187,7 +187,7 @@ pub fn parse_files_with_env_files_interp(
 	Ok(merged)
 }
 
-/// Re-read `path` and return the interpolated, merge-resolved YAML as text — the
+/// Re-read `path` and return the interpolated, merge-resolved YAML as text, the
 /// same document shape the parser builds before deserializing into a
 /// `ComposeFile`. Used only by the raw nested-key diagnostic, which needs the
 /// pre-typed document to spot keys the model drops. `interpolate = false` (the
@@ -218,7 +218,7 @@ fn interpolated_yaml_text(path: &Path, env_files: &[String], interpolate: bool) 
 /// Synthesize the implicit `default` network, matching docker-compose: any
 /// service that declares neither `networks:` nor `network_mode` is attached to
 /// a project `default` network. Without this, such services are created with no
-/// network namespace at all — they get no IP and cannot resolve each other by
+/// network namespace at all: they get no IP and cannot resolve each other by
 /// name, silently breaking the common no-`networks:`-block compose file.
 ///
 /// The `default` network is created as `{project}_default` (see
@@ -272,7 +272,7 @@ fn merge_override(target: &mut ComposeFile, other: ComposeFile, directives: &tag
 /// Parse a compose YAML string (no file I/O).
 ///
 /// Variable substitution is applied using only the process environment.
-/// `extends: { file: ... }` and `include:` directives are not resolved —
+/// `extends: { file: ... }` and `include:` directives are not resolved;
 /// use [`parse_file`] for that.
 pub fn parse_str(content: &str) -> Result<ComposeFile> {
 	let vars = substitute::build_vars(Path::new("."));

@@ -5,7 +5,7 @@
 //! `depends_on` satisfied by an earlier level, so services *within* a level have
 //! no ordering between them and can be acted on concurrently. The whole-project
 //! lifecycle commands (stop/start/restart/kill/rm/pause/unpause/down) walk the
-//! levels in order — preserving the cross-level dependency ordering — but
+//! levels in order, preserving the cross-level dependency ordering, but
 //! dispatch each level's per-service (or, for teardown, per-container)
 //! operations in parallel instead of strictly serially, so a restart/stop/down
 //! of many independent services no longer serializes every grace period (#757).
@@ -111,7 +111,7 @@ pub(super) fn retain_levels(
 /// target subset (used only to label cascade-restarts distinctly in the logs).
 ///
 /// With no targets every service is restarted. With targets, the set is the
-/// targets plus — unless `no_deps` — every service whose `depends_on` carries a
+/// targets plus, unless `no_deps`, every service whose `depends_on` carries a
 /// `restart: true` condition pointing at one of the targets (one hop, matching
 /// the previous serial implementation).
 pub(super) fn restart_service_set(
@@ -161,7 +161,7 @@ impl Engine {
 			match self.stop_container(&container_name, grace).await {
 				Ok(true) => acted.store(true, std::sync::atomic::Ordering::Relaxed),
 				Ok(false) => {
-					tracing::debug!("{container_name}: not running — stop is a no-op");
+					tracing::debug!("{container_name}: not running, stop is a no-op");
 				}
 				Err(e) => {
 					first_err.get_or_insert(e);
@@ -279,7 +279,7 @@ impl Engine {
 			// `Removing` would be flushed as such by the plain sink.
 			crate::ui::progress::start("Container", &container_name, "Removing");
 			match self.client.delete_existed(&path).await {
-				// Only report a removal that actually happened — a phantom
+				// Only report a removal that actually happened: a phantom
 				// (never-created) container 404s and must not be logged as
 				// "removed".
 				Ok(true) => {
@@ -293,7 +293,7 @@ impl Engine {
 				Err(e) if !force && e.is_status(409) => {
 					crate::ui::progress_line("Container", &container_name, "Skipped");
 					tracing::warn!(
-						"{container_name} is running — skipping (pass -f to force removal)"
+						"{container_name} is running; skipping (pass -f to force removal)"
 					);
 				}
 				Err(e) => {
@@ -336,12 +336,12 @@ impl Engine {
 
 	/// Tear down one already-known-live container: run its `pre_stop` hooks (if
 	/// any), a best-effort stop bounded by `grace`, then a forced removal. One
-	/// unit of work in a concurrent teardown level/batch — shared by
+	/// unit of work in a concurrent teardown level/batch, shared by
 	/// [`super::Engine::down_with_options`] (per dependency level) and
 	/// [`super::Engine::down_by_label`] (one label-scoped batch, no dependency
 	/// graph to level).
 	///
-	/// A stalled or failed `stop` is never surfaced as an error here — the
+	/// A stalled or failed `stop` is never surfaced as an error here: the
 	/// forced removal that follows SIGKILLs the container regardless of how
 	/// `stop` went (`container_rm_path` always passes `force=true`), so only a
 	/// genuine removal failure propagates. A 404 (container already gone) is an
@@ -372,10 +372,10 @@ impl Engine {
 		);
 		// A 404 (container already gone, or a profile-gated service that was
 		// never created) is an idempotent no-op here, exactly as the network and
-		// volume removal arms treat it — not a warning. A stalled or failed stop
+		// volume removal arms treat it, not a warning. A stalled or failed stop
 		// is not fatal either: the force-remove just below SIGKILLs the
 		// container regardless, so its outcome is logged but never returned as
-		// an error — only a genuine removal failure is.
+		// an error; only a genuine removal failure is.
 		if let Err(e) = self
 			.client
 			.post_empty_ok_within(&stop_path, stop_deadline(grace))
@@ -392,7 +392,7 @@ impl Engine {
 				crate::ui::progress_line("Container", container_name, "Removed");
 				Ok(())
 			}
-			// The container was already gone (404) — nothing to do, but the row
+			// The container was already gone (404), so nothing to do, but the row
 			// has to close, or the live board leaves it spinning on `Stopping`
 			// forever (#1347).
 			Err(e) if e.is_status(404) => {

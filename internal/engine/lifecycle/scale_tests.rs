@@ -29,7 +29,7 @@ fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
 
 /// #598: a `scale`/`up --scale` down-sizing that can't remove a surplus
 /// replica (e.g. an active exec session) must not exit 0 with it left
-/// running — but a sibling replica that removes cleanly must still be
+/// running, but a sibling replica that removes cleanly must still be
 /// reclaimed.
 #[tokio::test]
 #[cfg(unix)]
@@ -70,7 +70,7 @@ async fn remove_surplus_replicas_propagates_a_real_rm_failure_after_completing_t
 }
 
 /// Surplus replicas that are already gone (404 on removal) stay an
-/// idempotent no-op — a re-run of `scale` down must still exit 0.
+/// idempotent no-op: a re-run of `scale` down must still exit 0.
 #[tokio::test]
 #[cfg(unix)]
 async fn remove_surplus_replicas_tolerates_already_gone() {
@@ -132,7 +132,7 @@ async fn live_project_replicas_sorted_sorts_shuffled_replicas_ascending() {
 
 /// #1445: the bulk GET that the per-replica query paths now share must
 /// cover a scaled service's full replica set, including replicas that are
-/// stopped — `logs`/`port`/`exec` need to see the second replica even when
+/// stopped: `logs`/`port`/`exec` need to see the second replica even when
 /// it is in `exited`, so the bulk request must NOT silently drop them the
 /// way libpod's `runningOnly` default would.
 #[tokio::test]
@@ -157,7 +157,7 @@ async fn live_project_replicas_sorted_includes_stopped_replicas() {
 		.await
 		.expect("live_project_replicas_sorted should succeed");
 
-	// All three replicas — running and stopped — must be in the bucket.
+	// All three replicas, running and stopped, must be in the bucket.
 	// A bug that silently filtered to running (libpod's `runningOnly`
 	// default) would return just `proj-web-1` and `proj-web-2`, missing the
 	// third replica entirely.
@@ -168,7 +168,7 @@ async fn live_project_replicas_sorted_includes_stopped_replicas() {
 			"proj-web-2".to_string(),
 			"proj-web-3".to_string(),
 		]),
-		"the stopped replica must not be filtered out — got {:?}",
+		"the stopped replica must not be filtered out; got {:?}",
 		by_service.get("web")
 	);
 }
@@ -178,7 +178,7 @@ async fn live_project_replicas_sorted_includes_stopped_replicas() {
 /// the compose file; the per-replica query paths (`exec`/`cp`/`port`/
 /// `logs`) layer the static-name fallback on top. Without that contract,
 /// `logs` could not `docker compose logs`-style behave on a never-created
-/// service — `port`/`exec`/`cp` would 404 immediately instead of letting
+/// service: `port`/`exec`/`cp` would 404 immediately instead of letting
 /// the caller see the predictable static name.
 #[tokio::test]
 #[cfg(unix)]
@@ -218,7 +218,7 @@ async fn live_project_replicas_sorted_omits_services_with_no_live_container() {
 }
 
 /// #1445: the per-replica query paths used to fan out one container-list
-/// round-trip per service — 40 services meant 40 GETs for a single
+/// round-trip per service: 40 services meant 40 GETs for a single
 /// `podup logs`. The bulk helper is the shared single GET. With the fake
 /// pinned to answer only `/containers/json`, a single resolution call must
 /// still satisfy the per-service query helpers without issuing a follow-up
@@ -230,7 +230,7 @@ async fn live_project_replicas_sorted_omits_services_with_no_live_container() {
 #[cfg(unix)]
 async fn logs_resolves_replicas_in_one_bulk_get_not_one_per_service() {
 	// Three services; `db` is scaled to 3, `web` to 2, `worker` to 1, all
-	// running — so the bulk GET is the only fetch needed for `logs` to
+	// running, so the bulk GET is the only fetch needed for `logs` to
 	// find 6 targets across 3 services.
 	let body = r#"[
 		{"Names":["/proj-db-1"],"Labels":{"podup.service":"db"}},
@@ -259,7 +259,7 @@ async fn logs_resolves_replicas_in_one_bulk_get_not_one_per_service() {
 	file.services
 		.insert("worker".into(), crate::compose::types::Service::default());
 
-	// Drive `logs` once across all 3 services — the resolution path is the
+	// Drive `logs` once across all 3 services; the resolution path is the
 	// one under test, not the streaming.
 	let _ = e
 		.logs_with_options(&file, &[], crate::engine::query::LogsOptions::default())
@@ -281,7 +281,7 @@ async fn logs_resolves_replicas_in_one_bulk_get_not_one_per_service() {
 /// every container that exists for its process list, and libpod answers a
 /// non-running one with an HTTP 500. The exited replica must be dropped
 /// before the call, and the survivors must keep the ascending order every
-/// other by-service command produces — so this asserts both, on a listing
+/// other by-service command produces, so this asserts both, on a listing
 /// that is shuffled and mixed-state at once.
 #[tokio::test]
 #[cfg(unix)]
@@ -341,7 +341,7 @@ async fn running_replica_names_does_not_fall_back_to_static_names() {
 	);
 }
 
-/// #1363 — the bulk project listing must include every project's
+/// #1363: the bulk project listing must include every project's
 /// containers, not just the running ones. With `all=true` libpod drops the
 /// `runningOnly` default and a 100-service project with 5 stopped replicas
 /// returns all 100 names; the gotcha caught during validation was a bare
@@ -391,7 +391,7 @@ async fn live_project_replicas_returns_every_project_container_including_stopped
 		"every project container must be returned (5 stopped included)"
 	);
 	// The 5 stopped services (svc000, svc020, …, svc080) must each be
-	// present with their replica name — i.e. `all=true` actually carried
+	// present with their replica name, i.e. `all=true` actually carried
 	// past the default filter, not just "runningOnly expanded to one".
 	for i in (0..100).step_by(20) {
 		let svc = format!("svc{i:03}");
@@ -415,7 +415,7 @@ async fn live_project_replicas_returns_every_project_container_including_stopped
 		"the bulk GET must pass all=true, got {container_list:?}"
 	);
 	// And no `status=` filter sneaked in that would have achieved the
-	// same effect — we want the all-inclusive default, not a workaround.
+	// same effect; we want the all-inclusive default, not a workaround.
 	assert!(
 		!container_list.contains("status="),
 		"the bulk GET must rely on all=true alone, not a status filter: {container_list:?}"
@@ -525,7 +525,7 @@ fn unnamed_service_scales_freely() {
 /// #1445 is a round-trip count, so pin the count rather than only the values it
 /// produces. Before it, every selected service cost its own `/containers/json`
 /// GET; a project of N services made N of them. Nothing in the value assertions
-/// above notices if that regresses — the names come back identical either way —
+/// above notices if that regresses (the names come back identical either way)
 /// so a later refactor could quietly put the call back inside the loop.
 ///
 /// Four services, and the fake records every request it answers. The assertion

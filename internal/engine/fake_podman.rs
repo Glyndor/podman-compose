@@ -4,14 +4,14 @@
 //! lifecycle/scale/query tests can assert exit-code semantics against canned
 //! API responses without a real Podman daemon. [`Client`] opens a fresh
 //! connection per request (see `internal/libpod/client/mod.rs`), so this only
-//! ever needs to answer one HTTP/1.1 request per accepted connection — no
+//! ever needs to answer one HTTP/1.1 request per accepted connection, with no
 //! keep-alive.
 //!
 //! It does frame a chunked body, for one reason: a stream that ends *badly* has
 //! a wire shape, and podup's central open question about streaming (#1104) is
 //! whether it can tell that shape from a stream that ended well. A real Podman
 //! cannot be asked to break a stream on demand, and which shape it produces at a
-//! CLEAN end turns out to differ by version — so the two cases are pinned here,
+//! CLEAN end turns out to differ by version, so the two cases are pinned here,
 //! deterministically, with no daemon and no version in the picture.
 
 #![cfg(unix)]
@@ -39,11 +39,11 @@ pub(super) enum FakeReply {
 	ChunkedTruncated(Vec<String>),
 	/// A 200 with a **chunked** body cut in the middle of a chunk's payload: the
 	/// header promises more bytes than are then written, and the connection
-	/// closes. The other place a severed stream can land, and — measured — hyper
+	/// closes. The other place a severed stream can land and, measured, hyper
 	/// classifies the two differently, which is why both exist here.
 	ChunkedCutMidPayload(String),
 	/// The request is read and accepted, and then the connection closes with **no
-	/// response at all** — not even a status line.
+	/// response at all**, not even a status line.
 	///
 	/// This is the shape `PodmanError::is_incomplete_message` names: hyper's
 	/// `IncompleteMessage` is about the message *head*, so it is the one reply
@@ -65,7 +65,7 @@ type Responder = dyn Fn(&str, &str) -> FakeReply + Send + Sync;
 /// A fake libpod socket driven by a routing closure; see [`Responder`].
 pub(super) struct FakePodman {
 	sock_path: std::path::PathBuf,
-	/// Every request answered so far, as `"METHOD target"` — lets a test assert
+	/// Every request answered so far, as `"METHOD target"`, letting a test assert
 	/// that a best-effort pass attempted every container even after one of them
 	/// failed.
 	pub(super) requests: Arc<Mutex<Vec<String>>>,
@@ -108,7 +108,7 @@ where
 	})
 }
 
-/// As [`start`], but the routing closure chooses the wire shape too — including
+/// As [`start`], but the routing closure chooses the wire shape too, including
 /// a chunked body that ends cleanly or one that is cut off mid-stream.
 pub(super) fn start_replying<F>(respond: F) -> FakePodman
 where

@@ -3,8 +3,8 @@
 disk, in the staging directory, immediately before the release is published.
 
 This is the substance half of the installer contract. `installer-contract.yml`
-answers a different question — "do `install.sh` and `release.yml` agree on the
-asset *names*?" — by reading both files. That is a cross-reference between two
+answers a different question, "do `install.sh` and `release.yml` agree on the
+asset *names*?", by reading both files. That is a cross-reference between two
 declarations, and reading YAML is the right way to answer it. It cannot answer
 "does the release actually produce these files", because nothing in a workflow
 file is evidence that a step ran.
@@ -21,7 +21,7 @@ matrix outputs in a later step and passed to `gh release create` as an argument,
 so it can never appear as a matrix entry. The check was therefore unpassable by
 construction: failing it was the normal state of a correct release workflow, and
 the only way to pass was to declare a matrix entry named `SHA256SUMS` without
-producing one — the exact lie the check existed to prevent. Measured on
+producing one, the exact lie the check existed to prevent. Measured on
 2026-08-17: no repository in the org declared that asset, podup was the gate's
 only consumer and was still pinned to a tag from before the clause, so the check
 had never run green anywhere. Its first contact with a real repository (the pin
@@ -47,8 +47,8 @@ downloads verifiable.
 
 Conscious non-goals: this does not verify signatures (release.yml already
 re-verifies every `.sig` against the keys consumers embed), does not check file
-contents, and does not talk to GitHub. It answers one question — are the files
-the installer will ask for present — and fails closed on anything it cannot
+contents, and does not talk to GitHub. It answers one question, whether the files
+the installer will ask for are present, and fails closed on anything it cannot
 parse, because an unparsed installer is not evidence of a good release.
 """
 
@@ -59,7 +59,7 @@ import re
 import sys
 from pathlib import Path
 
-# `download "${BASE_URL}/<name>" "<dest>"` — the only shape the install scripts
+# `download "${BASE_URL}/<name>" "<dest>"`, the only shape the install scripts
 # use to pull a file out of the release. Anything fetched from another host
 # (the apt keyring, for example) does not go through BASE_URL and is correctly
 # invisible here.
@@ -100,8 +100,8 @@ def artifact_names_sh(text: str, path: Path) -> set[str]:
 
 
 def artifact_names_ps1(text: str, path: Path) -> set[str]:
-    """Expand install.ps1's $Artifact template. The OS is usually a literal —
-    there being only one Windows — but an interpolation is accepted too."""
+    """Expand install.ps1's $Artifact template. The OS is usually a literal,
+    there being only one Windows, but an interpolation is accepted too."""
     template = PS_ARTIFACT_RE.search(text)
     if not template:
         fail(f'no $Artifact = "..." in {path}.')
@@ -207,7 +207,7 @@ def main() -> None:
             f"{listed}\n"
             f"staged in {args.workdir}: {sorted(p.name for p in args.workdir.iterdir())}\n"
             "Add them to the step that builds the release, not to the workflow's "
-            "asset declarations — this check reads the directory, not the YAML."
+            "asset declarations; this check reads the directory, not the YAML."
         )
 
     print(f"OK: all {len(required)} files the install scripts fetch are staged.")

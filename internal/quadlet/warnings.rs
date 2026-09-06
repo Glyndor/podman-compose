@@ -61,7 +61,7 @@ pub(super) fn collect_warnings(
 	// healthcheck: that service's unit carries `Notify=healthy`, so systemd
 	// does not call it started until the probe passes, and `After=`/`Requires=`
 	// then order against readiness rather than creation. Measured on podman
-	// 5.7.0 — a dependant started 10s into a dependency whose probe took 10s.
+	// 5.7.0: a dependant started 10s into a dependency whose probe took 10s.
 	//
 	// So the warning is now about the cases that really cannot work: a
 	// `service_healthy` naming a service with no healthcheck to wait on, and
@@ -93,7 +93,7 @@ pub(super) fn collect_warnings(
 	// `env_file: [{path, required: false}]` means a missing file is not an error.
 	// Quadlet has no way to say that: `EnvironmentFile=` becomes
 	// `podman run --env-file`, which is fatal on a missing path. So an entry the
-	// compose file marks optional becomes a container that refuses to start —
+	// compose file marks optional becomes a container that refuses to start,
 	// and this is the deployment-local override pattern (a `.env.production`
 	// deliberately absent from the repo), so it fails exactly where the file is
 	// meant to be missing.

@@ -268,7 +268,7 @@ impl Engine {
 	}
 }
 
-/// Whether a write error is a broken pipe on the stdout sink — a downstream
+/// Whether a write error is a broken pipe on the stdout sink, meaning a downstream
 /// reader closed early. A broken pipe never applies to a `-o FILE` sink, so it
 /// only short-circuits to a clean exit when streaming to stdout. Pure so it is
 /// unit-tested.
@@ -300,7 +300,7 @@ mod tests;
 
 /// End-to-end check that the destination path actually surfaces as
 /// [`ComposeError::IoPath`] when the operator passes an output the file
-/// system refuses to create — i.e. the production wiring from `Engine::export`
+/// system refuses to create, i.e. the production wiring from `Engine::export`
 /// through `std::fs::File::create` into `IoPath`, not just the helper that
 /// shapes the error. The bare `io_to_err` unit test above pins the wrapper;
 /// this one pins the call site that triggers it.

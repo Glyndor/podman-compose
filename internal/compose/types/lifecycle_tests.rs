@@ -202,7 +202,7 @@ fn podman_on_failure_parses_each_action() {
 }
 
 /// A typo is rejected rather than silently leaving a sick container in
-/// rotation — the failure this key exists to prevent.
+/// rotation, the failure this key exists to prevent.
 #[test]
 fn podman_on_failure_rejects_an_unknown_action() {
 	let yaml = format!("test: [\"CMD\", \"true\"]\n{X_PODMAN_ON_FAILURE}: bogus\n");

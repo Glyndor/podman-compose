@@ -1,6 +1,6 @@
 use super::*;
 
-/// A non-terminal descriptor is declined rather than failing — the path
+/// A non-terminal descriptor is declined rather than failing: the path
 /// `podup exec` takes inside a pipeline, which must keep working.
 ///
 /// Asked of an explicit `/dev/null` rather than of ambient stdin: the same

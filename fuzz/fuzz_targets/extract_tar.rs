@@ -44,6 +44,6 @@ fuzz_target!(|data: &[u8]| {
 	};
 	// `extract_tar_guarded` returns `Result<()>`. Any `Err` is the documented
 	// outcome for a hostile header (zip-slip, unreadable mode, …) and not a
-	// finding — only a panic (caught by libFuzzer as a crash) would be.
+	// finding; only a panic (caught by libFuzzer as a crash) would be.
 	let _ = podup::fuzz_api::extract_tar_guarded(data, &scratch.path);
 });

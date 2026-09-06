@@ -111,7 +111,7 @@ fn inline_tar_excludes_build_secrets_via_dockerignore() {
 	for entry in archive.entries().unwrap() {
 		let mut entry = entry.unwrap();
 		// No user ignore file in this context, so the synthesized one is
-		// written as `.containerignore` — the name podman prefers, so a
+		// written as `.containerignore`, the name podman prefers, so a
 		// stray `.dockerignore` cannot shadow our exclusions.
 		if entry.path().unwrap().to_string_lossy() == ".containerignore" {
 			entry.read_to_string(&mut di).unwrap();
@@ -133,7 +133,7 @@ fn dockerfile_is_force_included_despite_dockerignore() {
 	use std::io::Read;
 
 	// A `.dockerignore` that matches the Dockerfile (here a blanket `*`) must
-	// not drop it from the context tar — Docker keeps the active Dockerfile
+	// not drop it from the context tar; Docker keeps the active Dockerfile
 	// available to the builder regardless. Without the force-include the build
 	// fails with "stat .../Dockerfile: no such file or directory".
 	let dir = tempdir().unwrap();
@@ -377,7 +377,7 @@ fn inline_dockerfile_excluded_via_dockerignore() {
 	for entry in archive.entries().unwrap() {
 		let mut entry = entry.unwrap();
 		// No user ignore file in this context, so the synthesized one is
-		// written as `.containerignore` — the name podman prefers, so a
+		// written as `.containerignore`, the name podman prefers, so a
 		// stray `.dockerignore` cannot shadow our exclusions.
 		if entry.path().unwrap().to_string_lossy() == ".containerignore" {
 			entry.read_to_string(&mut di).unwrap();
@@ -502,7 +502,7 @@ fn glob_match_question_mark_matches_single_non_slash_char() {
 /// #1096: with both ignore files present, only `.containerignore` may filter the
 /// context tar. Applying both client-side is what made podup ship an image
 /// missing content that `podman build` includes: we dropped `b.txt` per
-/// `.dockerignore` — a file podman ignores entirely here — and the server then
+/// `.dockerignore` (a file podman ignores entirely here) and the server then
 /// dropped `a.txt` per `.containerignore`, so the union of both applied.
 #[test]
 fn context_tar_filters_by_containerignore_only_when_both_exist() {

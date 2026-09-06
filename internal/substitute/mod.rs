@@ -145,7 +145,7 @@ pub fn build_vars_with_env_files(dir: &Path, extra: &[String]) -> HashMap<String
 ///
 /// An explicitly-passed `--env-file` that is missing, unreadable, or malformed
 /// is a hard error (matching docker compose, which fails on a not-found env
-/// file) rather than being silently skipped — a typo'd path must not fall back
+/// file) rather than being silently skipped: a typo'd path must not fall back
 /// to process-env/defaults and exit 0.
 pub fn build_vars_with_env_files_strict(
 	dir: &Path,
@@ -156,7 +156,7 @@ pub fn build_vars_with_env_files_strict(
 
 /// The first control character in `value` that is never legitimate in an
 /// env-file value, or `None` if there is none. Tab, newline and carriage return
-/// are allowed — dotenv escapes (`\t`, `\n`, `\r`) and multi-line quoted values
+/// are allowed: dotenv escapes (`\t`, `\n`, `\r`) and multi-line quoted values
 /// produce them legitimately, and post-parse interpolation stores them verbatim
 /// as scalar data. Everything else in the C0/C1 ranges (NUL, ESC, …) is
 /// rejected. Pure so it is unit-tested.
@@ -205,7 +205,7 @@ fn build_vars_with_env_files_inner(
 			// interpolated verbatim into a compose scalar, where it is meaningless
 			// at best and corrupts the container's config at worst. Reject it here,
 			// at load time, with an error that names the originating env file and
-			// key — instead of letting it surface later as a compose-file parse
+			// key, instead of letting it surface later as a compose-file parse
 			// error at a meaningless post-substitution offset. Only the explicit
 			// (strict) `--env-file`/`env_file:` path errors; the lenient `.env`
 			// fallback keeps its historical pass-through behaviour.

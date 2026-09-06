@@ -124,7 +124,7 @@ fn merge_empty_other_is_noop() {
 	assert_eq!(target.services.len(), 1);
 }
 
-// parse_included_file — wraps every failure in ComposeError::Include (#1500).
+// parse_included_file wraps every failure in ComposeError::Include (#1500).
 //
 // Each rejection test asserts the variant with `matches!` so the assertion
 // cannot be satisfied by a different failure mode. Every rejection is paired
@@ -201,7 +201,7 @@ fn included_file_invalid_yaml_becomes_include_variant() {
 	);
 	// Acceptance shape: the same main file with a well-formed include
 	// succeeds, so the rejection above is the malformed-include path
-	// firing — not a YAML error in the main file itself.
+	// firing, not a YAML error in the main file itself.
 	let good = dir.path().join("good.yml");
 	write_file(&good, "services:\n  helper:\n    image: alpine\n");
 	let main_ok = dir.path().join("ok.yml");
@@ -235,7 +235,7 @@ fn included_path_is_directory_becomes_include_variant() {
 	// Pointing `include:` at a directory provokes a non-NotFound io error
 	// from the file reader (open-fails with IsADirectory on Unix, an
 	// access error on Windows). The wrapping must convert it to
-	// `Include`, not let `Io` leak out — that's the catch-all arm.
+	// `Include`, not let `Io` leak out; that's the catch-all arm.
 	let dir = tempfile::tempdir().expect("tempdir");
 	let not_a_file = dir.path().join("a-directory");
 	std::fs::create_dir(&not_a_file).expect("mkdir");

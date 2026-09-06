@@ -149,7 +149,7 @@ fn display_covers_all_variants() {
 fn parse_display_does_not_echo_offending_scalar() {
 	// A type error embeds the offending scalar in the raw serde_yaml message
 	// (`invalid type: string "s3cr3t-token", ...`). The Display must not surface
-	// that content — it points at the location instead, so a non-compose file
+	// that content; it points at the location instead, so a non-compose file
 	// pointed at with `-f` cannot leak its bytes onto stderr.
 	#[derive(Debug, serde::Deserialize)]
 	struct OnlyMap {

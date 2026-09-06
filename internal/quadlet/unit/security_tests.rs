@@ -167,7 +167,7 @@ fn maps_mask_and_unmask() {
 #[test]
 fn unknown_label_warns_and_emits_no_key() {
 	let (body, warnings) = map_one("label=bogus");
-	// Only the section header — no key added.
+	// Only the section header, with no key added.
 	assert_eq!(body, "[Container]\n");
 	assert_eq!(warnings.len(), 1);
 	assert!(warnings[0].contains("label=bogus"));

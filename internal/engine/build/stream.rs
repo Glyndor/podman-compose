@@ -4,7 +4,7 @@
 //! [`context_body`] runs the (blocking) tar+gzip writer on a `spawn_blocking`
 //! thread that feeds a bounded channel, and returns an async body stream that
 //! drains it. Peak memory is roughly `CHANNEL_CAP * CHUNK_BYTES` regardless of
-//! context size — a multi-gigabyte context no longer drives the process's RSS.
+//! context size: a multi-gigabyte context no longer drives the process's RSS.
 
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -82,7 +82,7 @@ impl Write for ChannelWriter {
 /// The producer's `JoinHandle` yields the context-assembly `Result` (a tar/IO
 /// error surfaces here with its descriptive message); the `body` is the stream
 /// the client sends as the request body. Await the body request first, then the
-/// producer — awaiting the producer before draining the body would deadlock on
+/// producer; awaiting the producer before draining the body would deadlock on
 /// the bounded channel.
 pub(super) fn context_body(
 	context: PathBuf,

@@ -36,7 +36,7 @@ impl Engine {
 		//
 		// The levels are still resolved, because that is what validates the
 		// graph (a cycle or a missing required dependency is an error before
-		// anything is created) — they just no longer gate execution.
+		// anything is created); they just no longer gate execution.
 		//
 		// Measured cost of the barrier on a 41-service level with one dependent
 		// behind one of them: the dependent started 809ms after its dependency
@@ -49,7 +49,7 @@ impl Engine {
 		//
 		// * `try_join_all` polls *every* future, so a service blocked on a
 		//   dependency yields and the others make progress. `buffer_unordered`
-		//   would deadlock here — it only polls the first N, and those N can
+		//   would deadlock here: it only polls the first N, and those N can
 		//   all be waiting on a dependency that is queued behind them.
 		// * the concurrency bound is a semaphore held only across the actual
 		//   work, never across a dependency wait, for the same reason.
@@ -76,7 +76,7 @@ impl Engine {
 			let permits = permits.clone();
 			let done = &done;
 			// Only the dependencies this service actually declares, and only
-			// those that are in this run's scheduled set — a service excluded by
+			// those that are in this run's scheduled set; a service excluded by
 			// profiles or an explicit target list is not going to signal.
 			let deps: Vec<tokio::sync::watch::Receiver<bool>> = file
 				.services

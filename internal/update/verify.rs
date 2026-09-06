@@ -1,4 +1,4 @@
-//! Verification primitives for self-update — the security core.
+//! Verification primitives for self-update: the security core.
 //!
 //! Trust anchor is the set of Ed25519 public keys embedded in this binary
 //! ([`RELEASE_PUBKEYS`]), not the download domain or TLS. A release is accepted
@@ -11,11 +11,11 @@ use sha2::{Digest, Sha256};
 
 use crate::ComposeError;
 
-/// Accepted Ed25519 release public keys — at most two. Slot 0 holds the active
+/// Accepted Ed25519 release public keys, at most two. Slot 0 holds the active
 /// release key (`GLYNDOR_RELEASE_ED25519_KEY`); slot 1 is the empty rotation
 /// slot, populated only during a key rotation (see below). A signature is
 /// trusted if it validates under either non-zero slot. The keys are public by
-/// design — their integrity comes from being baked into the signed,
+/// design: their integrity comes from being baked into the signed,
 /// build-provenance-attested binary, so an attacker cannot swap them without
 /// invalidating the binary itself.
 ///
@@ -35,8 +35,8 @@ use crate::ComposeError;
 ///    Every binary from step 1 trusts `new`, so the old key is retired and all
 ///    installs converge on the new key.
 ///
-/// If the outgoing private key is LOST, step 1 is impossible — no release can be
-/// signed by the old key — so fielded self-updaters cannot migrate in-band and
+/// If the outgoing private key is LOST, step 1 is impossible (no release can be
+/// signed by the old key) so fielded self-updaters cannot migrate in-band and
 /// must be re-installed out-of-band (rotated `install.sh` / apt). That happened
 /// here: the key below is a fresh key with no relationship to any previously
 /// embedded key, and slot 1 starts zeroed (the normal steady state) rather than
@@ -47,7 +47,7 @@ pub const RELEASE_PUBKEYS: [[u8; 32]; 2] = [
 		28, 91, 251, 190, 14, 69, 9, 142, 216, 200, 165, 3, 108, 152, 90, 65, 39, 193, 245, 38,
 		232, 36, 100, 155, 148, 155, 69, 108, 185, 139, 31, 51,
 	],
-	// Empty rotation slot — populate during the next key rotation.
+	// Empty rotation slot; populate during the next key rotation.
 	[0u8; 32],
 ];
 
@@ -126,7 +126,7 @@ fn verify_with_keys(keys: &[VerifyingKey], message: &[u8], signature: &[u8]) -> 
 		Ok(())
 	} else {
 		Err(ComposeError::Update(
-			"signature verification failed — release may be tampered or unsigned".to_string(),
+			"signature verification failed; release may be tampered or unsigned".to_string(),
 		))
 	}
 }
@@ -139,7 +139,7 @@ pub fn verify_signature(message: &[u8], signature: &[u8]) -> crate::Result<()> {
 }
 
 /// Verify `signature` against the embedded key using an explicitly supplied key
-/// — test seam so the signature path is exercised without the placeholder guard.
+/// Test seam so the signature path is exercised without the placeholder guard.
 #[cfg(test)]
 pub fn verify_signature_with(
 	key: &VerifyingKey,
@@ -229,7 +229,7 @@ mod tests;
 /// The release key is embedded in four places in this repository, and it has
 /// to be: a consumer that downloaded the key it verifies with would be
 /// handing the decision to whoever controls the download. Duplication is the
-/// correct design here, so the risk is not that copies exist — it is that a
+/// correct design here, so the risk is not that copies exist; it is that a
 /// rotation updates some and misses others.
 ///
 /// A miss is silent. `install.sh` would hand out a binary the self-updater

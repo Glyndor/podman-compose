@@ -67,7 +67,7 @@ async fn watch_sync_file_to_container() {
 	// second copy came back as the #1097 could-not-confirm error, which says in
 	// its own text that the copy may or may not have landed. #1270 owns that
 	// error-reporting defect. What this test owns is whether the bytes arrived,
-	// so it reads them and reports what the sync claimed alongside — which is
+	// so it reads them and reports what the sync claimed alongside, which is
 	// also the measurement #1270 needs to tell its branches apart.
 	let reported = engine
 		.test_sync_to_container(&cname, &src_file, "/tmp/app.txt")
@@ -256,8 +256,8 @@ async fn watch_sync_creates_missing_target_directory() {
 /// `rebuild` was the one watch action with no coverage at all, and it is the
 /// only one that goes all the way back through `build` and container recreation
 /// rather than touching a running container. It reads its trigger file into the
-/// image, so a rebuild that silently did nothing — or that rebuilt the image and
-/// left the old container running — is visible as stale content.
+/// image, so a rebuild that silently did nothing, or that rebuilt the image and
+/// left the old container running, is visible as stale content.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn watch_rebuild_recreates_the_container_from_the_new_image() {
 	let client = match podman().await {
@@ -332,7 +332,7 @@ async fn watch_sync_and_restart_does_both() {
 	let engine = Engine::with_base_dir(client, proj.clone(), dir.path().to_path_buf());
 	// The command appends one line per start. A restart re-runs it against the
 	// same (persisting) filesystem, so the line count is a container-scoped
-	// counter of how many times the process was started — unlike /proc/uptime,
+	// counter of how many times the process was started, unlike /proc/uptime,
 	// which is not namespaced and would report the host's.
 	let file = parse_str(
 		"services:\n  web:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"echo start >> /starts; sleep infinity\"]\n    develop:\n      watch:\n        - path: app.txt\n          action: sync+restart\n          target: /tmp/app.txt\n",

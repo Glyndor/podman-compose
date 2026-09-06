@@ -87,7 +87,7 @@ async fn engine_cp_follow_link_uploads_target_contents() {
 #[tokio::test]
 async fn engine_cp_to_container_renames_a_single_file() {
 	// `cp host-file svc:/tmp/newname.txt` must create a FILE named newname.txt,
-	// not a directory holding the source — matching `docker cp` rename-on-copy.
+	// not a directory holding the source, matching `docker cp` rename-on-copy.
 	let client = match podman().await {
 		Some(d) => d,
 		None => return,

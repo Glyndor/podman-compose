@@ -58,7 +58,7 @@ path = "internal/lib.rs"
 # (`test_exec_capture`, `test_project_container_names`) that live behind the
 # `test-helpers` feature so they never reach a release build. Without the
 # feature the target does not compile, and `debian/rules` builds with
-# `--no-default-features --features watch,completions` — so it broke there while
+# `--no-default-features --features watch,completions`, so it broke there while
 # every other caller passed either `--all-features` or `--features test-helpers`
 # and stayed green.
 #

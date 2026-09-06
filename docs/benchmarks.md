@@ -18,11 +18,11 @@
 All three tools drive **the same rootless Podman**, so this is a pure *tool*
 comparison: identical engine, identical digest-pinned and pre-pulled images,
 identical compose file per scenario, the same op flags for every tool. Each
-number is the median over **10 measured iterations** — 12 runs with the first
+number is the median over **10 measured iterations**: 12 runs with the first
 2 discarded as warm-up; p95 and standard deviation are in parentheses.
 
 `docker-compose` normally drives dockerd. Pointing it at the Podman socket
-through `DOCKER_HOST` is what makes it comparable here — the only difference
+through `DOCKER_HOST` is what makes it comparable here; the only difference
 left is the orchestrator. Run against a Docker daemon instead, the numbers
 would fold in the engine difference and could not be read as tool-versus-tool;
 the harness detects which engine it drove and labels the report accordingly.
@@ -34,7 +34,7 @@ never by the runner.
 
 Timing comes from `bench/timeit`, which forks the command, takes the clock
 across it, and reads peak RSS and CPU from `wait4`'s rusage. It replaced
-`/usr/bin/time -v`, whose `Elapsed` field resolves to 0.01 s — coarse enough
+`/usr/bin/time -v`, whose `Elapsed` field resolves to 0.01 s, coarse enough
 that the fastest rows here used to publish as `0.000` and podup's entire CPU
 column with them.
 

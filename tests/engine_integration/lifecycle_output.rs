@@ -1,6 +1,6 @@
 //! #817/#818/#873: the lifecycle commands must report concise per-container
 //! progress on success (docker-compose style), on stderr so stdout stays a
-//! clean pipe — and `run -d` must echo the started container's id on stdout.
+//! clean pipe, and `run -d` must echo the started container's id on stdout.
 
 use std::fs;
 use std::process::Command;

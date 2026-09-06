@@ -4,7 +4,7 @@
 //! fields (env vars, labels, maps) are merged with the override winning on
 //! overlapping keys. Sequence fields are combined per the Compose
 //! Specification's `extends` rules: referenced (base) items first, then the
-//! extending service's items, with duplicates removed — not replaced wholesale.
+//! extending service's items, with duplicates removed, not replaced wholesale.
 
 use super::super::types::{
 	DependsOn, DependsOnCondition, EnvFile, EnvVars, Labels, Service, ServiceCondition,
@@ -16,7 +16,7 @@ use super::super::types::{
 /// A key tagged `!override` takes the overriding value whole, skipping whatever
 /// combine rule would normally apply; `!reset` drops the key entirely, leaving
 /// the type's default. Both were accepted and silently ignored before, so a file
-/// asking for replacement got an append instead — the opposite of what it said.
+/// asking for replacement got an append instead, the opposite of what it said.
 ///
 /// Implemented by pre-shaping the two sides and then running the ordinary merge,
 /// rather than by branching inside it: `!reset` empties both sides so the result
@@ -43,7 +43,7 @@ pub(in crate::compose) fn merge_service_tagged(
 	merge_service(base, over)
 }
 
-/// Reset one service key to its default, by name — the primitive both tags are
+/// Reset one service key to its default, by name: the primitive both tags are
 /// built from.
 ///
 /// A key podup does not model is ignored: a tag cannot change a merge that never
@@ -230,7 +230,7 @@ pub(in crate::compose) fn merge_service(base: Service, override_svc: Service) ->
 		secrets: merge_vec(base.secrets, override_svc.secrets),
 		// Union, not replace. A service on `backend` in the base and `monitoring`
 		// in the override silently lost `backend`, dropped off the network, and
-		// service discovery failed at run time — far from the config that caused
+		// service discovery failed at run time, far from the config that caused
 		// it. docker compose unions them; the override's per-network config wins
 		// for a network both declare.
 		networks: merge_networks(base.networks, override_svc.networks),
@@ -303,7 +303,7 @@ pub(in crate::compose) fn merge_service(base: Service, override_svc: Service) ->
 		oom_score_adj: override_svc.oom_score_adj.or(base.oom_score_adj),
 		blkio_config: override_svc.blkio_config.or(base.blkio_config),
 		logging: override_svc.logging.or(base.logging),
-		// Merged per key, like `environment` and `labels` — not replaced.
+		// Merged per key, like `environment` and `labels`, not replaced.
 		sysctls: merge_sysctls(base.sysctls, override_svc.sysctls),
 		ulimits: {
 			let mut m = base.ulimits;
@@ -336,7 +336,7 @@ pub(in crate::compose) fn merge_service(base: Service, override_svc: Service) ->
 /// Merge `volumes:` by **container-side target**, with the override winning.
 ///
 /// `merge_vec` dedups by serialized form, so a base mounting `./a:/data` and an
-/// override remapping it to `./b:/data` produced both entries — and
+/// override remapping it to `./b:/data` produced both entries, and
 /// `podman create` refused the container with `duplicate mount destination`.
 /// docker compose replaces the mount at a target it already has, which is what
 /// remapping a path in an override is *for*.
@@ -393,7 +393,7 @@ fn merge_networks(base: ServiceNetworks, over: ServiceNetworks) -> ServiceNetwor
 		}
 	}
 	// Stay in the short form when nothing carries per-network config. That is the
-	// form the user wrote and the one docker keeps — and a map of all-`None`
+	// form the user wrote and the one docker keeps, and a map of all-`None`
 	// values is pruned as empty by the `config` renderer's null-stripping, which
 	// would drop the networks from the rendered file entirely.
 	if out.values().all(Option::is_none) {
@@ -402,7 +402,7 @@ fn merge_networks(base: ServiceNetworks, over: ServiceNetworks) -> ServiceNetwor
 	ServiceNetworks::Map(out)
 }
 
-/// Merge `sysctls:` per key, the way `environment` and `labels` already merge —
+/// Merge `sysctls:` per key, the way `environment` and `labels` already merge:
 /// the override wins for a key both set, and the base keeps the rest.
 fn merge_sysctls(base: Sysctls, over: Sysctls) -> Sysctls {
 	if matches!(over, Sysctls::Empty) {

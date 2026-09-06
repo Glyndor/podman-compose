@@ -26,7 +26,7 @@ fn chunks_are_reassembled_in_order() {
 }
 
 /// The reader must survive a producer that sends an empty frame. Reporting
-/// end-of-stream there would truncate the archive with no error anywhere —
+/// end-of-stream there would truncate the archive with no error anywhere,
 /// exactly the silent-data-loss shape this file exists to avoid.
 #[test]
 fn an_empty_frame_is_not_end_of_stream() {

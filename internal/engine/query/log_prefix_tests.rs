@@ -2,7 +2,7 @@ use super::{prefix_slot, prefix_style, LinePrefixer};
 
 /// The regression this guards: `new` used to resolve `service_slot(label)`
 /// directly against the raw, replica-suffixed label, which is never a key
-/// in the per-project registry `identity_slot` resolves against — every log
+/// in the per-project registry `identity_slot` resolves against, so every log
 /// prefix silently fell back to the hash instead of the sequential colour
 /// `ps` uses for the same container.
 ///
@@ -13,7 +13,7 @@ use super::{prefix_slot, prefix_style, LinePrefixer};
 /// was red on any terminal that never announces the wide palette (no
 /// `TERM`/`COLORTERM`, which is every Linux/macOS CI leg today) whether or
 /// not the regression it guards was present. The slot itself never wraps,
-/// so it stays a real, palette-independent assertion — and since
+/// so it stays a real, palette-independent assertion, and since
 /// `prefix_style` does nothing but render `prefix_slot`'s output (see its
 /// doc comment), pinning the slot pins the `Style` too.
 #[test]
@@ -29,7 +29,7 @@ fn prefix_style_routes_through_identity_style_not_service_style() {
 		"the raw, suffixed label must not be hashed directly"
 	);
 	// `prefix_style` is a pure rendering of `prefix_slot`, so its `Style`
-	// still agrees with `identity_style` on a wide-palette terminal — kept
+	// still agrees with `identity_style` on a wide-palette terminal, kept
 	// as a smoke test that the rendering step itself is wired up.
 	assert_eq!(
 		prefix_style("web-1"),

@@ -106,8 +106,8 @@ impl Engine {
 			let levels = crate::compose::resolve_levels(file)?;
 			let active = active_profiles_set(active_profiles);
 			// Which services this `up`/`create` should start. A profiled service
-			// that an active service depends on is implicitly activated here —
-			// the same set `config` reports — so `up` never leaves a started
+			// that an active service depends on is implicitly activated here,
+			// the same set `config` reports, so `up` never leaves a started
 			// service with an unsatisfied (never-created) dependency.
 			let enabled = enabled_profile_services(file, &active, target_services);
 
@@ -161,9 +161,9 @@ impl Engine {
 			}
 
 			// Seed the board before any work starts. This is the whole point of
-			// the phase: the resource set is knowable here — `levels` is already
+			// the phase: the resource set is knowable here, since `levels` is already
 			// resolved above, and the networks and volumes come straight off the
-			// compose file — while every progress event in the tree fires once
+			// compose file, while every progress event in the tree fires once
 			// its work is already over. A board grown from those events would be
 			// a transcript with extra steps.
 			let mut resources = self.up_resources(file, &enabled, &target_set);
@@ -239,7 +239,7 @@ impl Engine {
 			// Best-effort: warm the image cache for every service this pass will
 			// pull, concurrently, before the per-level walk below serializes a
 			// level-2+ service's image acquisition behind the level-1 barrier.
-			// A prefetch I/O miss is never fatal — `up_one_service`'s own pull
+			// A prefetch I/O miss is never fatal: `up_one_service`'s own pull
 			// below is still authoritative and the only path that can fail `up`
 			// on a transport / registry error. A configuration error (an
 			// unrecognized `pull_policy:`) does propagate: it is reported here

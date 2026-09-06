@@ -52,7 +52,7 @@ pub struct ImageInspect {
 	/// On-disk size of the image in bytes, as libpod reports it.
 	///
 	/// Present in the default inspect response, so reading it costs no extra
-	/// call and no query parameter — unlike a container's size, which libpod
+	/// call and no query parameter, unlike a container's size, which libpod
 	/// leaves `null` until asked. Defaults to zero when the field is absent, so
 	/// an older server renders an empty cell rather than failing the whole
 	/// listing.

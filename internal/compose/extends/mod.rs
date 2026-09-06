@@ -1,4 +1,4 @@
-//! `extends:` directive — inheritance and field merging between service definitions.
+//! `extends:` directive: inheritance and field merging between service definitions.
 //!
 //! Services can extend another service within the same file or from an external
 //! compose file referenced by path. Resolution is recursive (chains are supported)

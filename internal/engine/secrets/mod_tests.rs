@@ -24,7 +24,7 @@ fn only_file_path(engine: &Engine, yaml: &str) -> PathBuf {
 #[test]
 fn secret_file_relative_path_is_anchored_to_base_dir() {
 	// A relative `file:` resolves against the project dir, not the Podman
-	// service's cwd — same as a bind-mount source, which is what this was.
+	// service's cwd, the same as a bind-mount source, which is what this was.
 	let base = PathBuf::from("/srv/project");
 	let yaml = "services:\n  web:\n    image: nginx\n    secrets: [tok]\nsecrets:\n  tok:\n    file: secret.txt\n";
 	let engine = engine_with_base(&base.to_string_lossy());
@@ -47,7 +47,7 @@ fn config_file_absolute_path_is_passed_through() {
 fn inline_union_dedups_shared_secret_across_services() {
 	// Two services in the same project both reference the same inline secret.
 	// The up-front union must create it once (one scoped name), not once per
-	// service — which is what previously raced delete-then-create.
+	// service, which is what previously raced delete-then-create.
 	let yaml = "services:\n  a:\n    image: nginx\n    secrets: [tok]\n  b:\n    image: nginx\n    secrets: [tok]\nsecrets:\n  tok:\n    content: shared\n";
 	let file = crate::compose::parse_str_raw(yaml).unwrap();
 	let union = collect_payload_union("proj", &file, Path::new("/base")).unwrap();

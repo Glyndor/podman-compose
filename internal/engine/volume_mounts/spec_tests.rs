@@ -8,7 +8,7 @@ use crate::compose::types::BindOptions;
 fn tmpfs_short_form_splits_path_from_options() {
 	// Regression: the whole entry used to become the destination, so
 	// `/multi:size=64m,…` mounted a tmpfs at a directory *named* that, with no
-	// size cap — while the real path stayed untouched. Silent, exit 0.
+	// size cap, while the real path stayed untouched. Silent, exit 0.
 	let m = parse_tmpfs_string("/multi:size=64m,mode=1777,noexec,nosuid,nodev");
 	assert_eq!(m.destination, "/multi", "path must not carry the options");
 	assert_eq!(
@@ -110,7 +110,7 @@ fn extend_bind_opts_translates_selinux() {
 
 #[test]
 fn windows_drive_source_is_a_bind_not_a_named_volume() {
-	// `C:\data:/in/container` — the drive colon must not be read as the
+	// `C:\data:/in/container`: the drive colon must not be read as the
 	// src/dst separator, and the source must classify as a bind.
 	assert_eq!(
 		split_volume_spec(r"C:\data:/in/container"),

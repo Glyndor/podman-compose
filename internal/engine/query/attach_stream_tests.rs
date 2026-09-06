@@ -61,7 +61,7 @@ fn engine(fake: &fake_podman::FakePodman) -> Engine {
 
 /// Fake that ends both services' log streams cleanly, lists both as exited, and
 /// answers `/wait` with the per-container exit code passed in. Stop calls
-/// return 204 (idempotent on already-stopped containers is fine — the abort
+/// return 204 (idempotent on already-stopped containers is fine; the abort
 /// path's `engine.stop` runs against an already-exited project).
 fn fake_two_services_exited(first_code: i64, second_code: i64) -> fake_podman::FakePodman {
 	fake_podman::start_replying(move |method, target| {
@@ -77,7 +77,7 @@ fn fake_two_services_exited(first_code: i64, second_code: i64) -> fake_podman::F
 		} else if method == "POST" && target.contains("proj-second-1/wait") {
 			FakeReply::Body(200, second_code.to_string())
 		} else if target.contains("/containers/json") {
-			// Both containers are listed as exited — the abort path's
+			// Both containers are listed as exited, so the abort path's
 			// `container_still_running` will answer "stopped" for either.
 			FakeReply::Body(
 				200,
@@ -86,7 +86,7 @@ fn fake_two_services_exited(first_code: i64, second_code: i64) -> fake_podman::F
 					.to_string(),
 			)
 		} else if method == "POST" {
-			// Stop calls (POST /containers/X/stop?t=...) — 204 makes them
+			// Stop calls (POST /containers/X/stop?t=...): 204 makes them
 			// idempotent no-ops against the already-stopped containers, which
 			// is what `engine.stop` does when the project is already down.
 			FakeReply::Body(204, String::new())
@@ -197,7 +197,7 @@ async fn abort_with_exit_code_from_returns_named_service_exit_code() {
 /// `--exit-code-from ghost` names a service that does not exist in the compose
 /// file. The check runs before any container is created so the error surfaces
 /// as a clear `ServiceNotFound`, not a generic `is_err()` that could mean
-/// anything. Asserts the variant — a bare `is_err()` would be satisfied by
+/// anything. Asserts the variant; a bare `is_err()` would be satisfied by
 /// any failure.
 #[tokio::test]
 async fn exit_code_from_with_unknown_service_is_rejected() {
@@ -243,7 +243,7 @@ async fn exit_code_from_with_known_service_is_accepted() {
 }
 
 /// Without `--abort-on-container-exit` (and without `--exit-code-from`), a
-/// container that exits mid-stream is **not** an event — we keep waiting for
+/// container that exits mid-stream is **not** an event: we keep waiting for
 /// the others, and the function returns `StreamsEnded` when they finish. This
 /// is the existing-attached-`up` behavior, kept intact.
 ///

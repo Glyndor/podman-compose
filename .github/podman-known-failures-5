@@ -1,9 +1,9 @@
 # Integration tests that fail on the Podman 5 nested-virt lane for environmental
 # reasons, not because podup is broken. The lane fails when a failing test is NOT
-# on this list — a new identity is a real regression, whatever the pass count says.
+# on this list: a new identity is a real regression, whatever the pass count says.
 #
 # Adding a line here is a claim that a test cannot pass under nested-virt. Make
-# that claim with a run, not a guess — the whole point of this file is that the
+# that claim with a run, not a guess: the whole point of this file is that the
 # 2026-07 regression (#1072) hid inside a count-only gate for a day and a
 # release. Remove a line the moment its test starts passing in the lane.
 #
@@ -11,13 +11,13 @@
 # nested virt. Podman's journald log driver could not open its library in this
 # image, so every logs request returned HTTP 500 and the VM served no logs at
 # all. With the file-based driver configured the lane went from 10 failures to
-# 2 — the six run/attach tests and cli_run_subcommand and cli_logs_tail_limits_output
+# 2: the six run/attach tests and cli_run_subcommand and cli_logs_tail_limits_output
 # all pass now. The claim "cannot pass under nested virt" was made honestly, with
 # a run, and was still wrong: the physical host that proved 155/155 also had a
 # working journald, so the comparison could not see the difference.
 #
 # 2026-07-25: the same mistake again, and the same shape. run_flags::engine_run_
-# applies_volume_publish_and_interactive was never about nested virt either — it
+# applies_volume_publish_and_interactive was never about nested virt either; it
 # bind-mounted a host directory with no SELinux relabel, so on an enforcing host
 # the container read it as `Permission denied`. Measured on Fedora 44 + Podman
 # 5.8.1 with plain `podman run`, no podup involved: without `z` the read is
@@ -27,8 +27,8 @@
 #
 # 2026-07-27: and with that the last entry goes too. The lane printed its own
 # stale-entry notice for niche::engine_events_stream_connects in three
-# consecutive runs — 30237701219, 30239588499 and the 12:26 nightly on main,
-# 30265944631 — each carrying `test niche::engine_events_stream_connects ... ok`
+# consecutive runs (30237701219, 30239588499 and the 12:26 nightly on main,
+# 30265944631) each carrying `test niche::engine_events_stream_connects ... ok`
 # in the log, 172 passed and 0 failed on both legs, and no retry fired on either.
 # The events stream was never the nested-virt casualty this line claimed it was;
 # the journald fix of 2026-07-20 is the likeliest reason it stopped failing, and
@@ -37,4 +37,4 @@
 # So this file is empty now, and so is its Podman 6 counterpart. That is the
 # loudest shape either can have: on both majors, any failing test is a regression
 # until a run says otherwise. If one appears here, classify it with a run and add
-# it back with the evidence — do not add it to make the red go away.
+# it back with the evidence; do not add it to make the red go away.

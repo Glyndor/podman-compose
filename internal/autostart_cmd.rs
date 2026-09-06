@@ -86,7 +86,7 @@ pub(crate) async fn dispatch(
 			let working_dir = std::fs::canonicalize(&base_dir).unwrap_or(base_dir);
 			// The longest stop_grace_period in the project. systemd bounds the whole
 			// ExecStop independently of what podup does inside it, and its default
-			// is 90s — so without this a stack whose slowest container needs longer
+			// is 90s, so without this a stack whose slowest container needs longer
 			// is killed mid-stop at reboot, while a manual `podup stop` honours it.
 			let max_grace = podup::autostart::max_stop_grace_secs(file);
 			let unit = podup::autostart::ServiceUnitOpts::new(exe, abs_files, project, working_dir)
@@ -128,7 +128,7 @@ pub(crate) async fn dispatch(
 			// The one check that needs a live Podman. Start mode restores what
 			// the store holds and deliberately does not reconcile, so a
 			// container that is absent, or present but no longer matching the
-			// file, must be refused HERE — at install, where a human is
+			// file, must be refused HERE, at install, where a human is
 			// watching. At boot there is no podup to notice: that is the cost of
 			// keeping it off the boot path, not an oversight.
 			//
@@ -153,11 +153,11 @@ pub(crate) async fn dispatch(
 			)
 		}
 		AutostartCommands::Uninstall { purge } => {
-			// Remove whichever mode is installed — the two never coexist, and asking
+			// Remove whichever mode is installed; the two never coexist, and asking
 			// the user to name the mode only risks a no-op against the wrong one.
 			// Hold the uninstall's outcome rather than `?`-ing it here. By the time
 			// it can fail, the unit files are already gone and `installed_mode`
-			// would no longer recognise the project — so short-circuiting would
+			// would no longer recognise the project, so short-circuiting would
 			// skip `--purge` exactly when the stack is still up and most needs
 			// tearing down, leaving its named volumes behind and the state
 			// unrecognisable. Purge first, report the failure after.

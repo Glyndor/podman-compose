@@ -22,7 +22,7 @@ pub fn parse(content: &str) -> Vec<(String, String)> {
 ///
 /// Used for explicitly requested env files (`--env-file`, a service `env_file:`)
 /// where a typo'd or truncated file must fail loudly rather than silently drop
-/// variables — matching docker compose, which hard-errors on an unterminated
+/// variables, matching docker compose, which hard-errors on an unterminated
 /// quoted value.
 pub fn parse_strict(content: &str) -> crate::error::Result<Vec<(String, String)>> {
 	parse_inner(content, true)

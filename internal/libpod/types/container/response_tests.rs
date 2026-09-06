@@ -2,7 +2,7 @@ use super::*;
 use crate::libpod::types::container::spec::Namespace;
 
 // ---------------------------------------------------------------------------
-// Namespace (spec type — tested here to avoid pushing spec.rs over 500 lines)
+// Namespace (spec type, tested here to avoid pushing spec.rs over 500 lines)
 // ---------------------------------------------------------------------------
 
 #[test]

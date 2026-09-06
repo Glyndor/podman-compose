@@ -111,7 +111,7 @@ fn split_volume_spec(s: &str) -> (&str, &str, &str) {
 ///
 /// The entry is `<path>` or `<path>:<opt>[,<opt>…]`, split on the **first**
 /// colon: everything after it is handed to the engine as mount options. That is
-/// what docker compose does, measured against it rather than inferred — for
+/// what docker compose does, measured against it rather than inferred, for
 /// `/multi:size=64m,mode=1777,noexec` it produces the Tmpfs entry
 /// `/multi -> size=64m,mode=1777,noexec,…`, and a bare `/plain` or a trailing
 /// `/trail:` yields the path with no options.

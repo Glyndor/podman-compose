@@ -24,7 +24,7 @@ async fn cli_wait_names_the_container_and_its_exit_code() {
 	let out = run(&["-f", c, "-p", &proj, "wait", "job"]);
 	assert!(out.status.success(), "wait failed: {:?}", out.stderr);
 	// One line per container, naming it (#1248). This used to assert a line
-	// that was exactly `"0"` — a bare code with nothing saying whose it was,
+	// that was exactly `"0"`, a bare code with nothing saying whose it was,
 	// which is what the change replaced.
 	let stdout = String::from_utf8_lossy(&out.stdout);
 	assert!(
@@ -112,7 +112,7 @@ async fn cli_attach_streams_output_until_exit() {
 	// `attach` streams LIVE output only (libpod `tail=0`), like `docker attach`:
 	// anything emitted before the client connects is not replayed. So the
 	// container must keep emitting after start, or the test races the attach
-	// connection. It prints a line every second for a few seconds, then exits —
+	// connection. It prints a line every second for a few seconds, then exits;
 	// attach connects, catches a live line, and the follow stream closes when the
 	// container stops (attach returns rather than blocking forever).
 	fs::write(

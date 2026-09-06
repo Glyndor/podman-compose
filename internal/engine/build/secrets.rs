@@ -48,7 +48,7 @@ impl Engine {
 					})?
 					.into_bytes()
 			} else if config.external == Some(true) {
-				warn!("build secret '{name}' is external; cannot forward over the libpod build API — skipping");
+				warn!("build secret '{name}' is external; cannot forward over the libpod build API; skipping");
 				continue;
 			} else {
 				continue;

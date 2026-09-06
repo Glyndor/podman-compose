@@ -68,7 +68,7 @@ struct PoolInner {
 	closed: bool,
 }
 
-/// Per-socket HTTP/1.1 connection pool. Cheap to clone — the state is behind
+/// Per-socket HTTP/1.1 connection pool. Cheap to clone; the state is behind
 /// `Arc`s internally.
 pub(crate) struct ConnPool {
 	socket_path: String,
@@ -111,12 +111,12 @@ impl ConnPool {
 	/// - `cap > 0` and an idle connection is available: hand it out.
 	/// - `cap > 0` and no idle connection: open a fresh one and track it
 	///   in the pool. If the pool is at its cap, open a transient
-	///   connection (not tracked) instead — the cap is a hint for idle
+	///   connection (not tracked) instead: the cap is a hint for idle
 	///   reuse, not a cap on concurrency.
 	pub(super) async fn acquire(self: &Arc<Self>) -> Result<PoolGuard> {
 		// No-pool short-circuit. The pool is opt-in (a cap of 0 means
 		// disabled). Every acquire opens a fresh connection that is dropped
-		// on release — the previous, proven behaviour.
+		// on release, the previous, proven behaviour.
 		if self.cap == 0 {
 			let (sender, driver) = open_one(&self.socket_path).await?;
 			return Ok(PoolGuard {
@@ -151,7 +151,7 @@ impl ConnPool {
 				// Discard any idle-but-poisoned connections first; they will
 				// be replaced by the next acquire that opens fresh. Doing this
 				// here, before the at-cap check, keeps the live_count honest
-				// — a poisoned idle slot no longer counts against `cap`.
+				// A poisoned idle slot no longer counts against `cap`.
 				while matches!(inner.idle.front(), Some(c) if c.poisoned) {
 					inner.idle.pop_front();
 					inner.live_count -= 1;
@@ -200,7 +200,7 @@ impl ConnPool {
 			// At cap. The cap is a hint for reuse, not a cap on concurrency:
 			// open a transient connection that is NOT tracked in the pool
 			// (no `live_count` increment, no slot to release into). A parallel
-			// caller that exceeds the cap is not throttled — it just does not
+			// caller that exceeds the cap is not throttled; it just does not
 			// reuse a socket. This is the same shape as Go's `http.Transport`,
 			// where `MaxIdleConnsPerHost` caps the idle pool while active
 			// requests can exceed it.
@@ -231,7 +231,7 @@ impl ConnPool {
 	}
 
 	/// Open a dedicated connection for a streaming call. The connection is
-	/// tracked on the pool only so the buffered half sees the pressure —
+	/// tracked on the pool only so the buffered half sees the pressure;
 	/// streaming callers receive their own [`StreamingConn`] regardless.
 	pub(super) async fn open_streaming(self: &Arc<Self>) -> Result<StreamingConn> {
 		{
@@ -281,7 +281,7 @@ impl ConnPool {
 ///
 /// `transient` is `true` when the pool was at its cap and the acquire fell
 /// through to a fresh connection that is NOT tracked in the pool's idle
-/// queue. A transient guard is dropped directly — there is no release to
+/// queue. A transient guard is dropped directly: there is no release to
 /// the pool, no count decrement, no wake-up. The cap is a hint for reuse,
 /// not a cap on concurrency: a parallel caller that exceeds it is not
 /// throttled, it just does not get to reuse an idle socket.
@@ -344,7 +344,7 @@ impl StreamingConn {
 impl Drop for StreamingConn {
 	fn drop(&mut self) {
 		// Aborting the driver task closes the socket via the IO half hyper
-		// holds — the sender is left alone because dropping it does not, on
+		// holds; the sender is left alone because dropping it does not, on
 		// its own, surface an EOF to the background task in a timely way.
 		if let Some(inner) = self.inner.take() {
 			inner.driver.abort();

@@ -102,7 +102,7 @@ impl Drop for CountingServer {
 }
 
 /// With the pool enabled (cap > 0), sequential requests ride a single
-/// connection — the pool's whole reason to exist. 100 calls → 1 accepted
+/// connection, the pool's whole reason to exist. 100 calls → 1 accepted
 /// connection. The default cap is 0 (no pool), so this test constructs
 /// the client with a non-zero cap to exercise the reuse path.
 #[tokio::test]
@@ -152,7 +152,7 @@ async fn concurrent_requests_share_connections_within_the_cap() {
 /// A parallel caller that exceeds the cap is not throttled. The pool opens
 /// transient connections beyond the cap and drops them on release; the
 /// idle queue stays at the cap. The server sees more than `pool_size`
-/// connections under load — that is the documented contract: the cap is
+/// connections under load; that is the documented contract: the cap is
 /// a hint for idle reuse, not a cap on concurrency.
 #[tokio::test]
 async fn concurrent_requests_above_cap_open_transient_connections() {
@@ -197,7 +197,7 @@ async fn a_dropped_client_closes_its_pool() {
 		// driver task.
 	}
 	// A subsequent acquire against the same socket would need a new Client;
-	// we don't reach into a closed pool — the test simply verifies the
+	// we don't reach into a closed pool; the test simply verifies the
 	// Drop-driven close did not panic and the temp dir is still usable.
 	let _ = std::fs::metadata(&sock_str).unwrap();
 }

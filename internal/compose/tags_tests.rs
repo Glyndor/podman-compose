@@ -20,7 +20,7 @@ fn untagged_document_yields_nothing() {
 	assert!(parse("services:\n  web:\n    ports: [\"80:80\"]\n").is_empty());
 }
 
-/// A tag this tool does not define is ignored, not rejected — the document
+/// A tag this tool does not define is ignored, not rejected; the document
 /// may be valid for something else.
 #[test]
 fn unknown_tag_is_ignored() {
@@ -46,7 +46,7 @@ fn strip_removes_tags_at_any_depth() {
 	let out = serde_yaml::to_string(&v).unwrap();
 	assert!(!out.contains("!override"), "{out}");
 	assert!(!out.contains("!reset"), "{out}");
-	// The wrapped value survives — stripping removes the tag, not the data.
+	// The wrapped value survives: stripping removes the tag, not the data.
 	assert!(out.contains("9090:80"), "{out}");
 }
 

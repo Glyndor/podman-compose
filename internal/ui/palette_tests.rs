@@ -235,8 +235,8 @@ fn assignment_ignores_the_order_names_arrive_in() {
 	assert_eq!(assign(&forward), assign(&backward));
 }
 
-/// A label podup never resolved from the compose file — an orphan container,
-/// say — still gets a stable colour rather than none.
+/// A label podup never resolved from the compose file (an orphan container,
+/// say) still gets a stable colour rather than none.
 #[test]
 fn an_unregistered_service_still_gets_a_stable_colour() {
 	let map = assign(&["web".to_string()]);
@@ -249,7 +249,7 @@ fn an_unregistered_service_still_gets_a_stable_colour() {
 }
 
 /// `colour_for` must answer from the registry, not the hash, once a label is
-/// registered — otherwise `set_services` would be a no-op and every label
+/// registered; otherwise `set_services` would be a no-op and every label
 /// would still collide exactly as before this task. `"db"` is chosen because
 /// its registered slot (1, from sorting alongside `web`/`cache`/`worker`/
 /// `queue`) provably differs from its own unregistered hash (11 against a

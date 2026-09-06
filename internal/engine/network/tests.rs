@@ -78,7 +78,7 @@ fn network_mode_service_single_replica_uses_first_replica_name() {
 
 #[test]
 fn network_mode_service_scaled_replicas_resolves_replica_one() {
-	// `scale:`/`deploy.replicas` > 1 means the base name does not exist —
+	// `scale:`/`deploy.replicas` > 1 means the base name does not exist,
 	// docker-compose attaches to replica `-1`.
 	let target = Service {
 		scale: Some(3),

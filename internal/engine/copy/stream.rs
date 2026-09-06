@@ -31,7 +31,7 @@ pub(super) type ChunkItem = io::Result<Bytes>;
 /// Serves the bytes an async producer sends over a bounded channel to a
 /// blocking consumer, refusing to serve more than `cap` in total.
 ///
-/// The cap is no longer a memory bound — nothing accumulates — but it stays
+/// The cap is no longer a memory bound (nothing accumulates) but it stays
 /// meaningful: a compromised container can stream without end, and the bytes
 /// land on the host's disk as they arrive. What it protects changed from RAM to
 /// disk, so it is not redundant.
@@ -65,7 +65,7 @@ impl Read for ChannelReader {
 		while self.current.is_empty() {
 			match self.rx.blocking_recv() {
 				// Channel closed: the producer finished or was dropped. Either
-				// way there are no more bytes, which is a clean end of file —
+				// way there are no more bytes, which is a clean end of file;
 				// a truncated archive surfaces as a tar error, not here.
 				None => return Ok(0),
 				Some(Err(e)) => return Err(e),

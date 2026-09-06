@@ -9,7 +9,7 @@
 //!
 //! These tests used to assert only the end-to-end outcome, so a runtime whose
 //! DNS server had died reported `service \`server\` was not reachable by its
-//! service name` — which reads as a podup defect and cost real debugging time
+//! service name`, which reads as a podup defect and cost real debugging time
 //! before measurement showed aardvark-dns was simply not running. Each layer is
 //! now asserted on its own, and a failure names the layer that produced it.
 
@@ -25,7 +25,7 @@ use super::*;
 /// podup never touched failing to resolve cannot be podup's alias handling.
 ///
 /// The signatures come from the measurement in #1330 rather than from guessing
-/// at what busybox prints — a dead server times out, while a live server that
+/// at what busybox prints: a dead server times out, while a live server that
 /// does not know the name answers NXDOMAIN, and only the first is the runtime's
 /// fault. `test_exec_capture` attaches stderr and does not inspect the exit
 /// code, so a failed lookup arrives as `Ok` carrying its own complaint.
@@ -47,8 +47,8 @@ async fn runtime_dns_is_down(engine: &Engine, from: &str, own_name: &str) -> boo
 /// The body both tests share: bring the project up, assert podup's layer, then
 /// the runtime's, and tear down whatever happened.
 ///
-/// `alias_context` distinguishes the two topologies in the failure message —
-/// an explicit `networks:` block versus the synthesized `default` network —
+/// `alias_context` distinguishes the two topologies in the failure message,
+/// an explicit `networks:` block versus the synthesized `default` network,
 /// because "the alias is missing" has a different cause in each.
 async fn assert_sibling_resolves_by_service_name(
 	engine: &Engine,
@@ -98,7 +98,7 @@ async fn assert_sibling_resolves_by_service_name(
 	);
 
 	// A runtime whose DNS is down cannot answer this question, and a test that
-	// could not run is not a test that failed. It skips — but only where the
+	// could not run is not a test that failed. It skips, but only where the
 	// environment does not promise Podman works.
 	//
 	// Where it does (the nested-virt lane sets PODUP_REQUIRE_PODMAN), the skip
@@ -111,7 +111,7 @@ async fn assert_sibling_resolves_by_service_name(
 			std::env::var_os("PODUP_REQUIRE_PODMAN").is_none(),
 			"the alias `server` is registered, so podup did its part, but the container \
 			 runtime's DNS server did not answer a lookup for the container's own name \
-			 either — aardvark-dns is down. PODUP_REQUIRE_PODMAN is set, so this is a \
+			 either: aardvark-dns is down. PODUP_REQUIRE_PODMAN is set, so this is a \
 			 broken environment rather than a test to skip."
 		);
 		eprintln!(
@@ -152,7 +152,7 @@ async fn sibling_resolves_service_by_name_on_shared_network() {
 
 // ---------------------------------------------------------------------------
 // With NO `networks:` block, services still reach each other by service name
-// (the synthesized `default` network — docker-compose parity, #417)
+// (the synthesized `default` network, docker-compose parity, #417)
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "test-helpers")]
@@ -165,7 +165,7 @@ async fn sibling_resolves_service_by_name_without_networks_block() {
 	let proj = proj("dnsdef");
 	let engine = Engine::new(client, proj.clone());
 
-	// No top-level `networks:` and no per-service `networks:` — the common case.
+	// No top-level `networks:` and no per-service `networks:`, the common case.
 	// Parse through the real CLI entry point so the implicit `default` network
 	// is synthesized; `parse_str` deliberately does not normalize.
 	let dir = tempfile::tempdir().unwrap();

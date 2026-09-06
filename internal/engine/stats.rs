@@ -1,4 +1,4 @@
-//! `stats` — live resource-usage stream for a project's service containers.
+//! `stats` is the live resource-usage stream for a project's service containers.
 
 use std::collections::{HashMap, HashSet};
 
@@ -89,7 +89,7 @@ const NAME_WIDTH: usize = 32;
 /// or an empty string when none are wanted (which falls back to the daemon
 /// default). libpod's `/containers/stats` expects the `containers` parameter
 /// **repeated** once per container (`&containers=a&containers=b`), not a single
-/// comma-joined value — a comma-joined list is parsed as one container name and
+/// comma-joined value: a comma-joined list is parsed as one container name and
 /// 404s. Names are sorted for a stable URL and each is URL-encoded.
 fn containers_query(wanted: &HashSet<String>) -> String {
 	if wanted.is_empty() {
@@ -175,7 +175,7 @@ struct NetStat {
 /// How `stats` renders a size: binary units at one decimal.
 ///
 /// Binary because this table is read next to `free` and `htop`, which are
-/// binary — not next to podman's own output, which is decimal. One decimal
+/// binary, not next to podman's own output, which is decimal. One decimal
 /// because the columns below are fixed-width by design (a live view must not
 /// resize itself mid-repaint), and a second decimal does not fit `NET I/O`.
 const SIZE_FORMAT: SizeFormat = SizeFormat::binary().with_decimals(1);
@@ -220,7 +220,7 @@ fn load_style(pct: f64) -> crate::ui::Style {
 	use crate::ui::AnsiColor;
 	// Four bands, not three, and the lowest one is dim rather than green.
 	// Everything under 70% used to be the same green, so a container at 0.02%
-	// looked exactly like one at 69% — colour that does not vary with the value
+	// looked exactly like one at 69%: colour that does not vary with the value
 	// carries no information, and the whole reason to read `stats` is to find
 	// the row in trouble. Idle rows now recede instead of competing.
 	if pct < 5.0 {
@@ -239,7 +239,7 @@ fn load_style(pct: f64) -> crate::ui::Style {
 /// Format one stats row into the table layout, optionally coloured. With
 /// `no_trunc` a long name is left intact (and may overflow its column);
 /// otherwise it is truncated to [`NAME_WIDTH`]. Pure, so the layout is testable
-/// without a terminal — the tests pass `colour = false`.
+/// without a terminal; the tests pass `colour = false`.
 ///
 /// Each cell is padded to its width *before* being painted: the ANSI codes are
 /// zero-width, so padding afterwards would count them and knock every later
@@ -414,7 +414,7 @@ impl Engine {
 
 		if opts.no_stream || running.is_empty() {
 			// Nothing running means nothing to sample (and an empty `containers=`
-			// filter would otherwise fall back to the whole host) — skip the call
+			// filter would otherwise fall back to the whole host), so skip the call
 			// and render an empty/`--all`-only frame.
 			let report = if running.is_empty() {
 				StatsReport::default()
@@ -440,7 +440,7 @@ impl Engine {
 		let mut frames = parse_json_lines::<StatsReport>(resp.into_body());
 
 		// A live region only where one belongs: stdout a terminal, colour on, the
-		// width readable — the same three conditions the lifecycle board uses,
+		// width readable, the same three conditions the lifecycle board uses,
 		// asked of stdout rather than stderr because `stats` *is* its output. A
 		// `--format json` stream is a machine path and never repaints.
 		let mut region = wants_region(opts.json, live_stats_allowed())
@@ -459,13 +459,13 @@ impl Engine {
 					// it out of band: re-check what is still running. If nothing the
 					// stream was sampling is alive, the end was expected and the
 					// command succeeded; if something is still running, the stream
-					// truncated a live sample and the command failed — which is the
+					// truncated a live sample and the command failed, which is the
 					// exit code a monitor scraping `stats` needs (#1080).
 					//
 					// The re-check is point-in-time: it samples state a moment after
 					// the break, so a genuine break that happens to coincide with
 					// every sampled container stopping is knowingly tolerated as a
-					// clean end — the transport layer cannot tell the two apart, and
+					// clean end: the transport layer cannot tell the two apart, and
 					// the sampled containers are gone either way.
 					let still_running = match self.target_containers(file, target_services).await {
 						Ok(targets) => targets
@@ -505,7 +505,7 @@ impl Engine {
 		Ok(())
 	}
 
-	/// The containers to report on — every existing replica of the targeted
+	/// The containers to report on: every existing replica of the targeted
 	/// services (all services when `target_services` is empty), paired with
 	/// whether each is currently running. Only containers that actually exist are
 	/// returned (no static-name fallback): an absent service simply contributes
@@ -595,7 +595,7 @@ fn frame_rows(
 ///
 /// Pure, and separate from the terminal probe, so the `--format json` half is
 /// testable: a piped test cannot exercise it at all, because the terminal probe
-/// is already false there — a version that let JSON repaint on a tty passed
+/// is already false there: a version that let JSON repaint on a tty passed
 /// every integration test in the suite.
 fn wants_region(json: bool, live_terminal: bool) -> bool {
 	// Never for the machine path, whatever the terminal says. A parser reading
@@ -629,7 +629,7 @@ fn print_frame(
 
 	if opts.json {
 		let json: Vec<_> = rows.iter().map(stat_json_row).collect();
-		// While streaming, one compact array per line — NDJSON, the shape
+		// While streaming, one compact array per line: NDJSON, the shape
 		// `events` already emits. A pretty-printed array per frame, concatenated,
 		// is neither a single JSON document nor NDJSON, so no parser accepts it:
 		// `stats --format json` was unreadable by anything for as long as it

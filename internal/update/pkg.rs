@@ -23,7 +23,7 @@ use crate::ComposeError;
 /// Both path checks can be wrong in one direction only, which is the direction
 /// that matters. A layout that merely looks like Homebrew's or Scoop's makes
 /// podup refuse to self-update and send the user to a package manager that does
-/// not own it — wrong, visible, and recoverable by hand. The opposite mistake,
+/// not own it: wrong, visible, and recoverable by hand. The opposite mistake,
 /// missing a managed install, silently rewrites a file whose manager still
 /// believes it knows the contents. These heuristics are shaped to fail the
 /// first way.
@@ -49,9 +49,9 @@ pub fn managing_package_manager() -> Option<&'static str> {
 /// Homebrew installs every formula under `<prefix>/Cellar/<name>/<version>/`
 /// and links a symlink into `<prefix>/bin`, so the caller's `canonicalize`
 /// resolves into the Cellar whichever of the two the user invoked. The prefix
-/// itself moves — `/opt/homebrew` on Apple silicon, `/usr/local` on Intel,
-/// `/home/linuxbrew/.linuxbrew` on Linux, anywhere at all for a custom install
-/// — but the `Cellar` component does not, which is what makes it the thing to
+/// itself moves (`/opt/homebrew` on Apple silicon, `/usr/local` on Intel,
+/// `/home/linuxbrew/.linuxbrew` on Linux, anywhere at all for a custom install)
+/// but the `Cellar` component does not, which is what makes it the thing to
 /// match rather than any of the prefixes.
 fn homebrew_owns(path: &Path) -> bool {
 	path.components()
@@ -73,7 +73,7 @@ fn scoop_owns(path: &Path) -> bool {
 
 /// The body of [`scoop_owns`] with the root passed in rather than read from the
 /// environment, so the configured-root branch can be tested without mutating
-/// `SCOOP` — which in a parallel test binary is a race against every other test
+/// `SCOOP`, which in a parallel test binary is a race against every other test
 /// in the process rather than a fixture.
 fn scoop_owns_under(path: &Path, root: Option<&Path>) -> bool {
 	if let Some(root) = root {
@@ -96,7 +96,7 @@ fn scoop_owns_under(path: &Path, root: Option<&Path>) -> bool {
 /// The primary check is `dpkg-query -S <path>`. Crucially this must not *fail
 /// open*: if the helper cannot be spawned (missing, not executable, or denied)
 /// we do not fall back to scanning dpkg's on-disk file lists directly
-/// (`/var/lib/dpkg/info/*.list`) — that directory is owned by another package
+/// (`/var/lib/dpkg/info/*.list`): that directory is owned by another package
 /// and we have no guarantee of its mode, ownership, or the validity of its
 /// contents. Reading it opens a window where a tampered target file's path
 /// could be planted inside the listing directory to make self-update refuse
@@ -154,7 +154,7 @@ pub(crate) enum GlyndorAutoUpdate {
 /// **And a third way to be stuck.** `Package-Blacklist` vetoes by name, so an
 /// allowed origin is not sufficient on its own.
 ///
-/// The origin match is deliberately loose — any entry mentioning `Glyndor`
+/// The origin match is deliberately loose: any entry mentioning `Glyndor`
 /// counts, rather than `Glyndor:stable` exactly. An operator who allowed a
 /// different Glyndor suite has thought about this and does not need telling;
 /// the machine worth warning is the one whose configuration has never heard of

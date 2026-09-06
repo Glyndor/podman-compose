@@ -19,14 +19,14 @@ async fn export_to_an_unwritable_destination_surfaces_iopath() {
 	);
 
 	// The fake answers the streaming GET the same way it would for a
-	// healthy container — podup never has to read a real byte from us,
+	// healthy container; podup never has to read a real byte from us,
 	// because the destination file fails to open before the body is
 	// consumed. The chunked body is what `get_stream` accepts. The
 	// target carries the `http://localhost` prefix the client builds,
 	// so the matcher looks for the trailing `/export` route instead.
 	let fake = fake_podman::start_replying(|method, target| {
 		if method == "GET" && target.contains("/export") {
-			// One empty chunk is enough — the test errors before the
+			// One empty chunk is enough; the test errors before the
 			// body is fully drained.
 			return FakeReply::ChunkedEnd(vec![String::new()]);
 		}

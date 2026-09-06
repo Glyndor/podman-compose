@@ -60,7 +60,7 @@ impl EnvVars {
 	}
 }
 
-/// One entry in an `env_file:` list — either a bare path or a long-form object.
+/// One entry in an `env_file:` list: either a bare path or a long-form object.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum EnvFileEntry {
@@ -88,7 +88,7 @@ impl EnvFileEntry {
 		}
 	}
 
-	/// `true` by default — missing file is an error unless `required: false`.
+	/// `true` by default: a missing file is an error unless `required: false`.
 	pub fn required(&self) -> bool {
 		match self {
 			EnvFileEntry::Path(_) => true,
@@ -97,7 +97,7 @@ impl EnvFileEntry {
 	}
 }
 
-/// `env_file:` field — single path, list of paths, or list of long-form objects.
+/// `env_file:` field: single path, list of paths, or list of long-form objects.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(untagged)]
 pub enum EnvFile {

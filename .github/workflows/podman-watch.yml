@@ -1,6 +1,6 @@
 name: podman-version-watch
 # Notifies (opens an issue) when Podman ships a release newer than the version
-# podup was last validated against AND at least one distro has packaged it — the
+# podup was last validated against AND at least one distro has packaged it, the
 # signal to run the validation lane. The last-validated version lives in
 # .github/podman-baseline; bump it after a successful validation.
 on:
@@ -29,7 +29,7 @@ jobs:
           LATEST=$(gh api repos/containers/podman/releases/latest --jq '.tag_name' | sed 's/^v//')
           # LATEST is a third-party-controlled release tag. Reject anything but a
           # plain SemVer before it is used anywhere else in this script.
-          [[ "$LATEST" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::unexpected Podman release tag '$LATEST' — not a plain version"; exit 1; }
+          [[ "$LATEST" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::unexpected Podman release tag '$LATEST'; not a plain version"; exit 1; }
           echo "baseline=$BASELINE  latest=$LATEST"
           # Nothing to do unless LATEST is strictly newer than BASELINE.
           if [ "$LATEST" = "$BASELINE" ] || \
@@ -43,24 +43,24 @@ jobs:
             "https://repology.org/api/v1/project/podman" \
             | LATEST="$LATEST" python3 -c "import os,sys,json;d=json.load(sys.stdin);latest=os.environ['LATEST'];print(', '.join(sorted({p['repo'] for p in d if p.get('version')==latest})))")
           if [ -z "$DISTROS" ]; then
-            echo "Podman $LATEST is released but not packaged in any distro yet — keep watching."; exit 0
+            echo "Podman $LATEST is released but not packaged in any distro yet; keep watching."; exit 0
           fi
           echo "Podman $LATEST is packaged in: $DISTROS"
           # Major bump => full sweep; otherwise a lighter re-check.
           MAJ_NEW=${LATEST%%.*}; MAJ_OLD=${BASELINE%%.*}
           KIND="patch/minor re-check"; EFFORT="effort:M"
           if [ "$MAJ_NEW" != "$MAJ_OLD" ]; then
-            KIND="MAJOR — full command-by-command sweep + wire-field re-probe"
+            KIND="MAJOR: full command-by-command sweep + wire-field re-probe"
             # A major re-probes the wire fields on top of the suite: a size more.
             EFFORT="effort:L"
           fi
           TITLE="Validate podup on Podman $LATEST (now packaged)"
           # Idempotent: skip if an issue for this version is already open.
           if gh issue list --state open --search "in:title $TITLE" --json title --jq '.[].title' | grep -qxF "$TITLE"; then
-            echo "Issue already open — nothing to do."; exit 0
+            echo "Issue already open; nothing to do."; exit 0
           fi
           # Label on creation. An unlabelled issue is a process bug, and one filed
-          # by a bot is no exception — #673 and #1016 both landed bare because this
+          # by a bot is no exception: #673 and #1016 both landed bare because this
           # step never passed --label, and both had to be labelled by hand later.
           gh issue create --title "$TITLE" \
             --label "type:test" --label "prio:P2" --label "status:ready" \
@@ -70,7 +70,7 @@ jobs:
           This is **$KIND**.
 
           Validation steps:
-          - [ ] Run the nested-virt Podman-$LATEST lane (Fedora rawhide / a distro that ships it) — command-by-command + the integration suite
+          - [ ] Run the nested-virt Podman-$LATEST lane (Fedora rawhide / a distro that ships it): command-by-command + the integration suite
           - [ ] If a new MAJOR: re-probe wire fields (healthcheck / secrets / quadlet) and check the upstream breaking-changes notes
           - [ ] File issues for any regressions
           - [ ] If green: bump \`.github/podman-baseline\` to **$LATEST** and refresh the README badge + ai-context
