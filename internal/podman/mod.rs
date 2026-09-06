@@ -19,7 +19,7 @@ const DEFAULT_PIPE: &str = "//./pipe/podman-machine-default";
 ///
 /// Priority:
 /// 1. `socket_path` if provided.
-/// 2. The first existing platform default — on Linux the rootful or
+/// 2. The first existing platform default: on Linux the rootful or
 ///    per-user runtime socket, on macOS the host-side socket exposed by
 ///    `podman machine`, on Windows the `podman machine` named pipe.
 /// 3. The conventional path for this platform, so a failed connection

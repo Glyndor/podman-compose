@@ -3,7 +3,7 @@
 //! The bootstrap this document publishes used to read `dpkg -i` first and
 //! `gpg --show-keys /usr/share/keyrings/glyndor.gpg` second. `dpkg -i` runs the
 //! package's maintainer scripts as root, so that order verified a keyring after
-//! giving the package that wrote it full privileges — the check ran on its own
+//! giving the package that wrote it full privileges: the check ran on its own
 //! subject. `dpkg-deb -x` unpacks the data archive and runs nothing, which is
 //! why the fingerprint has to come from an extracted copy.
 //!
@@ -28,7 +28,7 @@ fn doc() -> String {
 }
 
 /// Line index of the first line containing `needle`, or a failure naming what
-/// was being looked for — an `Option` that silently becomes `None` would let a
+/// was being looked for: an `Option` that silently becomes `None` would let a
 /// renamed command turn this test green.
 fn line_of(text: &str, needle: &str) -> usize {
 	text.lines()

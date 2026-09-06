@@ -12,7 +12,7 @@ fn both_ladders_cover_the_whole_input_type() {
 }
 
 /// The regression the ladder was extended for: stopping at `TiB` rendered a
-/// petabyte as `1024.0TiB` — right arithmetic, wrong unit, and nine digits in a
+/// petabyte as `1024.0TiB`: right arithmetic, wrong unit, and nine digits in a
 /// column sized for five.
 #[test]
 fn a_petabyte_does_not_saturate_into_terabytes() {
@@ -97,7 +97,7 @@ fn a_value_that_rounds_onto_the_next_unit_is_promoted() {
 /// makes the test above a promotion rather than an off-by-one.
 #[test]
 fn a_value_that_does_not_round_up_stays_on_its_rung() {
-	// 1048000 bytes is 1023.4KiB, which rounds to 1023.44 — still KiB.
+	// 1048000 bytes is 1023.4KiB, which rounds to 1023.44, still KiB.
 	assert_eq!(format_bytes(1_048_000, &SizeFormat::binary()), "1023.44KiB");
 }
 
@@ -124,7 +124,7 @@ fn the_decimal_count_is_configurable() {
 /// read off a real tool on 2026-08-03: `docker compose` v5.1.3 printed `98.2MB`
 /// for `redis:8-alpine`, and `podman images` printed `1.01 GB`, `101 MB` and
 /// `805 kB` on the same host. Three digits in all of them, which a fixed decimal
-/// count cannot produce — `98.2` has one decimal and `8.71` has two.
+/// count cannot produce: `98.2` has one decimal and `8.71` has two.
 #[test]
 fn significant_digits_match_what_podman_and_docker_print() {
 	let fmt = SizeFormat::decimal().with_significant(3);
@@ -136,7 +136,7 @@ fn significant_digits_match_what_podman_and_docker_print() {
 
 /// The digit count holds across every magnitude, which is the property that
 /// keeps the column from breathing as rows scroll past. A fixed decimal count
-/// gives `1.00GB` and `999.00MB` — four characters apart.
+/// gives `1.00GB` and `999.00MB`, four characters apart.
 #[test]
 fn significant_digits_keep_a_constant_width() {
 	let fmt = SizeFormat::decimal().with_significant(3);
@@ -156,7 +156,7 @@ fn significant_digits_keep_a_constant_width() {
 
 /// A promotion changes the value's magnitude, so the digit count has to be
 /// recomputed for the new rung. Without that, 999999 bytes rounds to `1000kB`
-/// and then renders as `1kB` — the promotion applied and the decimals did not.
+/// and then renders as `1kB`: the promotion applied and the decimals did not.
 #[test]
 fn significant_digits_are_recomputed_after_a_promotion() {
 	let fmt = SizeFormat::decimal().with_significant(3);
@@ -175,7 +175,7 @@ fn significant_digits_do_not_reach_below_a_byte() {
 }
 
 /// A zero-digit request still shows a digit, because `{:.0}` prints one
-/// whatever it is handed. Nothing in the formatter enforces this — it is a
+/// whatever it is handed. Nothing in the formatter enforces this; it is a
 /// property of the format machinery, and it is pinned here so a future clamp
 /// added "to be safe" has something to justify itself against.
 #[test]
@@ -186,7 +186,7 @@ fn a_zero_digit_request_still_renders_a_digit() {
 
 /// Tested one level below `format_bytes` on purpose. Unit selection guarantees
 /// the value handed over is at least one, so the sub-one branch cannot be
-/// reached through the public entry point — a mutation deleting the clamp that
+/// reached through the public entry point: a mutation deleting the clamp that
 /// used to sit here survived every test that went in the front door, which is
 /// what dead defensive code looks like from outside. The clamp is gone; this
 /// pins what the arithmetic actually does, including where it is weak.
@@ -200,7 +200,7 @@ fn the_decimal_count_is_pinned_below_its_public_entry_point() {
 	assert_eq!(Precision::Fixed(4).decimals_for(805.0), 4);
 	// Sub-one values count their leading zero as the digit before the point.
 	// That means one significant digit of 0.5 asks for no decimals and renders
-	// `0` — a real weakness, and unreachable, so it is recorded rather than
+	// `0`, a real weakness, and unreachable, so it is recorded rather than
 	// fixed. If a caller ever hands this a fraction, fix it then.
 	assert_eq!(Precision::Significant(3).decimals_for(0.5), 2);
 	assert_eq!(Precision::Significant(1).decimals_for(0.5), 0);
@@ -226,7 +226,7 @@ fn composite_skips_empty_components() {
 }
 
 /// Asking for more components than the value has yields only the ones that
-/// exist — no `1KiB 0B` padding.
+/// exist: no `1KiB 0B` padding.
 #[test]
 fn composite_stops_when_the_value_runs_out() {
 	let fmt = SizeFormat::binary().with_parts(7);

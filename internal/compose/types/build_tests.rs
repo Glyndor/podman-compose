@@ -85,7 +85,7 @@ fn build_config_long_form_context() {
 #[test]
 fn build_with_only_dockerfile_inline_defaults_context_to_dot() {
 	// Compose Spec (v2.22+): `build:` may carry only `dockerfile_inline:` with
-	// no `context:` — the context then defaults to the project directory `.`.
+	// no `context:`, so the context then defaults to the project directory `.`.
 	let b: BuildConfig = serde_yaml::from_str("dockerfile_inline: |\n  FROM alpine\n").unwrap();
 	assert!(matches!(b, BuildConfig::Config { .. }));
 	assert_eq!(b.context(), ".");

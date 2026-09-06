@@ -6,7 +6,7 @@ name: Installer contract (reusable)
 # the release workflow publishes a fixed list of assets. If the two drift, the
 # installer breaks for users. This catches the drift on the PR, before any tag.
 #
-# Scope — this gate reads declarations, and only declarations. It compares two
+# Scope: this gate reads declarations, and only declarations. It compares two
 # files and answers "do install.sh and release.yml agree on the asset names?".
 # That is a cross-reference between two statements of intent, and parsing YAML
 # is the right way to answer it.
@@ -16,7 +16,7 @@ name: Installer contract (reusable)
 # appear among the parsed `asset:` keys. Those keys are the build matrix, and
 # the manifest is computed FROM the matrix outputs in a later step, so it can
 # never be one of them: the check was unpassable by construction, and the only
-# way to satisfy it was to declare a matrix entry that produced nothing — the
+# way to satisfy it was to declare a matrix entry that produced nothing, the
 # exact defect it existed to catch. It had never run green in any repository.
 # Existence is answered where it can be answered honestly, against the staged
 # files at release time, by `scripts/verify-release-assets.py`.
@@ -102,7 +102,7 @@ jobs:
                   f"workflow does not declare:\n{lines}\n"
                   f"declared: {sorted(published)}\n"
                   "This gate reads the workflow's asset declarations only. It "
-                  "does not check that the release produces them — "
+                  "does not check that the release produces them; "
                   "scripts/verify-release-assets.py does that against the "
                   "staging directory at release time."
               )

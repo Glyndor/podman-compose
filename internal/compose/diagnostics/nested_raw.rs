@@ -1,7 +1,7 @@
 //! Unknown-key warnings for nested compose *option blocks*.
 //!
 //! The typed [`ComposeFile`](crate::compose::types::ComposeFile) silently drops
-//! any key it does not model inside seven nested option blocks — a `bind`,
+//! any key it does not model inside seven nested option blocks: a `bind`,
 //! `volume`, or `tmpfs` mount block, a long-form service `networks.<net>` map,
 //! and the `deploy.resources.{limits,reservations}` specs (plus their
 //! `driver_config` / `devices[]` children). Unlike the service- and top-level
@@ -18,7 +18,7 @@
 //! (serialize-the-parsed-struct) would drop any modeled key whose value is
 //! `None`/empty (every field carries `skip_serializing_if`), so `propagation:`
 //! null, `link_local_ips: []`, `driver_opts: {}`, or `devices: []` would be
-//! mis-flagged as unknown — the forbidden "warn on a modeled key" case. A guard
+//! mis-flagged as unknown, the forbidden "warn on a modeled key" case. A guard
 //! test per type (see `tests`) serializes a fully-populated, exhaustive struct
 //! literal and asserts its key set equals the allowlist, so adding a field to
 //! any of the seven structs fails to compile until both the literal and the
@@ -68,7 +68,7 @@ const DEVICE_RESERVATION_KEYS: &[&str] =
 /// interpolated, merge-resolved compose document.
 ///
 /// Pure (no I/O, no logging) so it is unit-testable; the caller emits each
-/// message via `tracing::warn!`. An unparseable document yields no warnings — it
+/// message via `tracing::warn!`. An unparseable document yields no warnings; it
 /// is the parser proper's job to report that.
 pub(crate) fn raw_nested_unknown_warnings(interpolated_yaml: &str) -> Vec<String> {
 	let mut out = Vec::new();
@@ -136,7 +136,7 @@ fn walk_volumes(service: &str, svc: &serde_yaml::Mapping, out: &mut Vec<String>)
 	}
 }
 
-/// `services.<svc>.networks.<net>` — only the long-form mapping carries options;
+/// `services.<svc>.networks.<net>`: only the long-form mapping carries options;
 /// a bare list or a `null` attachment has nothing to diff.
 fn walk_networks(service: &str, svc: &serde_yaml::Mapping, out: &mut Vec<String>) {
 	let Some(nets) = svc.get("networks").and_then(|v| v.as_mapping()) else {

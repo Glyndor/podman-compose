@@ -1,4 +1,4 @@
-//! [`Service`] struct — the central type representing a single compose service.
+//! [`Service`] struct, the central type representing a single compose service.
 //!
 //! Fields map 1-to-1 to the Docker Compose specification. Optional fields use
 //! `Option<T>` so that absent keys are distinguishable from explicit nulls
@@ -22,90 +22,90 @@ use super::{
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[non_exhaustive]
 pub struct Service {
-	/// `image:` — container image reference (`name[:tag|@digest]`) to run; if
+	/// `image:` is the container image reference (`name[:tag|@digest]`) to run; if
 	/// absent, `build:` must supply one.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub image: Option<String>,
-	/// `build:` — build the image from source instead of (or in addition to)
+	/// `build:` builds the image from source instead of (or in addition to)
 	/// pulling `image:`; a string shorthand is the build context path.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub build: Option<BuildConfig>,
-	/// `extends:` — inherit configuration from another service (optionally in
+	/// `extends:` inherits configuration from another service (optionally in
 	/// another file); merged before this service's own keys are applied.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub extends: Option<ExtendsConfig>,
-	/// `command:` — overrides the image `CMD`; string (shell-parsed) or list (exec
+	/// `command:` overrides the image `CMD`; string (shell-parsed) or list (exec
 	/// form, no shell).
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub command: Option<Command>,
-	/// `entrypoint:` — overrides the image `ENTRYPOINT` and resets any image
+	/// `entrypoint:` overrides the image `ENTRYPOINT` and resets any image
 	/// `CMD`; string (shell form) or list (exec form).
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub entrypoint: Option<Command>,
 
-	/// `ports:` — published host↔container port mappings (`[host:]container[/proto]`
+	/// `ports:` lists published host↔container port mappings (`[host:]container[/proto]`
 	/// or long form); exposes the port outside the container network.
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub ports: Vec<PortMapping>,
-	/// `expose:` — ports made reachable to linked services only, without
+	/// `expose:` lists ports made reachable to linked services only, without
 	/// publishing them on the host.
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub expose: Vec<String>,
 
-	/// `environment:` — environment variables set in the container; map or
+	/// `environment:` holds environment variables set in the container; map or
 	/// `KEY=VALUE` list. Takes precedence over `env_file:`.
 	#[serde(default)]
 	pub environment: EnvVars,
-	/// `env_file:` — file(s) of `KEY=VALUE` lines loaded into the environment;
+	/// `env_file:` names file(s) of `KEY=VALUE` lines loaded into the environment;
 	/// overridden by `environment:` on key collision.
 	#[serde(default)]
 	pub env_file: EnvFile,
-	/// `volumes:` — bind mounts, named volumes, and anonymous volumes (short
+	/// `volumes:` lists bind mounts, named volumes, and anonymous volumes (short
 	/// `src:dst[:opts]` or long form).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub volumes: Vec<VolumeMount>,
-	/// `tmpfs:` — paths mounted as an in-memory tmpfs inside the container; single
+	/// `tmpfs:` lists paths mounted as an in-memory tmpfs inside the container; single
 	/// path or list.
 	#[serde(default)]
 	pub tmpfs: StringOrList,
-	/// `volumes_from:` — mount all volumes from another service or container
+	/// `volumes_from:` mounts all volumes from another service or container
 	/// (`name[:ro|rw]`).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub volumes_from: Vec<String>,
-	/// `configs:` — top-level configs granted to this service, mounted as files
+	/// `configs:` lists top-level configs granted to this service, mounted as files
 	/// (default `/<config-name>`) or exposed per the long form.
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub configs: Vec<ServiceConfigRef>,
-	/// `secrets:` — top-level secrets granted to this service, mounted under
+	/// `secrets:` lists top-level secrets granted to this service, mounted under
 	/// `/run/secrets/` (or the long-form target).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub secrets: Vec<ServiceSecretRef>,
 
-	/// `networks:` — networks this service joins, with optional per-network
+	/// `networks:` lists the networks this service joins, with optional per-network
 	/// aliases/IPs; absent means the project's default network.
 	#[serde(default)]
 	pub networks: ServiceNetworks,
-	/// `hostname:` — the container's own hostname (its `/etc/hostname` and
+	/// `hostname:` is the container's own hostname (its `/etc/hostname` and
 	/// in-container `uname -n`).
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub hostname: Option<String>,
-	/// `domainname:` — the container's NIS/DNS domain (fully-qualified
+	/// `domainname:` is the container's NIS/DNS domain (fully-qualified
 	/// hostname suffix).
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub domainname: Option<String>,
-	/// `mac_address:` — fixed MAC for the container's primary interface; a
+	/// `mac_address:` is a fixed MAC for the container's primary interface; a
 	/// documented divergence under rootless Podman where it may be ignored.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub mac_address: Option<String>,
-	/// `links:` — legacy service links (`service[:alias]`) adding hostname
+	/// `links:` declares legacy service links (`service[:alias]`) adding hostname
 	/// entries; superseded by shared networks.
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub links: Vec<String>,
-	/// `external_links:` — link to containers outside this compose project
+	/// `external_links:` links to containers outside this compose project
 	/// (`container[:alias]`).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub external_links: Vec<String>,
-	/// `extra_hosts:` — extra `/etc/hosts` entries (`hostname:ip`); accepts the
+	/// `extra_hosts:` adds `/etc/hosts` entries (`hostname:ip`); accepts the
 	/// list or mapping YAML forms.
 	#[serde(
 		default,
@@ -113,186 +113,186 @@ pub struct Service {
 		skip_serializing_if = "Vec::is_empty"
 	)]
 	pub extra_hosts: Vec<String>,
-	/// `dns:` — custom DNS server IP(s) for name resolution; single value or list.
+	/// `dns:` sets custom DNS server IP(s) for name resolution; single value or list.
 	#[serde(default)]
 	pub dns: StringOrList,
-	/// `dns_search:` — DNS search domains appended to unqualified names; single
+	/// `dns_search:` sets DNS search domains appended to unqualified names; single
 	/// value or list.
 	#[serde(default)]
 	pub dns_search: StringOrList,
-	/// `dns_opt:` — resolver options written to `/etc/resolv.conf` (e.g.
+	/// `dns_opt:` sets resolver options written to `/etc/resolv.conf` (e.g.
 	/// `ndots:2`); single value or list.
 	#[serde(default)]
 	pub dns_opt: StringOrList,
-	/// `network_mode:` — networking namespace mode (`bridge`, `host`, `none`,
+	/// `network_mode:` is the networking namespace mode (`bridge`, `host`, `none`,
 	/// `service:NAME`, `container:NAME`); mutually exclusive with `networks:`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub network_mode: Option<String>,
 
-	/// `depends_on:` — start/stop ordering and optional `condition:`
+	/// `depends_on:` declares start/stop ordering and an optional `condition:`
 	/// (`service_started`/`service_healthy`/`service_completed_successfully`)
 	/// dependencies on other services.
 	#[serde(default)]
 	pub depends_on: DependsOn,
-	/// `healthcheck:` — command and timing that determine container health;
+	/// `healthcheck:` is the command and timing that determine container health;
 	/// `disable: true` turns off any image-defined check.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub healthcheck: Option<HealthCheck>,
 
-	/// `restart:` — restart policy (`no`/`always`/`on-failure[:max]`/
+	/// `restart:` is the restart policy (`no`/`always`/`on-failure[:max]`/
 	/// `unless-stopped`). Takes precedence over `deploy.restart_policy` when both
 	/// are set.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub restart: Option<RestartPolicy>,
-	/// `stop_signal:` — signal sent to stop the container (e.g. `SIGTERM`,
+	/// `stop_signal:` is the signal sent to stop the container (e.g. `SIGTERM`,
 	/// `SIGINT`); default `SIGTERM`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub stop_signal: Option<String>,
-	/// `stop_grace_period:` — duration string (e.g. `10s`, `1m30s`) to wait after
+	/// `stop_grace_period:` is the duration string (e.g. `10s`, `1m30s`) to wait after
 	/// `stop_signal` before `SIGKILL`; default `10s`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub stop_grace_period: Option<String>,
-	/// `profiles:` — activation profiles; the service starts only when one of
+	/// `profiles:` lists activation profiles; the service starts only when one of
 	/// these profiles is enabled (no profiles = always enabled).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub profiles: Vec<String>,
-	/// `post_start:` — lifecycle hook commands run inside the container right
+	/// `post_start:` holds lifecycle hook commands run inside the container right
 	/// after it starts (Compose v2.30+).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub post_start: Vec<LifecycleHook>,
-	/// `pre_stop:` — lifecycle hook commands run inside the container just before
+	/// `pre_stop:` holds lifecycle hook commands run inside the container just before
 	/// it is stopped (Compose v2.30+).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub pre_stop: Vec<LifecycleHook>,
 
-	/// `labels:` — metadata labels applied to the container; map or `key=value`
+	/// `labels:` holds metadata labels applied to the container; map or `key=value`
 	/// list.
 	#[serde(default)]
 	pub labels: Labels,
-	/// `annotations:` — OCI annotations on the container; distinct from `labels:`,
+	/// `annotations:` holds OCI annotations on the container; distinct from `labels:`,
 	/// passed through to the runtime.
 	#[serde(default)]
 	pub annotations: Labels,
-	/// `container_name:` — explicit container name overriding the generated
+	/// `container_name:` is an explicit container name overriding the generated
 	/// `<project>_<service>_<n>`; forbids scaling above 1 replica.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub container_name: Option<String>,
-	/// `user:` — user (and optional `:group`) the process runs as, by name or
+	/// `user:` is the user (and optional `:group`) the process runs as, by name or
 	/// numeric `UID[:GID]`; overrides the image `USER`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub user: Option<String>,
-	/// `working_dir:` — working directory for the process; overrides the image
+	/// `working_dir:` is the working directory for the process; overrides the image
 	/// `WORKDIR`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub working_dir: Option<String>,
-	/// `group_add:` — additional groups (name or GID) the process joins, beyond
+	/// `group_add:` lists additional groups (name or GID) the process joins, beyond
 	/// its primary group.
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub group_add: Vec<String>,
-	/// `platform:` — target platform for the image (`os[/arch[/variant]]`, e.g.
+	/// `platform:` is the target platform for the image (`os[/arch[/variant]]`, e.g.
 	/// `linux/amd64`).
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub platform: Option<String>,
 
-	/// `cap_add:` — Linux capabilities to grant on top of the runtime default set
+	/// `cap_add:` lists Linux capabilities to grant on top of the runtime default set
 	/// (e.g. `NET_ADMIN`).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub cap_add: Vec<String>,
-	/// `cap_drop:` — Linux capabilities to drop from the default set (`ALL` drops
+	/// `cap_drop:` lists Linux capabilities to drop from the default set (`ALL` drops
 	/// every capability).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub cap_drop: Vec<String>,
-	/// `security_opt:` — runtime security options (e.g. `label:...`, `seccomp=...`,
+	/// `security_opt:` lists runtime security options (e.g. `label:...`, `seccomp=...`,
 	/// `no-new-privileges:true`, `apparmor=...`).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub security_opt: Vec<String>,
-	/// `read_only:` — when `true`, mounts the container's root filesystem
+	/// `read_only:`, when `true`, mounts the container's root filesystem
 	/// read-only (writes only via volumes/tmpfs). Default `false`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub read_only: Option<bool>,
-	/// `privileged:` — when `true`, grants extended host privileges; has reduced
+	/// `privileged:`, when `true`, grants extended host privileges; has reduced
 	/// effect under rootless Podman. Default `false`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub privileged: Option<bool>,
-	/// `init:` — when `true`, runs an init process (PID 1) that reaps zombies and
+	/// `init:`, when `true`, runs an init process (PID 1) that reaps zombies and
 	/// forwards signals. Default `false`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub init: Option<bool>,
-	/// `tty:` — when `true`, allocates a pseudo-TTY for the container (akin to
+	/// `tty:`, when `true`, allocates a pseudo-TTY for the container (akin to
 	/// `docker run -t`). Default `false`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub tty: Option<bool>,
-	/// `stdin_open:` — when `true`, keeps stdin open for the container (akin to
+	/// `stdin_open:`, when `true`, keeps stdin open for the container (akin to
 	/// `docker run -i`). Default `false`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub stdin_open: Option<bool>,
 
-	/// `runtime:` — OCI runtime to execute the container (e.g. `runc`, `crun`);
+	/// `runtime:` is the OCI runtime to execute the container (e.g. `runc`, `crun`);
 	/// default is the engine's configured runtime.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub runtime: Option<String>,
-	/// `shm_size:` — size of `/dev/shm` as a size string (e.g. `512m`, `1g`);
+	/// `shm_size:` is the size of `/dev/shm` as a size string (e.g. `512m`, `1g`);
 	/// bytes if unitless.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub shm_size: Option<String>,
-	/// `userns_mode:` — user-namespace mode (e.g. `host`, `keep-id`) controlling
+	/// `userns_mode:` is the user-namespace mode (e.g. `host`, `keep-id`) controlling
 	/// UID/GID mapping into the container.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub userns_mode: Option<String>,
-	/// `pid:` — PID namespace to share (e.g. `host`, `container:NAME`,
+	/// `pid:` is the PID namespace to share (e.g. `host`, `container:NAME`,
 	/// `service:NAME`).
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub pid: Option<String>,
-	/// `ipc:` — IPC namespace mode (e.g. `host`, `shareable`, `service:NAME`,
+	/// `ipc:` is the IPC namespace mode (e.g. `host`, `shareable`, `service:NAME`,
 	/// `container:NAME`).
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub ipc: Option<String>,
-	/// `uts:` — UTS namespace mode; `host` shares the host's hostname/domain
+	/// `uts:` is the UTS namespace mode; `host` shares the host's hostname/domain
 	/// namespace.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub uts: Option<String>,
-	/// `cgroup_parent:` — optional parent cgroup under which the container's
+	/// `cgroup_parent:` is the optional parent cgroup under which the container's
 	/// cgroup is created.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cgroup_parent: Option<String>,
-	/// `cgroup:` — cgroup namespace mode (`host` or `private`) for the container.
+	/// `cgroup:` is the cgroup namespace mode (`host` or `private`) for the container.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cgroup: Option<String>,
 
-	/// `devices:` — host devices exposed to the container
+	/// `devices:` lists host devices exposed to the container
 	/// (`host[:container[:perms]]`, perms a subset of `rwm`).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub devices: Vec<String>,
-	/// `device_cgroup_rules:` — explicit device cgroup allow/deny rules (e.g.
+	/// `device_cgroup_rules:` lists explicit device cgroup allow/deny rules (e.g.
 	/// `c 1:3 mr`).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub device_cgroup_rules: Vec<String>,
-	/// `storage_opt:` — per-container storage driver options (e.g. `size`) passed
+	/// `storage_opt:` holds per-container storage driver options (e.g. `size`) passed
 	/// to the graph driver.
 	#[serde(default, skip_serializing_if = "HashMap::is_empty")]
 	pub storage_opt: HashMap<String, String>,
 
-	/// `scale:` — number of replica containers to run. Takes precedence over
+	/// `scale:` is the number of replica containers to run. Takes precedence over
 	/// `deploy.replicas`; a CLI `--scale` override wins over both.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub scale: Option<u32>,
-	/// `cpu_shares:` — relative CPU weight under contention (default `1024`);
+	/// `cpu_shares:` is the relative CPU weight under contention (default `1024`);
 	/// proportional share, not a hard cap like `cpus:`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cpu_shares: Option<u64>,
-	/// `cpu_quota:` — CFS hard cap in microseconds of CPU time per `cpu_period`;
+	/// `cpu_quota:` is the CFS hard cap in microseconds of CPU time per `cpu_period`;
 	/// `cpus:` is the higher-level equivalent.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cpu_quota: Option<i64>,
-	/// `cpu_period:` — CFS scheduler period in microseconds against which
+	/// `cpu_period:` is the CFS scheduler period in microseconds against which
 	/// `cpu_quota` is measured (default `100000`).
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cpu_period: Option<u64>,
-	/// `cpuset:` — explicit CPUs/cores the container may run on (e.g. `0-3`,
+	/// `cpuset:` names the explicit CPUs/cores the container may run on (e.g. `0-3`,
 	/// `0,2`).
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cpuset: Option<String>,
-	/// `cpus:` — fractional number of CPUs to allow (e.g. `0.5`); a hard cap
+	/// `cpus:` is the fractional number of CPUs to allow (e.g. `0.5`); a hard cap
 	/// converted to a CFS quota. Top-level value wins over `deploy.resources`.
 	/// Accepts both the unquoted number (`cpus: 0.5`) and the quoted string form.
 	#[serde(
@@ -301,115 +301,115 @@ pub struct Service {
 		skip_serializing_if = "Option::is_none"
 	)]
 	pub cpus: Option<String>,
-	/// `cpu_count:` — number of usable CPUs (Windows containers); not honored on
+	/// `cpu_count:` is the number of usable CPUs (Windows containers); not honored on
 	/// Linux/Podman.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cpu_count: Option<i64>,
-	/// `cpu_percent:` — usable percentage of available CPU (Windows containers);
+	/// `cpu_percent:` is the usable percentage of available CPU (Windows containers);
 	/// not honored on Linux/Podman.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cpu_percent: Option<i64>,
-	/// `cpu_rt_runtime:` — real-time CPU runtime per period in microseconds for
+	/// `cpu_rt_runtime:` is the real-time CPU runtime per period in microseconds for
 	/// real-time scheduling.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cpu_rt_runtime: Option<i64>,
-	/// `cpu_rt_period:` — real-time scheduler period in microseconds for
+	/// `cpu_rt_period:` is the real-time scheduler period in microseconds for
 	/// real-time scheduling.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cpu_rt_period: Option<i64>,
-	/// `mem_limit:` — hard memory cap as a size string (e.g. `512m`, `1g`); bytes
+	/// `mem_limit:` is the hard memory cap as a size string (e.g. `512m`, `1g`); bytes
 	/// if unitless. Top-level value wins over `deploy.resources.limits.memory`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub mem_limit: Option<String>,
-	/// `memswap_limit:` — total memory + swap limit as a size string; `-1` allows
+	/// `memswap_limit:` is the total memory + swap limit as a size string; `-1` allows
 	/// unlimited swap.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub memswap_limit: Option<String>,
-	/// `mem_reservation:` — soft memory limit (size string, e.g. `256m`) enforced
+	/// `mem_reservation:` is the soft memory limit (size string, e.g. `256m`) enforced
 	/// under host memory pressure; must be below `mem_limit`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub mem_reservation: Option<String>,
-	/// `mem_swappiness:` — swap tendency for the container's memory, `0`–`100`.
+	/// `mem_swappiness:` is the swap tendency for the container's memory, `0`–`100`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub mem_swappiness: Option<i64>,
-	/// `pids_limit:` — maximum number of PIDs the container may create; `-1` for
+	/// `pids_limit:` is the maximum number of PIDs the container may create; `-1` for
 	/// unlimited. Top-level value wins over `deploy.resources.limits.pids`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub pids_limit: Option<i64>,
-	/// `oom_kill_disable:` — when `true`, disables the OOM killer for the
+	/// `oom_kill_disable:`, when `true`, disables the OOM killer for the
 	/// container; not supported on cgroups v2.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub oom_kill_disable: Option<bool>,
-	/// `oom_score_adj:` — OOM-killer preference (`-1000`..`1000`); higher makes
+	/// `oom_score_adj:` is the OOM-killer preference (`-1000`..`1000`); higher makes
 	/// the container likelier to be killed first.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub oom_score_adj: Option<i64>,
-	/// `blkio_config:` — block-IO weights and per-device read/write bandwidth and
+	/// `blkio_config:` holds block-IO weights and per-device read/write bandwidth and
 	/// IOPS limits.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub blkio_config: Option<BlkioConfig>,
 
-	/// `logging:` — log driver and its options for the container's stdout/stderr.
+	/// `logging:` is the log driver and its options for the container's stdout/stderr.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub logging: Option<LoggingConfig>,
-	/// `sysctls:` — kernel parameters set in the container's namespace (e.g.
+	/// `sysctls:` sets kernel parameters in the container's namespace (e.g.
 	/// `net.core.somaxconn`); map or list form.
 	#[serde(default)]
 	pub sysctls: Sysctls,
-	/// `ulimits:` — per-resource process limits (e.g. `nofile`) as a single
+	/// `ulimits:` sets per-resource process limits (e.g. `nofile`) as a single
 	/// value or `{soft, hard}` pair, keyed by limit name.
 	#[serde(default, skip_serializing_if = "IndexMap::is_empty")]
 	pub ulimits: IndexMap<String, UlimitConfig>,
 
-	/// `label_file:` — file(s) of `key=value` lines loaded as container labels;
+	/// `label_file:` names file(s) of `key=value` lines loaded as container labels;
 	/// single path or list (Compose v2.32+).
 	#[serde(default)]
 	pub label_file: StringOrList,
 
-	/// `attach:` — when `false`, `up` does not stream this service's logs to the
+	/// `attach:`, when `false`, stops `up` streaming this service's logs to the
 	/// console. Default `true`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub attach: Option<bool>,
 
-	/// `pull_policy:` — when to pull the image: `always`, `never`, `missing` (the
+	/// `pull_policy:` decides when to pull the image: `always`, `never`, `missing` (the
 	/// default; alias `if_not_present`), `build`, or `newer`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub pull_policy: Option<String>,
 
-	/// `deploy:` — deployment config (replicas, resource limits/reservations,
+	/// `deploy:` is the deployment config (replicas, resource limits/reservations,
 	/// restart policy); a fallback for top-level `scale`/`cpus`/`mem_limit`/
 	/// `restart` and the source of Swarm-only fields.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub deploy: Option<DeployConfig>,
 
-	/// `develop:` — `watch` rules driving file-sync/rebuild during development.
+	/// `develop:` holds the `watch` rules driving file-sync/rebuild during development.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub develop: Option<DevelopConfig>,
 
-	/// `gpus:` — GPU devices to expose (`all` or a capability/count spec),
+	/// `gpus:` lists GPU devices to expose (`all` or a capability/count spec),
 	/// forwarded as CDI device reservations.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub gpus: Option<GpuSpec>,
 
-	/// `credential_spec:` — Windows managed-service-account credential source
+	/// `credential_spec:` is the Windows managed-service-account credential source
 	/// (`config`/`file`/`registry`). Parsed for fidelity; podup has no rootless
 	/// Podman equivalent, so the diagnostics pass reports it as not honored.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub credential_spec: Option<CredentialSpec>,
 
-	/// `isolation:` — container isolation technology (e.g. `default`, `process`,
+	/// `isolation:` is the container isolation technology (e.g. `default`, `process`,
 	/// `hyperv`). Distinct from `build.isolation`. Parsed for fidelity; podup has
 	/// no rootless Podman equivalent, so it is reported as not honored.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub isolation: Option<String>,
 
-	/// `provider:` (Compose v2.36) — delegates the service lifecycle to an
+	/// `provider:` (Compose v2.36) delegates the service lifecycle to an
 	/// external provider plugin. Parsed for fidelity; podup invokes no provider
 	/// plugins, so it is reported as not honored.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub provider: Option<ProviderConfig>,
 
-	/// `use_api_socket:` (Compose v2.37.1) — bind-mount the Docker API socket and
+	/// `use_api_socket:` (Compose v2.37.1) bind-mounts the Docker API socket and
 	/// forward credentials into the container. Parsed for fidelity; podup has no
 	/// equivalent, so it is reported as not honored.
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -492,20 +492,20 @@ impl Service {
 	}
 }
 
-/// `credential_spec:` — source of a Windows managed-service-account credential
+/// `credential_spec:` is the source of a Windows managed-service-account credential
 /// spec. Exactly one of `config`/`file`/`registry` is expected per the Compose
 /// Spec; podup parses all three for fidelity but honors none.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[non_exhaustive]
 pub struct CredentialSpec {
-	/// `config:` — ID of a Compose config object holding the credential spec.
+	/// `config:` is the ID of a Compose config object holding the credential spec.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub config: Option<String>,
-	/// `file:` — path to a credential-spec file, relative to the Docker data
+	/// `file:` is the path to a credential-spec file, relative to the Docker data
 	/// directory.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub file: Option<String>,
-	/// `registry:` — Windows registry value name holding the credential spec.
+	/// `registry:` is the Windows registry value name holding the credential spec.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub registry: Option<String>,
 	/// Forward-compatible keys captured so a typo is surfaced rather than dropped.
@@ -513,16 +513,16 @@ pub struct CredentialSpec {
 	pub unknown: IndexMap<String, serde_yaml::Value>,
 }
 
-/// `provider:` (Compose v2.36) — names an external provider plugin (`type`) and
+/// `provider:` (Compose v2.36) names an external provider plugin (`type`) and
 /// its free-form `options`. Parsed for fidelity; podup invokes no providers.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[non_exhaustive]
 pub struct ProviderConfig {
-	/// `type:` — name of the external provider plugin to delegate the service
+	/// `type:` is the name of the external provider plugin to delegate the service
 	/// lifecycle to.
 	#[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
 	pub provider_type: Option<String>,
-	/// `options:` — free-form provider-specific parameters passed through to the
+	/// `options:` holds free-form provider-specific parameters passed through to the
 	/// plugin.
 	#[serde(default, skip_serializing_if = "IndexMap::is_empty")]
 	pub options: IndexMap<String, serde_yaml::Value>,

@@ -48,10 +48,59 @@ pub(super) fn run_checks(
 	out
 }
 
-/// Field-name substring matching for the `secret_in_environment` check:
-/// `PASSWORD`, `SECRET`, `TOKEN`, `KEY`. Case-insensitive. The list is the
-/// issue, so it lives in one place.
-const SECRET_NAME_SUBSTRINGS: &[&str] = &["PASSWORD", "SECRET", "TOKEN", "KEY"];
+/// Field-name segments the `secret_in_environment` check matches after
+/// splitting: `PASSWORD`, `SECRET`, `TOKEN`, `KEY`. Comparison is segment
+/// equality, case-insensitive (segments are upper-cased before the
+/// lookup). Do not rename this back to a substring list: `contains` here
+/// reported `MONKEY_HABITAT` and `MD_Keywords` as hard-coded secrets
+/// (#1709), and the name is what says which of the two this is.
+const SECRET_NAME_SEGMENTS: &[&str] = &["PASSWORD", "SECRET", "TOKEN", "KEY"];
+
+/// Split an environment key into upper-case segments. Splits on the
+/// separators `_`, `-`, and `.`, and at camelCase (lower-to-upper) and
+/// PascalCase (upper-upper-followed-by-lower) boundaries. The camelCase
+/// split is what kept `apiToken` matching under the new rule; without
+/// it the helper would have treated `apiToken` as a single segment and
+/// the check would have stopped flagging it after the substring match
+/// was removed.
+fn segments(name: &str) -> Vec<String> {
+	let mut out = Vec::new();
+	for part in name.split(['_', '-', '.']) {
+		if part.is_empty() {
+			continue;
+		}
+		// Env keys are conventional identifiers and the keyword list is
+		// ASCII; working in bytes keeps the boundary check free of a
+		// UTF-8 decode at every step. A non-ASCII byte is upper-cased
+		// as-is and never splits on either side.
+		let bytes = part.as_bytes();
+		let mut start = 0;
+		let mut i = 1;
+		while i < bytes.len() {
+			let prev = bytes[i - 1];
+			let cur = bytes[i];
+			// Lower-to-upper: `aB`. A non-ASCII lead byte counts as the
+			// lower side: before this, `contains` flagged `NKey` spelled
+			// with a leading n-tilde, and dropping that would have been a
+			// silent false negative rather than the false positive #1709
+			// set out to remove. The split index is always an ASCII byte,
+			// so it is always a char boundary.
+			let lower_upper =
+				(prev.is_ascii_lowercase() || !prev.is_ascii()) && cur.is_ascii_uppercase();
+			// Upper-upper-followed-by-lower: `ABc` (PascalCase).
+			let upper_upper_lower = prev.is_ascii_uppercase()
+				&& cur.is_ascii_uppercase()
+				&& bytes.get(i + 1).is_some_and(|b| b.is_ascii_lowercase());
+			if lower_upper || upper_upper_lower {
+				out.push(part[start..i].to_ascii_uppercase());
+				start = i;
+			}
+			i += 1;
+		}
+		out.push(part[start..].to_ascii_uppercase());
+	}
+	out
+}
 
 /// `privileged: true`, grants extended host privileges that bypass the
 /// default capability set. Under rootless Podman the effect is reduced but
@@ -229,9 +278,11 @@ fn check_no_userns(name: &str, service: &Service, _file: &ComposeFile) -> Vec<Fi
 	}
 }
 
-/// `environment:` key whose name contains `PASSWORD|SECRET|TOKEN|KEY`
-/// (case-insensitive) with a literal non-empty value. Bare keys (host
-/// inheritance) and unresolved `${VAR}` placeholders are not secrets.
+/// `environment:` key whose name, split into segments on `_`, `-`, `.`,
+/// and camelCase/PascalCase boundaries, has a segment equal to
+/// `PASSWORD|SECRET|TOKEN|KEY` (case-insensitive), with a literal
+/// non-empty value. Bare keys (host inheritance) and unresolved
+/// `${VAR}` placeholders are not secrets.
 ///
 /// Service-local: the check is a positional grep on the `environment:` map
 /// of this service. These are surfaced so the operator can
@@ -240,8 +291,11 @@ fn check_no_userns(name: &str, service: &Service, _file: &ComposeFile) -> Vec<Fi
 fn check_secret_in_environment(name: &str, service: &Service, _file: &ComposeFile) -> Vec<Finding> {
 	let mut out = Vec::new();
 	for (key, value) in service.environment.to_map() {
-		let upper = key.to_ascii_uppercase();
-		if !SECRET_NAME_SUBSTRINGS.iter().any(|s| upper.contains(s)) {
+		let key_segments = segments(&key);
+		if !key_segments
+			.iter()
+			.any(|s| SECRET_NAME_SEGMENTS.contains(&s.as_str()))
+		{
 			continue;
 		}
 		let Some(value) = value else {
@@ -272,6 +326,14 @@ fn check_secret_in_environment(name: &str, service: &Service, _file: &ComposeFil
 /// `image:` is unpinned: no tag (defaults to `latest`), tag is `latest`,
 /// or `latest` is not pinned by a digest. An `@sha256:` digest counts as
 /// pinned even when a tag is also present.
+///
+/// A `build:` service can still pull when its image is missing locally and
+/// the pull policy asks for one, so a blanket skip on `build:` would hide
+/// a real registry reference. Only skip when the policy itself forbids
+/// the fetch: `pull_policy: build` or `pull_policy: never`. In every
+/// other case where `build:` is present the finding still fires, but
+/// names the operator-actionable fix (set `pull_policy: build`) instead
+/// of asking for a digest that no registry can serve.
 fn check_unpinned_image(name: &str, service: &Service, _file: &ComposeFile) -> Vec<Finding> {
 	let Some(reference) = service.image.as_deref() else {
 		// A `build:` service without an `image:` is built from source and
@@ -288,22 +350,38 @@ fn check_unpinned_image(name: &str, service: &Service, _file: &ComposeFile) -> V
 	// The tag/separator sits after the last colon not preceded by a slash;
 	// an image with no tag stops there.
 	let has_tag = last_colon > last_slash;
-	if !has_tag {
+	let needs_finding = !has_tag || &reference[last_colon + 1..] == "latest";
+	if !needs_finding {
+		return Vec::new();
+	}
+	if service.build.is_some()
+		&& matches!(
+			service.pull_policy.as_deref(),
+			Some("build") | Some("never")
+		) {
+		// Skip here: the operator's `pull_policy` already commits to a
+		// local-only run, so the check would duplicate a decision the
+		// policy has locked in and have nothing actionable to add.
+		return Vec::new();
+	}
+	if service.build.is_some() {
+		// Use a different message because a digest can only anchor a tag
+		// that exists in some registry; for a locally built image the
+		// actionable fix is the pull policy, not a pin.
 		return vec![finding(
 			name,
 			"unpinned_image",
-			&format!("image: {reference} has no tag; defaults to :latest"),
+			&format!(
+				"image: {reference} is built here, so a digest cannot pin it; set pull_policy: build to keep it from being pulled"
+			),
 		)];
 	}
-	let tag = &reference[last_colon + 1..];
-	if tag == "latest" {
-		return vec![finding(
-			name,
-			"unpinned_image",
-			&format!("image: {reference} pins to :latest, which moves under you"),
-		)];
-	}
-	Vec::new()
+	let msg = if !has_tag {
+		format!("image: {reference} has no tag; defaults to :latest")
+	} else {
+		format!("image: {reference} pins to :latest, which moves under you")
+	};
+	vec![finding(name, "unpinned_image", &msg)]
 }
 
 /// Construct one [`Finding`]. Private to this module so callers always go
@@ -328,5 +406,11 @@ fn finding(name: &str, check: &'static str, reason: &str) -> Finding {
 #[path = "checks_more_tests.rs"]
 mod more_tests;
 #[cfg(test)]
+#[path = "checks_secret_env_tests.rs"]
+mod secret_env_tests;
+#[cfg(test)]
 #[path = "checks_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "checks_unpinned_image_tests.rs"]
+mod unpinned_image_tests;

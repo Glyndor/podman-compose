@@ -16,7 +16,7 @@ pub(super) fn secret_field(value: &str) -> String {
 }
 
 /// Whether a top-level secret definition is an inline `content:`/`environment:`
-/// source — the kind `up` materialises as a project-scoped native Podman secret.
+/// source, the kind `up` materialises as a project-scoped native Podman secret.
 /// `external:` wins (never created by podup) and a bare `file:`/empty def is a
 /// bind/host source kept under its compose name.
 pub(super) fn is_inline_secret(def: Option<&SecretConfig>) -> bool {

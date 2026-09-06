@@ -4,7 +4,7 @@ use hyper::StatusCode;
 use super::{full, meets_minimum, Client, PathStat, Result, READ_TIMEOUT};
 
 impl Client {
-	/// `GET /libpod/_ping` — returns Ok(()) when Podman is reachable and
+	/// `GET /libpod/_ping` returns Ok(()) when Podman is reachable and
 	/// speaks a supported libpod API version.
 	pub async fn ping(&self) -> Result<()> {
 		let req = Self::build_request(

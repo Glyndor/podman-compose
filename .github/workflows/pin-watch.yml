@@ -19,7 +19,7 @@ name: pin-watch
 # `toolchain` input, and there is no single value here to hand it.
 #
 # Weekly, not daily: these move on the scale of months, and a daily run would
-# be noise. 05:00 Monday keeps it off audit.yml's 06:00 and fuzz.yml's 07:00 —
+# be noise. 05:00 Monday keeps it off audit.yml's 06:00 and fuzz.yml's 07:00;
 # stacking crons on the same minute only invites GitHub's scheduling delays.
 on:
   schedule:
@@ -45,7 +45,7 @@ jobs:
           set -euo pipefail
           # Every `python3 -c` below is ONE line, deliberately. Automatic dedent
           # of `-c` source arrived in CPython 3.13 and this runner ships 3.12,
-          # where indented source is an IndentationError — measured against a
+          # where indented source is an IndentationError, measured against a
           # real 3.12, not assumed. Un-indenting to column 0 is not the way out
           # either: inside a YAML `run: |` block a line at column 0 ends the
           # block. One line sidesteps both traps.
@@ -129,7 +129,7 @@ jobs:
 
           # ---- 3. Standards-Version -------------------------------------------
           # The regex MUST admit FOUR components. A three-component one silently
-          # truncates 4.7.4.1 to 4.7.4 and reports a false match — that exact
+          # truncates 4.7.4.1 to 4.7.4 and reports a false match; that exact
           # mistake was already made once on #1526.
           PINNED_STD=$(grep -oE '^Standards-Version:[[:space:]]+[0-9]+(\.[0-9]+){2,3}' debian/control \
             | head -n1 | awk '{print $2}')
@@ -365,7 +365,7 @@ jobs:
           # Idempotent: the title never changes, so a week that finds the same
           # drift again does not open a second issue.
           if gh issue list --state open --search "in:title $TITLE" --json title --jq '.[].title' | grep -qxF "$TITLE"; then
-            echo "Drift found, but the issue is already open — nothing to do."; exit 0
+            echo "Drift found, but the issue is already open; nothing to do."; exit 0
           fi
           {
             echo "| Pin | Pinned at | Pinned | Upstream |"
@@ -379,7 +379,7 @@ jobs:
             echo "The container digest has no bump path through Dependabot: the \`github-actions\` ecosystem does not update a workflow's \`container:\` image, so it has to be raised by hand."
           } > "$BODY"
           # Label on creation. An unlabelled issue is a process bug, and one filed
-          # by a bot is no exception — podman-watch carries the same note because
+          # by a bot is no exception; podman-watch carries the same note because
           # #673 and #1016 both landed bare.
           gh issue create --title "$TITLE" \
             --label "type:ci" --label "prio:P2" --label "status:ready" \

@@ -1,6 +1,10 @@
 //! The second half of the per-check matrix, split from `checks_tests.rs` to
-//! keep both files under the repository line limit. Same shape: one test
-//! for the bad shape and one for the good shape of each check.
+//! keep both files under the repository line limit. Holds the
+//! positive/negative pairs for the resource-limit and userns checks, plus
+//! the "every spelling" extensions for `dangerous_capability`,
+//! `no_cap_drop_all`, and `no_new_privileges_off`. The two checks with the
+//! densest coverage (`secret_in_environment`, `unpinned_image`) live in
+//! their own files.
 
 use super::tests::report_for;
 
@@ -137,129 +141,6 @@ services:
 	assert!(
 		!findings.iter().any(|f| f.check == "no_userns"),
 		"userns_mode: keep-id must pass: {findings:#?}"
-	);
-}
-
-// ---------------------------------------------------------------------------
-// secret_in_environment
-// ---------------------------------------------------------------------------
-
-#[test]
-fn audit_secret_in_environment_flags_literal_secret_keys() {
-	// One per keyword so a regression that misses one is caught by its own
-	// test rather than masked by the others passing.
-	for (key, _hint) in [
-		("DB_PASSWORD", "PASSWORD"),
-		("AUTH_SECRET", "SECRET"),
-		("API_TOKEN", "TOKEN"),
-		("SIGNING_KEY", "KEY"),
-	] {
-		let yaml = format!(
-			"services:\n  app:\n    image: alpine:3.20\n    environment:\n      - {key}=literal\n"
-		);
-		let findings = report_for(&yaml);
-		assert!(
-			findings.iter().any(|f| f.check == "secret_in_environment"),
-			"environment: {key}=literal must fire secret_in_environment; got {findings:#?}"
-		);
-		// The reason must name the key without echoing the value back ,
-		// the literal value would defeat the whole point of the audit.
-		let f = findings
-			.iter()
-			.find(|f| f.check == "secret_in_environment")
-			.expect("finding");
-		assert!(
-			!f.reason.contains("literal"),
-			"reason must not echo the value: {f:?}"
-		);
-		assert!(
-			f.reason.contains(key),
-			"reason must name the key {key}: {f:?}"
-		);
-	}
-}
-
-#[test]
-fn audit_secret_in_environment_passes_for_unrelated_keys() {
-	let yaml = r#"
-services:
-  app:
-    image: alpine:3.20
-    environment:
-      - LOG_LEVEL=info
-      - HOSTNAME=host-1
-      - PORT=8080
-"#;
-	let findings = report_for(yaml);
-	assert!(
-		!findings.iter().any(|f| f.check == "secret_in_environment"),
-		"unrelated env keys must not fire secret_in_environment: {findings:#?}"
-	);
-}
-
-// ---------------------------------------------------------------------------
-// unpinned_image
-// ---------------------------------------------------------------------------
-
-#[test]
-fn audit_unpinned_image_flags_when_no_tag() {
-	let yaml = r#"
-services:
-  web:
-    image: nginx
-"#;
-	let findings = report_for(yaml);
-	assert!(
-		findings.iter().any(|f| f.check == "unpinned_image"),
-		"untagged image must fire: {findings:#?}"
-	);
-}
-
-#[test]
-fn audit_unpinned_image_flags_when_tag_is_latest() {
-	let yaml = r#"
-services:
-  web:
-    image: nginx:latest
-"#;
-	let findings = report_for(yaml);
-	assert!(
-		findings.iter().any(|f| f.check == "unpinned_image"),
-		"`:latest` must fire: {findings:#?}"
-	);
-}
-
-#[test]
-fn audit_unpinned_image_passes_when_tagged_not_latest() {
-	// A non-default tag is the canonical "pinned to a version" case the
-	// check is supposed to recognise. The tag value is irrelevant beyond
-	// "is it the literal `latest`".
-	let yaml = r#"
-services:
-  web:
-    image: nginx:1.27.3
-"#;
-	let findings = report_for(yaml);
-	assert!(
-		!findings.iter().any(|f| f.check == "unpinned_image"),
-		"explicit non-latest tag must pass: {findings:#?}"
-	);
-}
-
-#[test]
-fn audit_unpinned_image_ignores_services_without_image() {
-	// A `build:` service has no registry reference: there is no tag to
-	// pin. Out of scope for this check; the report must be empty (or
-	// carry only unrelated findings).
-	let yaml = r#"
-services:
-  web:
-    build: .
-"#;
-	let findings = report_for(yaml);
-	assert!(
-		!findings.iter().any(|f| f.check == "unpinned_image"),
-		"build-only services are out of scope for unpinned_image: {findings:#?}"
 	);
 }
 

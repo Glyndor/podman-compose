@@ -35,7 +35,7 @@ enum HealthVerdict {
 	/// the service failed to start, so the wait must fail rather than report the
 	/// dependency satisfied. Carries the exit code.
 	Failed(i64),
-	/// Not healthy yet — keep polling.
+	/// Not healthy yet; keep polling.
 	Pending,
 }
 
@@ -77,14 +77,14 @@ fn classify_health(info: &ContainerInspect) -> HealthVerdict {
 /// Reading is a plain inspect: it does not execute the healthcheck, so it costs
 /// a request and nothing inside the container. Podman runs the check on its own
 /// schedule where systemd is available, and this is what notices promptly when
-/// it does — previously the status was only ever looked at once per `interval`,
+/// it does: previously the status was only ever looked at once per `interval`,
 /// so a container that turned healthy just after a probe went unnoticed for the
 /// rest of the window.
 const STATUS_READ_INTERVAL: Duration = Duration::from_millis(150);
 
 /// Lower bound on how often podup will *run* a healthcheck.
 ///
-/// Running is not free — it executes the command inside the container — so an
+/// Running is not free (it executes the command inside the container) so an
 /// `interval` of `10ms` must not turn into a hundred executions a second.
 const MIN_RUN_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -95,7 +95,7 @@ const MIN_RUN_INTERVAL: Duration = Duration::from_millis(100);
 /// how long it keeps trying. Sub-second intervals are honoured down to
 /// [`MIN_RUN_INTERVAL`]: they used to be discarded and replaced by the 2s
 /// default, so asking for `500ms` polling produced *slower* polling than asking
-/// for `1s` — the opposite of the request. Pure so the timing is unit-testable.
+/// for `1s`, the opposite of the request. Pure so the timing is unit-testable.
 fn health_poll_plan(
 	interval: Option<&str>,
 	start_period: Option<&str>,
@@ -124,7 +124,7 @@ fn health_poll_plan(
 /// healthcheck with a short `interval × retries` budget would otherwise time
 /// out long before a generous `--wait-timeout` elapsed. So when a wait-timeout
 /// is given we run at least enough iterations to cover it (plus a small margin),
-/// letting the outer `--wait-timeout` deadline — not the poll plan — decide when
+/// letting the outer `--wait-timeout` deadline, not the poll plan, decide when
 /// to give up. Without a wait-timeout the poll plan governs unchanged. Pure so
 /// the budget arithmetic is unit-tested without a live socket.
 fn effective_budget(
@@ -189,7 +189,7 @@ impl Engine {
 	/// `healthcheck.start_period` so a slow-starting service is not timed out early.
 	///
 	/// The wait is driven by the container's *effective* healthcheck reported by
-	/// the runtime, so healthchecks inherited from the image count too — not just
+	/// the runtime, so healthchecks inherited from the image count too, not just
 	/// those declared in compose. If the container has no effective healthcheck at
 	/// all (none in the image or compose), it can never report `healthy`, so the
 	/// wait short-circuits as satisfied rather than blocking until timeout.
@@ -210,7 +210,7 @@ impl Engine {
 		let budget = effective_budget(run_interval, plan_budget, wait_timeout);
 
 		// One inspect decides the short-circuits: already healthy, or no effective
-		// healthcheck at all (image or compose) — in which case a server-side
+		// healthcheck at all (image or compose), in which case a server-side
 		// `wait?condition=healthy` would block forever, so treat it as satisfied.
 		let info = self
 			.client
@@ -240,7 +240,7 @@ impl Engine {
 		// Actively drive the healthcheck on demand. A server-side
 		// `wait?condition=healthy` only returns once the health *status* flips to
 		// `healthy`, but Podman updates that status only when the healthcheck runs
-		// — and it schedules those runs via systemd transient timers. Without
+		// and it schedules those runs via systemd transient timers. Without
 		// systemd (containers, minimal hosts) the timer never fires and the status
 		// stays `starting`, so the wait would block until the whole budget elapsed.
 		//
@@ -255,7 +255,7 @@ impl Engine {
 		// Two cadences, because running a check and observing its result are not
 		// the same cost. Running executes a command inside the container, so it
 		// happens at the interval the compose file asked for and no faster.
-		// Observing is a plain inspect, so it happens often — Podman runs the
+		// Observing is a plain inspect, so it happens often: Podman runs the
 		// check on its own systemd schedule where one exists, and this is what
 		// notices promptly when it does.
 		//
@@ -275,7 +275,7 @@ impl Engine {
 					Ok(run) if run.status.as_deref() == Some("healthy") => return Ok(()),
 					Ok(_) => {}
 					// A transient error (container not yet running, 409, 500, …)
-					// just means "not healthy yet" — keep going rather than
+					// just means "not healthy yet", so keep going rather than
 					// failing hard.
 					Err(e) => tracing::debug!("{container_name} healthcheck run failed: {e}"),
 				}

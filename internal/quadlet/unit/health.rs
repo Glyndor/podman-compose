@@ -38,7 +38,7 @@ pub(super) fn render_healthcheck(
 			// Tell systemd the unit is not up until the healthcheck passes.
 			// Quadlet renders this as `--sdnotify=healthy`, and without it
 			// systemd calls the service started the moment the container is
-			// created — so `After=`/`Requires=` order the *creation*, not the
+			// created, so `After=`/`Requires=` order the *creation*, not the
 			// readiness, and a dependant starts against a service that is not
 			// serving yet.
 			//
@@ -46,7 +46,7 @@ pub(super) fn render_healthcheck(
 			// pass: `systemctl start` on the unit itself returned after 11s
 			// rather than immediately, and a second unit with
 			// `After=`/`Requires=` on it started 10s in. That second number is
-			// the one that matters — it is `depends_on: service_healthy`
+			// the one that matters: it is `depends_on: service_healthy`
 			// actually being honoured.
 			//
 			// Only emitted alongside a command. `--sdnotify=healthy` with
@@ -70,7 +70,7 @@ pub(super) fn render_healthcheck(
 	// The `x-podman-on-failure` extension. An invalid value is warned about
 	// rather than emitted: generation has no error channel here, and writing an
 	// unrecognised `HealthOnFailure=` would make Quadlet drop the whole unit at
-	// daemon-reload — a far worse failure than the key being absent. The live
+	// daemon-reload, a far worse failure than the key being absent. The live
 	// `up` path rejects the same value outright, where it can.
 	match hc.podman_on_failure() {
 		Ok(Some(action)) => container.add("HealthOnFailure", action.as_str().to_string()),

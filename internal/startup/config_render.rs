@@ -45,7 +45,7 @@ pub(crate) fn render_config(
 	// config-time validation (non-empty services, image-or-build, service-name
 	// charset, port ranges, undefined volume/network references, and an acyclic
 	// dependency graph) before the `--quiet`/projection short-circuits, so
-	// validate-only (`--quiet`) actually validates — matching `docker compose config`.
+	// validate-only (`--quiet`) actually validates, matching `docker compose config`.
 	podup::validate_config(file)?;
 	// Surface the active host-binding / privilege-escalation modes for every
 	// service at the default log level (`warn`), so CI logs picking up
@@ -110,7 +110,7 @@ pub(crate) fn render_config(
 	// not re-trigger the same warning. `x-*` extensions are kept.
 	redacted.strip_ignored_unknown_keys();
 	// Resolve relative bind-mount sources to absolute paths against the project
-	// directory, like `docker compose config`. Runtime mounting is unaffected —
+	// directory, like `docker compose config`. Runtime mounting is unaffected;
 	// this only normalizes the rendered output.
 	resolve_bind_sources(&mut redacted, base_dir);
 	redacted.redact_inline_content();
@@ -224,12 +224,12 @@ fn prune_json_nulls(v: &mut serde_json::Value) {
 
 /// `preserve_nulls` keeps null leaves at the current mapping level. It is set for
 /// the value under an `environment:` key so a map-form host-passthrough var
-/// (`MYVAR:` → null) is not stripped from the output — it is forwarded at runtime,
+/// (`MYVAR:` → null) is not stripped from the output: it is forwarded at runtime,
 /// so `config` must show it, matching docker compose (which never drops the key).
 ///
 /// It is set for `networks:` for the same reason: a null value there means
 /// "attach with default options", not "nothing". Dropping it removed a network
-/// the service is genuinely on — visible once merging could produce a map mixing
+/// the service is genuinely on, visible once merging could produce a map mixing
 /// a configured network with a bare one (#1078).
 fn prune_json(v: &mut serde_json::Value, preserve_nulls: bool) {
 	match v {
@@ -307,7 +307,7 @@ fn is_empty_yaml(v: &serde_yaml::Value) -> bool {
 /// Walk every service and emit one `tracing::warn!` per active host-binding
 /// mode. The warning is the same line the live `up` engine emits, so an
 /// operator reading `config` output before running `up` sees the same set of
-/// flags. `config` does not honour `--no-warn` for this surface — the whole
+/// flags. `config` does not honour `--no-warn` for this surface: the whole
 /// point of the command is to surface what is about to run.
 fn surface_host_modes(file: &podup::compose::types::ComposeFile) {
 	podup::surface_host_modes(file);

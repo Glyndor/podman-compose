@@ -115,7 +115,7 @@ fn is_go_duration(v: &str) -> bool {
 ///
 /// Attached `up` already strips it this way (`inspect.rs`), so before this the
 /// same container was tagged `myproj-web-1  | ` by one command and `web-1 | ` by
-/// the other — two shapes for one thing, in one binary. docker compose prints
+/// the other: two shapes for one thing, in one binary. docker compose prints
 /// the short form.
 pub(crate) fn display_label(container_name: &str, project: &str) -> String {
 	container_name
@@ -127,7 +127,7 @@ pub(crate) fn display_label(container_name: &str, project: &str) -> String {
 /// Whether a failed write to the log sink should end the follow loop.
 ///
 /// A `BrokenPipe` is the ordinary way a piped consumer signals it has read
-/// enough — `logs -f | head`, `| grep -q`, `| less` and quit. It is a clean end
+/// enough: `logs -f | head`, `| grep -q`, `| less` and quit. It is a clean end
 /// of output, not a failure, and the loop must stop: podup used to discard the
 /// write result entirely and go on streaming into a dead pipe until the process
 /// was killed. Any other io error is worth a warning before stopping, since it
@@ -152,7 +152,7 @@ fn stop_on_write_error(container_name: &str, result: std::io::Result<()>) -> boo
 /// `None` counts as a break. It is tempting to read "could not tell" as a clean
 /// end, and that is wrong in the exact case this matters: the severed connection
 /// that ends the stream is usually the same one the re-check needs, so treating
-/// the unknown as success turns every transport failure back into exit 0 — which
+/// the unknown as success turns every transport failure back into exit 0, which
 /// is the bug, not the fix. Measured: with the permissive version, restarting the
 /// libpod socket under an attached `logs -f` reported a still-running container
 /// as stopped.
@@ -244,7 +244,7 @@ impl Engine {
 		}
 		let selected: std::collections::HashSet<&str> =
 			target_services.iter().map(String::as_str).collect();
-		// (container_name, is_tty) — TTY containers send raw bytes; non-TTY use
+		// (container_name, is_tty): TTY containers send raw bytes; non-TTY use
 		// multiplexed 8-byte-header framing. Resolved against the containers
 		// Podman actually has, not the static compose replica count: after a
 		// runtime `scale`/`up --scale` the file's count no longer matches the
@@ -253,15 +253,15 @@ impl Engine {
 		// the map (the bulk helper does not see the compose file).
 		//
 		// Hoisted out of the per-service loop so a `logs` over N services
-		// costs one container-list round-trip, not N (#1445) — the same bulk
+		// costs one container-list round-trip, not N (#1445), the same bulk
 		// path the per-service lifecycle commands took in #1363.
 		//
 		// A failure resolving ONE service is tolerated so the others still
-		// print — that is deliberate and tested. The bulk GET is now the only
+		// print; that is deliberate and tested. The bulk GET is now the only
 		// point where a single engine-side failure can land, so the same
 		// tolerance collapses into "warn + remember, the post-loop empty
 		// check surfaces the error when there is no partial result to
-		// protect" — i.e. an unreachable engine used to look like a project
+		// protect": an unreachable engine used to look like a project
 		// with no logs and still exit 0; this preserves that fix.
 		//
 		// The skip-on-fetch-error case must NOT fall back to the static
@@ -299,14 +299,14 @@ impl Engine {
 		}
 
 		// A container that is simply not there yet is tolerated per-container so
-		// the services that *do* exist still stream — that is deliberate. Anything
+		// the services that *do* exist still stream; that is deliberate. Anything
 		// else (the socket refusing, a 500) is not a per-container fact, it is the
 		// command failing, and `logs` reported exit 0 for it. Collected here and
 		// returned at the end so every reachable container is still shown first.
 		//
 		// Nothing resolved and something went wrong: there is no partial result to
 		// preserve, so the tolerance has nothing left to protect. This is separate
-		// from #1104 — nothing here classifies how a stream *ended*, the request
+		// from #1104: nothing here classifies how a stream *ended*, the request
 		// never opened.
 		if targets.is_empty() {
 			if let Some(e) = first_err {
@@ -354,7 +354,7 @@ impl Engine {
 						// These futures run concurrently under `join_all` on the
 						// same task, so the stdout/stderr lock is taken and
 						// released within each frame rather than held across the
-						// `.await` above — holding a guard across the await would
+						// `.await` above: holding a guard across the await would
 						// let a sibling future block the thread on the same lock
 						// and deadlock. Each frame still locks once and flushes,
 						// keeping interleaved `logs -f` output prompt.
@@ -385,7 +385,7 @@ impl Engine {
 								//
 								// The re-check is point-in-time, so a genuine break that
 								// coincides with the container stopping is knowingly
-								// read as a clean end — the transport cannot separate
+								// read as a clean end, because the transport cannot separate
 								// them and the container is gone either way.
 								Err(e) => {
 									let kind = e.stream_end_kind();
@@ -520,12 +520,12 @@ impl Engine {
 	///
 	/// A `logs -f` stream lives as long as its container runs and ends when the
 	/// container stops. libpod signals that end with a chunked terminator, and a
-	/// lost terminator — a dropped connection, or a version that omits it —
+	/// lost terminator (a dropped connection, or a version that omits it)
 	/// arrives as an `Err` that the transport layer cannot tell apart from a real
 	/// mid-stream break (#1104). Re-checking the container out of band resolves
 	/// it: still running means the stream truncated live output.
 	///
-	/// `Ok(None)` is "could not tell" — an unreadable state is not confirmation
+	/// `Ok(None)` is "could not tell": an unreadable state is not confirmation
 	/// the end was expected, so the caller keeps the original error rather than
 	/// masking a possible failure. Mirrors the fail-closed rule `stats` uses.
 	pub(super) async fn container_still_running(&self, container_name: &str) -> Option<bool> {
@@ -547,12 +547,12 @@ impl Engine {
 			})
 			.map(|e| e.state == "running")
 			// A container the listing no longer holds has been removed, which is a
-			// stop by any other name — the stream had every reason to end.
+			// stop by any other name; the stream had every reason to end.
 			.or(Some(false))
 	}
 
 	/// Names of this project's containers (by label) that the current compose file
-	/// no longer defines — the orphans, shared by removal and the warning.
+	/// no longer defines: the orphans, shared by removal and the warning.
 	async fn orphan_container_names(&self, file: &ComposeFile) -> Result<Vec<String>> {
 		let path = format!(
 			"{API_PREFIX}/containers/json?all=true&filters={}",
@@ -584,8 +584,8 @@ impl Engine {
 
 	/// Remove containers labelled for this project that are not defined in the current compose file.
 	///
-	/// Best-effort across every orphan — one that fails to remove must not stop
-	/// the rest from being reaped — but the first real failure is remembered and
+	/// Best-effort across every orphan (one that fails to remove must not stop
+	/// the rest from being reaped) but the first real failure is remembered and
 	/// returned once every orphan has been attempted, so a removal that
 	/// genuinely fails does not exit 0 with the orphan left behind (#598). A 404
 	/// (already gone) stays an idempotent no-op.

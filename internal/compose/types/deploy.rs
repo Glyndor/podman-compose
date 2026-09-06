@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Labels;
 
-/// `deploy:` service key — resource limits, replica count, restart policies, and labels.
+/// `deploy:` service key: resource limits, replica count, restart policies, and labels.
 ///
 /// The engine uses `replicas`, `resources`, `restart_policy`, and `labels`.
 /// Fields inherited from Docker Swarm (`mode`, `placement`, `update_config`,
@@ -52,7 +52,7 @@ pub struct DeployConfig {
 	pub unknown: indexmap::IndexMap<String, serde_yaml::Value>,
 }
 
-/// Resource constraints under `deploy.resources:` — holds `limits` and `reservations`.
+/// Resource constraints under `deploy.resources:`, holding `limits` and `reservations`.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ResourcesConfig {
 	/// Hard upper bounds on resource usage.
@@ -89,7 +89,7 @@ pub struct ResourceSpec {
 // Device reservations (GPU / accelerators)
 // ---------------------------------------------------------------------------
 
-/// `deploy.resources.reservations.devices` — generic device reservation.
+/// `deploy.resources.reservations.devices`: generic device reservation.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct DeviceReservation {
 	/// Required device capabilities (e.g. `gpu`, `compute`).
@@ -133,7 +133,7 @@ impl CountOrAll {
 #[path = "deploy_tests.rs"]
 mod tests;
 
-/// Restart policy under `deploy.restart_policy:` — distinct from the service-level `restart:` string.
+/// Restart policy under `deploy.restart_policy:`, distinct from the service-level `restart:` string.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct DeployRestartPolicy {
 	/// When to restart, e.g. `on-failure` or `any`.
@@ -150,7 +150,7 @@ pub struct DeployRestartPolicy {
 	pub window: Option<String>,
 }
 
-/// Update (and rollback) configuration — reused for both `deploy.update_config` and `deploy.rollback_config`.
+/// Update (and rollback) configuration, reused for both `deploy.update_config` and `deploy.rollback_config`.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct DeployUpdateConfig {
 	/// Number of containers updated at once.

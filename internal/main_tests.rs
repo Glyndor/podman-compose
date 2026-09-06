@@ -1,5 +1,5 @@
 /// 130 is 128 + SIGINT, and it is what `docker compose up` returns for
-/// SIGTERM too — measured against v5.1.3 rather than derived from the signal
+/// SIGTERM too, measured against v5.1.3 rather than derived from the signal
 /// number, which would have said 143. podup returned 0 for both, so a
 /// cancelled CI job reported success.
 #[test]

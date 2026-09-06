@@ -33,7 +33,7 @@ fn copy_landed_asks_whether_the_entry_matches_what_was_uploaded() {
 ///
 /// The old check required the destination's mtime to move. The archive sets
 /// that mtime from the source, so re-copying an unchanged file leaves it
-/// identical by construction — no resolution would have helped — and the
+/// identical by construction (no resolution would have helped) and the
 /// second copy was reported as a failure. Matching against what was uploaded
 /// answers correctly.
 #[test]
@@ -50,7 +50,7 @@ fn copying_an_unchanged_file_twice_is_confirmed() {
 /// and a directory has none.
 ///
 /// A mutation replacing the length with a constant survived every other test
-/// here, because they all build `ExpectedEntry` by hand — this is the only
+/// here, because they all build `ExpectedEntry` by hand; this is the only
 /// one that goes through the filesystem.
 #[test]
 fn the_expected_size_comes_from_the_source_file() {

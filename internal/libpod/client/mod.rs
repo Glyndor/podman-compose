@@ -51,13 +51,13 @@ const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Ceiling on establishing the socket connection and HTTP handshake. Bounds the
 /// wait when the Podman socket is absent, busy, or unresponsive. This times the
-/// connect only — it does not limit the duration of a streaming response body.
+/// connect only; it does not limit the duration of a streaming response body.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Ceiling on reading a *buffered* (non-streaming) response body. Without it a
 /// daemon that accepts the request, sends headers, then stalls would hang the
 /// CLI forever. Streaming helpers (logs, attach, archive) are deliberately not
-/// bounded by this — they are long-lived by design.
+/// bounded by this; they are long-lived by design.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Whether a response carried `Connection: close`. When set, the socket is
@@ -85,7 +85,7 @@ pub type Result<T> = std::result::Result<T, PodmanError>;
 /// `post_empty_stream`, `post_bytes_stream`, `post_stream_body`,
 /// `post_json_stream_within`) take a dedicated connection for the lifetime of
 /// the stream's response body. Streaming connections do not share with the
-/// buffered pool — they are released when the [`Client`] is dropped, which in
+/// buffered pool; they are released when the [`Client`] is dropped, which in
 /// the CLI is the end of the command.
 pub struct Client {
 	socket_path: String,
@@ -93,12 +93,12 @@ pub struct Client {
 	streaming: Mutex<Vec<pool::StreamingConn>>,
 }
 
-/// The decoded `X-Docker-Container-Path-Stat` header — a container path's name,
+/// The decoded `X-Docker-Container-Path-Stat` header: a container path's name,
 /// size, Go file `mode` and `mtime`.
 ///
 /// `mtime` is an RFC3339 string compared only for equality, never parsed into a
-/// time. **Podman 6 reports it to whole seconds** — `2026-08-03T18:36:05Z`, no
-/// fractional part, measured on `podman-6.0.1-1.fc45` — which is why `size` is
+/// time. **Podman 6 reports it to whole seconds**: `2026-08-03T18:36:05Z`, no
+/// fractional part, measured on `podman-6.0.1-1.fc45`, which is why `size` is
 /// carried here too: two writes inside one second are indistinguishable by mtime
 /// alone. The runtime's JSON uses lowercase keys.
 #[derive(serde::Deserialize, Default, Clone, PartialEq, Eq, Debug)]
@@ -114,7 +114,7 @@ pub(crate) struct PathStat {
 /// Attach the socket path and a way forward to a connection failure.
 ///
 /// The operator saw `podman socket connection error: No such file or directory
-/// (os error 2)` — no path, no distinction between "it is not there" and "I
+/// (os error 2)`: no path, no distinction between "it is not there" and "I
 /// cannot open it", and nothing to do about it. Everything needed was already
 /// in hand one call earlier (#1146).
 ///
@@ -129,14 +129,14 @@ pub(crate) struct PathStat {
 pub(crate) fn socket_error(path: &str, e: std::io::Error) -> super::PodmanError {
 	let hint = match e.kind() {
 		std::io::ErrorKind::NotFound => {
-			" — the Podman API socket is not listening. podman itself is daemonless \
+			": the Podman API socket is not listening. podman itself is daemonless \
 			 and needs no socket, but podup speaks the libpod API and does. Enable it \
 			 with `systemctl --user enable --now podman.socket`, or for an account \
 			 with no login shell: `sudo -u <user> env XDG_RUNTIME_DIR=/run/user/$(id \
 			 -u <user>) systemctl --user enable --now podman.socket`"
 		}
 		std::io::ErrorKind::PermissionDenied => {
-			" — the socket exists but cannot be opened. Check that it is owned by \
+			": the socket exists but cannot be opened. Check that it is owned by \
 			 the user running podup; a socket created by another account is not \
 			 shared"
 		}
@@ -193,7 +193,7 @@ impl Client {
 	///
 	/// `response_timeout` bounds how long we wait for the server to return the
 	/// response head. Pass `Some` (the default [`READ_TIMEOUT`]) for ordinary and
-	/// streaming calls, where the head arrives promptly — this stops a socket that
+	/// streaming calls, where the head arrives promptly; this stops a socket that
 	/// accepts the connection but never replies from hanging the CLI indefinitely.
 	/// Pass `None` only for endpoints that legitimately block server-side before
 	/// the head (e.g. `wait?condition=stopped`), whose callers impose an outer
@@ -357,8 +357,8 @@ impl Client {
 	///
 	/// The pre-validators in [`super::validate`] catch the field-level
 	/// rejections libpod makes on its own (namespace modes, `device_cgroup_rule`
-	/// access, build-arg/label keys). For other fields — `cap_add`, `runtime`,
-	/// `devices`, `extra_hosts` — podup does not have a pre-validator (the
+	/// access, build-arg/label keys). For other fields (`cap_add`, `runtime`,
+	/// `devices`, `extra_hosts`) podup does not have a pre-validator (the
 	/// failure surfaces from the OCI runtime or the cgroup manager, not from
 	/// libpod's specgen), and podup does not know which compose-side key libpod
 	/// rejected. When the caller does know, passing `field` turns an opaque

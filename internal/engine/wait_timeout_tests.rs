@@ -6,7 +6,7 @@
 //! It is distinct from [`ComposeError::HealthCheckTimeout`], which is what a
 //! service's own healthcheck budget exhaustion looks like. The `--wait-timeout`
 //! exists for the case where every service still *can* become healthy given
-//! enough time — without it, a generous plan budget is the only cap, and that
+//! enough time; without it, a generous plan budget is the only cap, and that
 //! is what the user is overriding with `--wait-timeout 30`.
 //!
 //! The dispatch module builds this variant, so the test below mirrors its
@@ -25,7 +25,7 @@ use crate::libpod::API_PREFIX;
 
 /// A service that never reaches `healthy` plus a finite outer deadline is
 /// the one shape that surfaces [`ComposeError::WaitTimeout`]. The message
-/// must name the seconds — that is the only knob the operator set, and the
+/// must name the seconds: that is the only knob the operator set, and the
 /// only one they need to tweak to retry.
 #[tokio::test]
 async fn an_unhealthy_service_under_a_short_wait_timeout_surfaces_waittimeout() {
@@ -33,7 +33,7 @@ async fn an_unhealthy_service_under_a_short_wait_timeout_surfaces_waittimeout() 
 		// The inspect that `wait_healthy` reads before deciding to poll.
 		if method == "GET" && target.contains("/containers/proj-web-1/json") {
 			// `starting` health under an effective healthcheck is the
-			// `HealthVerdict::Pending` branch — exactly the one the
+			// `HealthVerdict::Pending` branch, exactly the one the
 			// wrapper sits on top of.
 			return FakeReply::Body(
 				200,
@@ -74,8 +74,8 @@ async fn an_unhealthy_service_under_a_short_wait_timeout_surfaces_waittimeout() 
 	// Mirror the dispatch.rs wrapper byte-for-byte: the variant only exists
 	// because this exact `map_err(|_| ComposeError::WaitTimeout { secs })`
 	// does. The inner future is the health wait with a generous
-	// per-service budget, so the OUTER `tokio::timeout` — the one the
-	// dispatch owns — is what elapses first.
+	// per-service budget, so the OUTER `tokio::timeout` (the one the
+	// dispatch owns) is what elapses first.
 	let fut = engine.wait_services_healthy_within(&file, &[], Some(wait_timeout * 20));
 	let result =
 		tokio::time::timeout(wait_timeout, fut)
@@ -107,8 +107,8 @@ async fn an_unhealthy_service_under_a_short_wait_timeout_surfaces_waittimeout() 
 /// A wait that *does* finish before the wrapper elapses must not produce
 /// `WaitTimeout`. The wrapper must yield the inner result (here: a
 /// `HealthCheckTimeout` because the fake never reports `healthy`). Pinning
-/// the inverse — the timeout path only fires when the inner future is
-/// genuinely slow, not on every dispatch — so a regression that always
+/// the inverse: the timeout path only fires when the inner future is
+/// genuinely slow, not on every dispatch, so a regression that always
 /// wraps cannot land as `WaitTimeout`.
 #[tokio::test]
 async fn a_wait_that_finishes_in_time_does_not_produce_waittimeout() {
@@ -146,7 +146,7 @@ async fn a_wait_that_finishes_in_time_does_not_produce_waittimeout() {
 		},
 	);
 
-	// Tight inner, loose wrapper — the inner must error first. The
+	// Tight inner, loose wrapper: the inner must error first. The
 	// dispatch.rs wrapper only fires when the inner is slow.
 	let inner_budget = std::time::Duration::from_secs(5);
 	let wrapper = std::time::Duration::from_secs(30);
@@ -170,7 +170,7 @@ async fn a_wait_that_finishes_in_time_does_not_produce_waittimeout() {
 
 /// Sanity check that the inspect path the wait uses (`/containers/{name}/json`)
 /// is the one the wrapper is built around. If libpod ever renames it, this
-/// test is the one that has to be updated first — the wrapper's behaviour
+/// test is the one that has to be updated first: the wrapper's behaviour
 /// depends on the wait polling at this URL.
 #[tokio::test]
 async fn the_wait_polls_the_expected_inspect_path() {
@@ -198,13 +198,13 @@ async fn the_wait_polls_the_expected_inspect_path() {
 		},
 	);
 
-	// Healthy on the first inspect — the wait must return without
+	// Healthy on the first inspect, so the wait must return without
 	// touching the budget.
 	engine
 		.wait_services_healthy(&file, &[])
 		.await
 		.expect("a service reported healthy on inspect must not error");
-	// The API_PREFIX constant is exported for a reason — the path the
+	// The API_PREFIX constant is exported for a reason: the path the
 	// client builds lives here; touching the wrong one breaks the wait.
 	let _ = API_PREFIX;
 }

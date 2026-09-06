@@ -150,9 +150,9 @@ fn sync_tar_directory() {
 
 #[test]
 fn sync_tar_path_with_no_file_name() {
-	// A path that has no file_name (e.g. root "/") — tar should be empty but valid.
+	// A path that has no file_name (e.g. root "/"): tar should be empty but valid.
 	let dir = tempdir().unwrap();
-	// Empty directory — no entries other than root
+	// Empty directory, so no entries other than root
 	let bytes = build_sync_tar(dir.path(), Path::new(".")).unwrap();
 	assert_eq!(&bytes[..2], &[0x1f, 0x8b]);
 }

@@ -184,7 +184,7 @@ async fn down_with_remove_volumes() {
 	// Match on the project prefix, not the declared name. podup namespaces a
 	// declared volume as `{project}_{name}`, so an equality check against
 	// `{proj}-data` can never match and the assertion would hold whatever `down`
-	// did — which is how the first version of this line survived its mutation.
+	// did, which is how the first version of this line survived its mutation.
 	assert!(
 		!volumes.lines().any(|v| v.contains(proj.as_str())),
 		"down --volumes left a volume belonging to the project behind: {volumes:?}"

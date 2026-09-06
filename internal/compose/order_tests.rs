@@ -131,7 +131,7 @@ fn resolve_levels_missing_required_dep_is_error() {
 #[test]
 fn resolve_order_optional_missing_dep_is_ignored() {
 	// A `required: false` dependency that is not defined is skipped, not an
-	// error — the dependent still resolves.
+	// error; the dependent still resolves.
 	let yaml = "services:\n  web:\n    image: nginx\n    depends_on:\n      ghost:\n        condition: service_started\n        required: false\n";
 	let file = parse_str_raw(yaml).unwrap();
 	let order = resolve_order(&file).unwrap();

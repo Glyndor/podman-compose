@@ -14,11 +14,11 @@
 //! The Podman floor is written in three places and nothing derives one from
 //! another.
 //!
-//! - `internal/libpod/client/mod.rs` — `MIN_LIBPOD_API_MAJOR`, the gate the
+//! - `internal/libpod/client/mod.rs`: `MIN_LIBPOD_API_MAJOR`, the gate the
 //!   running binary applies to the major the engine reports.
-//! - `install.sh` — `PODMAN_MIN_MAJOR`, the precheck that refuses to install
+//! - `install.sh`: `PODMAN_MIN_MAJOR`, the precheck that refuses to install
 //!   over a local engine below the floor.
-//! - `debian/control` — the `podman (>= N.0)` relationship.
+//! - `debian/control`: the `podman (>= N.0)` relationship.
 //!
 //! The third one used to be a `Recommends`, where a wrong number cost a
 //! suggestion. As a `Depends` it decides whether the package installs at all,
@@ -167,8 +167,8 @@ fn the_package_requires_unattended_upgrades() {
 /// package ships `/etc/apt/sources.list.d/glyndor.sources` and
 /// `/etc/apt/apt.conf.d/51glyndor-unattended-upgrades`, and with neither of
 /// them the daemon runs against Debian's own security suite and nothing else.
-/// Two paths reached that state — `dpkg -i` of a release `.deb`, and adding the
-/// repository by hand — and on both, podup installed and never updated again.
+/// Two paths reached that state (`dpkg -i` of a release `.deb`, and adding the
+/// repository by hand) and on both, podup installed and never updated again.
 /// #1602.
 #[test]
 fn the_package_requires_the_archive_keyring() {

@@ -43,7 +43,7 @@ fn embedded_key_is_configured_and_rejects_garbage() {
 #[test]
 fn zeroed_key_would_fail_closed() {
 	// Defence in depth: an all-zero key is a valid curve point, so the
-	// explicit guard in `release_pubkeys` — not the curve math — is what
+	// explicit guard in `release_pubkeys`, not the curve math, is what
 	// refuses to trust an unverifiable release if every key is zeroed.
 	assert!(VerifyingKey::from_bytes(&[0u8; 32]).is_ok());
 	let is_placeholder = |key: [u8; 32]| key == [0u8; 32];

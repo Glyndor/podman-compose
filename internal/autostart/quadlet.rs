@@ -6,7 +6,7 @@
 //! `generate quadlet` emits, so systemd owns boot, restart and dependency
 //! ordering directly. The generated `.container` units already carry
 //! `[Install] WantedBy=default.target`, so a `daemon-reload` wires them into boot
-//! on its own — this module writes them, reloads, and starts them now; it never
+//! on its own, so this module writes them, reloads, and starts them now; it never
 //! `enable`s a generated unit (systemd does not enable generator output).
 
 use std::path::{Path, PathBuf};
@@ -16,7 +16,7 @@ use crate::{quadlet, ComposeError};
 
 use super::{checked, config_home, emit_guards, unit_path, SystemCtl};
 
-/// `${XDG_CONFIG_HOME:-~/.config}/containers/systemd/` — where Quadlet reads a
+/// `${XDG_CONFIG_HOME:-~/.config}/containers/systemd/`, where Quadlet reads a
 /// user's units from. The same directory `generate quadlet` documents.
 pub fn quadlet_dir() -> PathBuf {
 	config_home().join("containers").join("systemd")
@@ -37,12 +37,12 @@ fn container_services(units: &[quadlet::QuadletUnit]) -> Vec<String> {
 ///
 /// This deliberately does NOT read the `Label=podup.project=<project>` line
 /// every unit builder in `crate::quadlet` also stamps (that label stays, but
-/// only for its original purpose — Podman uses `podup.project` for
+/// only for its original purpose; Podman uses `podup.project` for
 /// container/secret scoping at runtime). A compose service's user-supplied
 /// `labels:` renders into the very same `[Section]`, in the very same
 /// `Key=Value` shape, so a service declaring `labels: {podup.project:
 /// other}` produces a forged `Label=podup.project=other` line that is
-/// textually indistinguishable from the real one — and would be the FIRST
+/// textually indistinguishable from the real one, and would be the FIRST
 /// such line if it precedes the trusted stamp, defeating a scan that takes
 /// the first match. The `# podup-owner: <project>` marker every unit builder
 /// emits as its literal first line cannot be forged the same way: systemd
@@ -62,15 +62,15 @@ fn unit_owner(path: &Path) -> Option<String> {
 /// A file name starting with `<project>-` is only a candidate: project names
 /// may themselves contain `-`, so `app-extra-web.container` also starts with
 /// `app-`. Matching on that prefix alone (the old behaviour) meant
-/// `uninstall -p app` matched — and `uninstall_quadlet` then stopped and
-/// deleted — the sibling project `app-extra`'s units. Each candidate is
+/// `uninstall -p app` matched (and `uninstall_quadlet` then stopped and
+/// deleted) the sibling project `app-extra`'s units. Each candidate is
 /// therefore opened and kept only when its `# podup-owner:` marker equals
 /// `project` EXACTLY (see `unit_owner` above); the marker is exact by
 /// construction and, unlike the `Label=podup.project=` line, cannot be
 /// pre-empted by a forged line from the compose file's own `labels:`.
 ///
 /// A candidate with no marker at all (installed before this ownership check
-/// existed) cannot be proven to belong to `project` — treating "no marker" as
+/// existed) cannot be proven to belong to `project`: treating "no marker" as
 /// "assume it's ours" would just reopen the same hole for those legacy
 /// installs. So it is left in place, not deleted, and reported via
 /// `tracing::warn!` so the user can re-install (which re-marks it) or remove
@@ -98,7 +98,7 @@ fn installed_units(project: &str) -> Vec<PathBuf> {
 					tracing::warn!(
 						"quadlet unit {} has no podup-owner ownership marker and cannot be \
 						 proven to belong to '{project}'; skipping it rather than risking a \
-						 sibling project's unit — re-run `podup autostart install --mode quadlet` \
+						 sibling project's unit; re-run `podup autostart install --mode quadlet` \
 						 to re-mark it, or remove it by hand if it is stale",
 						path.display()
 					);
@@ -199,7 +199,7 @@ pub fn install_quadlet<S: SystemCtl>(
 }
 
 /// Uninstall quadlet-mode autostart: stop this project's container services, remove
-/// its `<project>-*` unit files, and reload the user manager. Idempotent — a
+/// its `<project>-*` unit files, and reload the user manager. Idempotent: a
 /// service that was never started, or a file already gone, is not an error.
 ///
 /// A service that *is* running and refuses to stop is a different matter: the
@@ -217,14 +217,14 @@ pub fn uninstall_quadlet<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<(
 				// Stop unconditionally. There is no state here worth probing for
 				// first: measured against real systemd, `stop` on a unit whose
 				// fragment is on disk exits 0 whether it is running, inactive, or
-				// was never started at all — and every unit in this loop has its
+				// was never started at all, and every unit in this loop has its
 				// fragment on disk, because that is what `installed_units` found.
 				// (`stop` only fails with "not loaded" when no fragment exists,
 				// which cannot happen here.)
 				//
 				// Gating on `is-active` would be worse than redundant: a service
 				// that is still coming up reports `activating`, which `is-active`
-				// calls a failure — so a stack caught mid-start, or one sitting in
+				// calls a failure, so a stack caught mid-start, or one sitting in
 				// `activating (auto-restart)`, would be skipped and left running
 				// while uninstall deleted its units and reported success.
 				if let Err(e) = checked(sc.systemctl(&["stop", &service]), "stop") {
@@ -266,7 +266,7 @@ pub fn rebuild_quadlet<S: SystemCtl>(
 		.collect();
 	if builds.is_empty() {
 		return Err(ComposeError::Autostart(format!(
-			"no quadlet build units for '{project}' — nothing to rebuild. Only a service \
+			"no quadlet build units for '{project}'; nothing to rebuild. Only a service \
 			 with a compose `build:` produces a `.build` unit, and quadlet-mode autostart \
 			 must be installed first (`podup autostart install --mode quadlet`)."
 		)));

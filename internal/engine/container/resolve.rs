@@ -186,7 +186,7 @@ pub(crate) fn config_hash(service: &Service, file: &ComposeFile) -> Result<Strin
 	// different bytes for different iteration orders, which would flap the
 	// hash on every parse and trigger spurious recreates. The double
 	// serialisation is therefore load-bearing for the stable-hash invariant
-	// (#1364 deferred the proposed optimisation — see
+	// (#1364 deferred the proposed optimisation; see
 	// `config_hash_stable_despite_map_field_order`). Fail closed if either
 	// step fails (e.g. a non-scalar mapping key in an `x-` extension):
 	// returning an empty/default hash would make distinct services hash
@@ -226,7 +226,7 @@ pub(crate) fn config_hash(service: &Service, file: &ComposeFile) -> Result<Strin
 
 /// Fold an inline secret/config's resolved bytes into the config hasher. Inline
 /// `content:` contributes its literal bytes; `environment:` contributes the
-/// current value of the named variable (empty if unset — `up` errors on a
+/// current value of the named variable (empty if unset; `up` errors on a
 /// genuinely missing var later). `file:`/`external:` sources contribute nothing.
 fn hash_inline_payload(
 	hasher: &mut sha2::Sha256,
@@ -237,7 +237,7 @@ fn hash_inline_payload(
 ) {
 	use sha2::Digest;
 	// The environment-sourced branch holds the resolved `String` in a local so
-	// the `&[u8]` view stays alive across `update()` (#1364 — also E0716
+	// the `&[u8]` view stays alive across `update()` (#1364, and also E0716
 	// otherwise: a temporary `as_bytes()` is freed at end of statement).
 	let env_value;
 	let payload: Option<&[u8]> = match (content, environment) {

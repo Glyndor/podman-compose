@@ -1,6 +1,6 @@
 //! Lifecycle and dependency types: `depends_on:`, `healthcheck:`, `restart:`, and lifecycle hooks.
 //!
-//! [`DependsOn`] models the service dependency graph — either a simple name list
+//! [`DependsOn`] models the service dependency graph: either a simple name list
 //! or a map with per-dependency [`ServiceCondition`] semantics. [`HealthCheck`]
 //! covers the inline healthcheck definition. [`RestartPolicy`] parses the
 //! `restart:` string field. [`LifecycleHook`] is used for `post_start:` and
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::env::EnvVars;
 use super::primitives::Command;
 
-/// `depends_on:` value — absent, a bare list of service names, or a map of service name to condition.
+/// `depends_on:` value: absent, a bare list of service names, or a map of service name to condition.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(untagged)]
 pub enum DependsOn {
@@ -63,7 +63,7 @@ impl DependsOn {
 	}
 }
 
-/// Long-form per-dependency entry in `depends_on:` — holds the condition and restart flag.
+/// Long-form per-dependency entry in `depends_on:`, holding the condition and restart flag.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DependsOnCondition {
 	/// Condition the dependency must reach before the dependent starts.
@@ -122,7 +122,7 @@ pub struct HealthCheck {
 ///
 /// `x-` is the spec's reserved prefix for extensions: docker compose ignores an
 /// unknown `x-` key rather than erroring, so a file using this stays a valid
-/// compose file and still runs under docker — it just does not act on a sick
+/// compose file and still runs under docker; it just does not act on a sick
 /// container there. That is the whole reason for the prefix rather than a bare
 /// `on_failure`, which would make the file podup-only.
 pub const X_PODMAN_ON_FAILURE: &str = "x-podman-on-failure";
@@ -130,8 +130,8 @@ pub const X_PODMAN_ON_FAILURE: &str = "x-podman-on-failure";
 /// What Podman does when a container's healthcheck flips to unhealthy.
 ///
 /// The Compose Spec has no equivalent: a compose healthcheck detects a sick
-/// container and does nothing about it. A restart policy does not cover this —
-/// it reacts to the process exiting, not to the container being unhealthy — so
+/// container and does nothing about it. A restart policy does not cover this:
+/// it reacts to the process exiting, not to the container being unhealthy, so
 /// an app that hangs without dying stays in rotation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HealthOnFailure {
@@ -178,7 +178,7 @@ impl HealthCheck {
 	///
 	/// Spec-defined keys are typed fields on this struct; a Podman extension
 	/// lives in `unknown` (where `#[serde(flatten)]` already preserves it for
-	/// round-tripping) and is read through here. That split is deliberate — it
+	/// round-tripping) and is read through here. That split is deliberate: it
 	/// keeps the type honest about which keys are portable.
 	///
 	/// `Err` for a value that is not one of Podman's four actions, so a typo is
@@ -223,7 +223,7 @@ pub struct LifecycleHook {
 	pub environment: EnvVars,
 }
 
-/// Service-level `restart:` policy — `no`, `always`, `unless-stopped`, or `on-failure` (with optional max-retries).
+/// Service-level `restart:` policy: `no`, `always`, `unless-stopped`, or `on-failure` (with optional max-retries).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RestartPolicy {
 	/// Never restart the container.

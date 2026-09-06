@@ -1,8 +1,8 @@
 use super::*;
 use crate::compose::parse_str;
 
-/// `up_resources` never touches the client — it reads the compose file and the
-/// project name — but an `Engine` needs one, so the tests borrow the same fake
+/// `up_resources` never touches the client (it reads the compose file and the
+/// project name) but an `Engine` needs one, so the tests borrow the same fake
 /// the rest of the lifecycle suite uses. That fake is a unix socket, which is
 /// why this module is `cfg(unix)`.
 fn engine(fake: &crate::engine::fake_podman::FakePodman) -> Engine {
@@ -100,7 +100,7 @@ async fn a_targeted_up_seeds_only_its_targets() {
 }
 
 /// A scaled service gets one row per replica, because the board tracks
-/// containers rather than services — that is the granularity every progress
+/// containers rather than services: that is the granularity every progress
 /// event in the tree already reports at.
 #[tokio::test]
 async fn a_scaled_service_seeds_one_row_per_replica() {

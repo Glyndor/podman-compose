@@ -20,7 +20,7 @@ impl Engine {
 	/// replica (skipping containers that are unchanged unless `force_recreate`).
 	/// Used by [`super::run_up`]; safe to run concurrently for services in
 	/// the same dependency level (the `Engine` holds no per-call mutable
-	/// state — the libpod client is connection-per-request).
+	/// state; the libpod client is connection-per-request).
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn up_one_service(
 		&self,
@@ -47,7 +47,7 @@ impl Engine {
 		}
 
 		// `create` (start = false) only builds the containers, so there is nothing
-		// to gate on — skip the `depends_on` readiness waits entirely.
+		// to gate on, so skip the `depends_on` readiness waits entirely.
 		for dep in service
 			.depends_on
 			.service_names()
@@ -60,12 +60,12 @@ impl Engine {
 			// waiting on (and 404-ing against) a container that was never
 			// created.
 			if !super::targets::in_started_set(target_set, &dep) {
-				tracing::debug!("{dep} not in started target set — skipping {name} readiness wait");
+				tracing::debug!("{dep} not in started target set; skipping {name} readiness wait");
 				continue;
 			}
 
 			let condition = service.depends_on.condition_for(&dep);
-			// `required: false` makes the dependency optional — a failed wait
+			// `required: false` makes the dependency optional: a failed wait
 			// must not abort `up`, matching docker-compose v2.
 			let required = service.depends_on.required_for(&dep);
 			let dep_service = match file.services.get(&dep) {
@@ -92,7 +92,7 @@ impl Engine {
 						.is_some_and(|h| h.is_disabled());
 					if disabled {
 						tracing::debug!(
-							"{dep} healthcheck disabled — skipping service_healthy wait"
+							"{dep} healthcheck disabled; skipping service_healthy wait"
 						);
 						Ok(())
 					} else {
@@ -142,7 +142,7 @@ impl Engine {
 		let new_hash = config_hash(service, file)?;
 
 		// Fan the replicas out with the same bounded concurrency the level
-		// walk uses, instead of creating and starting them one at a time —
+		// walk uses, instead of creating and starting them one at a time:
 		// `up --scale web=5` used to pay 5x (create+start) in strict
 		// sequence. Every replica is still attempted even when one fails
 		// (`join_bounded` runs the whole batch), and `first_error` picks the
@@ -176,7 +176,7 @@ impl Engine {
 	/// config-hash skip logic, then fall through to create+start. One future
 	/// in the per-service replica fan-out ([`Self::up_one_service`]); safe to
 	/// run concurrently with the service's other replicas, since replicas of
-	/// one service share no per-replica mutable state — a fixed host port
+	/// one service share no per-replica mutable state: a fixed host port
 	/// that would make concurrent starts race is already rejected up front by
 	/// `super::scale::check_scale_port_conflict`.
 	#[allow(clippy::too_many_arguments)]
@@ -195,7 +195,7 @@ impl Engine {
 		let present = existing.contains_key(&container_name);
 		if !force_recreate {
 			if no_recreate && present {
-				tracing::debug!("{container_name} already exists — skipping recreate");
+				tracing::debug!("{container_name} already exists; skipping recreate");
 				// `create` leaves an existing container as-is; `up` ensures it runs.
 				if start {
 					self.ensure_started(&container_name).await?;
@@ -211,7 +211,7 @@ impl Engine {
 				.unchanged(&container_name, name, service, existing, new_hash)
 				.await?
 			{
-				tracing::debug!("{container_name} is up to date — skipping recreate");
+				tracing::debug!("{container_name} is up to date; skipping recreate");
 				if start {
 					self.ensure_started(&container_name).await?;
 				}

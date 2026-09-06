@@ -37,7 +37,7 @@ mod tests;
 ///
 /// **This is the only endpoint that knows a volume's size.** The volume list
 /// carries no size field at all, so answering "how big is this volume" means
-/// asking libpod to account for every image, container and volume it owns —
+/// asking libpod to account for every image, container and volume it owns,
 /// measured at 1.2 s against 10 ms for the plain list on a host with 46
 /// volumes. That cost is why the column is opt-in rather than default.
 #[derive(serde::Deserialize, Default)]
@@ -56,7 +56,7 @@ pub struct VolumeDiskUsage {
 	/// Bytes the volume occupies.
 	#[serde(rename = "Size", default)]
 	pub size: u64,
-	/// Bytes that would be freed by removing it — zero while a container still
+	/// Bytes that would be freed by removing it: zero while a container still
 	/// links the volume, which is what makes it worth showing next to the size
 	/// rather than instead of it.
 	#[serde(rename = "ReclaimableSize", default)]

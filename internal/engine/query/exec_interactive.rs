@@ -16,8 +16,8 @@ use super::Engine;
 impl Engine {
 	/// Run an exec session with a pty and a live stdin.
 	///
-	/// The terminal is restored by `RawMode`'s `Drop`, so every exit path —
-	/// command exits, socket dies, `?` on an unrelated error, panic — leaves the
+	/// The terminal is restored by `RawMode`'s `Drop`, so every exit path
+	/// (command exits, socket dies, `?` on an unrelated error, panic) leaves the
 	/// caller's shell usable. That is the one thing this must not get wrong: a
 	/// terminal left raw has no echo and no line discipline, and the user cannot
 	/// even see what they type to fix it.

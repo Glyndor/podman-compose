@@ -14,7 +14,7 @@ residual risks.
   acquires no capabilities of its own.
 - It drives **rootless Podman** over the libpod REST API on a Unix socket. Any
   privilege a container ends up with is granted by Podman/the kernel, bounded by
-  the launching user's own privileges — a rootless container can never exceed
+  the launching user's own privileges; a rootless container can never exceed
   them. Fields that assume more (`privileged`, `oom_kill_disable`,
   `mem_swappiness`, `cpu_rt_*`) are forwarded but warned about, since they are
   reduced or ineffective rootless.
@@ -26,7 +26,7 @@ residual risks.
 
 | Boundary | Trusted? | Notes |
 |----------|----------|-------|
-| Podman socket (`PODMAN_SOCKET`/`DOCKER_HOST`) | Trusted, local-only | Whoever can reach it controls the engine; this is the primary boundary. Only `unix://`/`npipe://` are accepted — remote schemes are rejected fail-closed. |
+| Podman socket (`PODMAN_SOCKET`/`DOCKER_HOST`) | Trusted, local-only | Whoever can reach it controls the engine; this is the primary boundary. Only `unix://`/`npipe://` are accepted; remote schemes are rejected fail-closed. |
 | Compose file and its referenced files | **Trusted input** | Treated like a Makefile (see below). |
 | Release artifacts (`podup update`, installer) | Untrusted transport | Verified against an embedded Ed25519 key + provenance attestation, fail-closed. |
 | Container filesystem (e.g. `cp` archives) | Untrusted | Tar extraction refuses path-traversal (zip-slip) entries. |
@@ -37,7 +37,7 @@ residual risks.
 - The libpod socket is **strictly local**. Only a `unix://` socket path (or an
   `npipe://` named pipe on Windows) is accepted, whether it comes from
   `--socket`, `PODMAN_SOCKET`, `DOCKER_HOST`, or auto-detection. Remote schemes
-  (`tcp://`, `ssh://`, `http(s)://`, `fd://`) are **rejected fail-closed** —
+  (`tcp://`, `ssh://`, `http(s)://`, `fd://`) are **rejected fail-closed**:
   podup never connects to a remote engine, so the socket boundary is always a
   local one.
 
@@ -48,13 +48,13 @@ trusting its author. Path-valued keys the spec resolves relative to the compose
 file (`extends.file`, `env_file`, `label_file`, `include`) may reference paths
 outside the project directory, including `../`. Do **not** run podup on a compose
 file from an untrusted source. `include` accepts an absolute path and uses it as
-given, the same as `extends.file` and `env_file` — there is no containment here
+given, the same as `extends.file` and `env_file`; there is no containment here
 to rely on.
 
 ## Container hardening (compose security keys)
 
 The compose keys that constrain a container are translated onto Podman's
-`SpecGenerator` and take effect on the running container — they are not silently
+`SpecGenerator` and take effect on the running container; they are not silently
 dropped. Everything below remains bounded by the rootless ceiling: a key can
 only tighten, never widen, what the launching user already has.
 
@@ -79,7 +79,7 @@ can be added to a CI gate without altering runtime behaviour.
   cgroup rules (a malformed entry is warned about and skipped, not fatal).
 - CDI devices (Container Device Interface, e.g. `nvidia.com/gpu=all`) requested
   under `devices:` are passed through to Podman, which resolves them by name.
-- Per-mount hardening — `noexec`, `nosuid` and `nodev` — is carried onto a
+- Per-mount hardening (`noexec`, `nosuid` and `nodev`) is carried onto a
   volume's mount options, so a mount can deny binary execution, ignore
   setuid/setgid bits, and block device nodes. The short form spells them as raw
   mount options (`cache:/app/cache:noexec`); the long form takes them as
@@ -90,7 +90,7 @@ can be added to a CI gate without altering runtime behaviour.
 
 - `secrets:`/`configs:` sourced from inline `content:` or `environment:`, and
   from a `file:` path, are created as Podman-native secrets over the libpod API
-  (under a project-scoped name) and injected into the container — podup writes no
+  (under a project-scoped name) and injected into the container; podup writes no
   secret material to a host directory. They are removed again on `podup down`.
 - `external: true` secrets/configs are injected as Podman-native secrets
   (pre-flighted for existence), pointing at a pre-existing `podman secret`.
@@ -100,8 +100,8 @@ can be added to a CI gate without altering runtime behaviour.
   secret stays unreadable to a non-root container user.
 - Because the payload is a copy taken at `up`, editing the host file afterwards
   does not reach an already-running container; recreate it to pick up a new
-  value. (A rotation that replaces the file atomically — write-new-then-rename,
-  which is what careful tools do — was never visible to a running container
+  value. (A rotation that replaces the file atomically, write-new-then-rename,
+  which is what careful tools do, was never visible to a running container
   either, because a file bind mount pins the inode.)
 - Dangerous secret file modes (setuid/setgid/sticky/executable) are rejected.
 - The `config` subcommand redacts inline `content:` secrets before printing.
@@ -123,7 +123,7 @@ individually justified with safety comments, and unit-tested.
 
 - Dependencies are pinned in `Cargo.lock`; `cargo deny` enforces a license
   allowlist and bans yanked crates, and `cargo audit` runs weekly in CI.
-- No third-party CI actions are used — only GitHub-owned (SHA-pinned) actions.
+- No third-party CI actions are used, only GitHub-owned (SHA-pinned) actions.
 - Releases are Ed25519-signed and carry GitHub build-provenance attestations; a
   CycloneDX SBOM and third-party license attribution are published with each
   release. See [self-update.md](self-update.md) for verification steps.
@@ -181,9 +181,9 @@ individually justified with safety comments, and unit-tested.
 
 ## Self-update
 
-The `podup update` mechanism and its release trust chain — the embedded Ed25519
+The `podup update` mechanism and its release trust chain (the embedded Ed25519
 keys, the verify-before-install flow, key rotation, and independent/offline
-verification — are documented in [self-update.md](self-update.md).
+verification) are documented in [self-update.md](self-update.md).
 
 ### Installer error classification
 
@@ -194,7 +194,7 @@ different remedies:
 - **Release-tampering (rc=1 / `Fail`)**: every embedded key rejected the
   signature. Treat as a release-side problem: do not retry, do not bypass.
 - **Configuration problem (rc=3 / `Fail`)**: at least one embedded key was
-  set but could not be decoded into a 32-byte Ed25519 point — a malformed
+  set but could not be decoded into a 32-byte Ed25519 point: a malformed
   `PODUP_RELEASE_PUBKEY_B64` / `PODUP_RELEASE_PUBKEY2_B64` (or, with a
   third rotation slot, `PODUP_RELEASE_PUBKEY3_B64`) override, a stray
   whitespace, a non-base64 character. The release itself may be fine; the
@@ -208,7 +208,7 @@ uses the same exit-code scheme.
 ### Per-asset .sig verification
 
 Every detached signature in a release is verified against the keys
-`install.sh` ships — not just `SHA256SUMS.sig`. Per-binary, per-deb, per-SBOM
+`install.sh` ships, not just `SHA256SUMS.sig`. Per-binary, per-deb, per-SBOM
 and per-installer signatures are checked at release time (CI step "Verify every
 signature against the keys consumers embed") and the installers themselves
 verify the per-asset signature of whatever they fetch. A per-binary
@@ -236,7 +236,7 @@ data into a process or onto disk:
 - **Quadlet values** are filtered through `escape_unit_value` /
   `safe_unit_stem`; the unit filename is checked again by `write_units` so
   a poisoned value cannot break out of the output directory.
-- **Signal names** are resolved to numbers through `resolve_stop_signal` —
+- **Signal names** are resolved to numbers through `resolve_stop_signal`:
   the libpod endpoint is a number, a string returns HTTP 500.
 - **Pull policies** are normalised through `libpod_pull_policy`; an
   unrecognised value is a hard error rather than a silent default, so a
@@ -267,7 +267,7 @@ filters above. They are not flaws; they are the conscious boundary.
   `env_file`, `extends.file`, `include`, `secrets.file`, `build.context`,
   and the bind sources in `volumes:` accept `../` and absolute paths; the
   spec treats them as trusted operator input. The operator who runs
-  `podup` on a compose file is the one choosing to honour those paths —
+  `podup` on a compose file is the one choosing to honour those paths,
   the same posture a `Makefile` has.
 - **Inline-secret `file:` sources have a point-in-time lifetime.** The
   bytes are read at `up`, copied into a Podman-native secret, and persist
@@ -283,7 +283,7 @@ filters above. They are not flaws; they are the conscious boundary.
 
 ## What the live integration lane validates
 
-The `podman-lane` workflow boots Fedora qemu VMs in the runner (nested-virt —
+The `podman-lane` workflow boots Fedora qemu VMs in the runner (nested-virt:
 `ubuntu-24.04` exposes `/dev/kvm`) with full systemd, once per supported
 Podman major (Fedora 44 for Podman 5, rawhide for Podman 6). Each VM runs
 the integration suite as a rootless user. The lane is a **required status
@@ -312,7 +312,7 @@ audit of podup are not decidable from source alone:
 - Whether the rollback attack via CDN re-sign of an older release would
   be accepted by a field binary. The PoC for that is in
   `install.sh:verify_version_self_test` and `install.ps1:Test-StagedVersion`
-  — the staged binary's `--version` is checked against the resolved
+  where the staged binary's `--version` is checked against the resolved
   release tag before the in-place swap, so a CDN that hands back a
   legitimately-signed older release is rejected.
 - Whether the race conditions in `cp_to_container`, `run_attached`, and

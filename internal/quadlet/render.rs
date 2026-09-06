@@ -114,7 +114,7 @@ pub(super) fn render_volume(vol: &VolumeMount, project: &str, declared_volumes: 
 /// If `vol` is a long-form `type: tmpfs` mount, render it as a Quadlet `Tmpfs=`
 /// value (`target[:size=…,mode=…]`); otherwise return `None` so the caller emits
 /// a normal `Volume=`. A tmpfs mount written as `Volume=` would create a
-/// persistent named/anonymous volume instead of an in-memory filesystem — a
+/// persistent named/anonymous volume instead of an in-memory filesystem, a
 /// silent semantic inversion. Size/mode mirror the runtime mount options.
 pub(super) fn render_tmpfs_mount(vol: &VolumeMount) -> Option<String> {
 	let VolumeMount::Long {
@@ -254,8 +254,8 @@ fn key_is_arg_line(key: &str) -> bool {
 ///
 /// * systemd specifiers (`%h`, `%U`, …) are passed through literally by doubling
 ///   `%` to `%%`, instead of being expanded at unit-activation time;
-/// * a value ending in a backslash — which would otherwise fold the next
-///   physical line (and the directive on it) into this value — is quoted and the
+/// * a value ending in a backslash, which would otherwise fold the next
+///   physical line (and the directive on it) into this value, is quoted and the
 ///   backslash escaped, closing the line-continuation hole;
 /// * for word-split keys (`Environment`, `Label`, …) a value containing
 ///   whitespace is double-quoted so systemd keeps it as one value rather than
@@ -282,8 +282,8 @@ pub(super) fn escape_unit_value(key: &str, value: &str) -> String {
 /// Build the project-prefixed unit-file stem for a resource, e.g. service `web`
 /// in project `proj` → `proj-web`. Generated unit files share a single systemd
 /// directory across projects, so the stem (and every in-unit cross-reference to
-/// it) carries the project name — matching the project-scoped resource names
-/// inside the units — so two projects' `web` services do not clobber each other.
+/// it) carries the project name, matching the project-scoped resource names
+/// inside the units, so two projects' `web` services do not clobber each other.
 pub(super) fn unit_stem(project: &str, name: &str) -> String {
 	safe_unit_stem(&format!("{project}-{name}"))
 }

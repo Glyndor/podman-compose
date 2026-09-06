@@ -5,7 +5,7 @@
 //! ioctl and `SIGWINCH`; Windows speaks the console API (`SetConsoleMode`,
 //! `GetConsoleScreenBufferInfo`) and polls for window changes, because the
 //! console has no resize signal to subscribe to. Callers see the same three
-//! names either way — [`RawMode`], [`window_size`], [`ResizeWatcher`] — and
+//! names either way ([`RawMode`], [`window_size`], [`ResizeWatcher`]) and
 //! the pump in `terminal_pump` compiles once against them.
 //!
 //! The invariant both implementations exist to hold: **the terminal is

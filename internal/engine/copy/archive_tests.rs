@@ -312,7 +312,7 @@ fn absolute_entry_name_cannot_chmod_a_file_outside_the_destination() {
 
 	// Build an entry whose stored name is the victim's ABSOLUTE path. The
 	// safe setter refuses absolute paths, but a hostile archive is not built
-	// with the safe setter, so write the header's name field directly — this
+	// with the safe setter, so write the header's name field directly: this
 	// is the shape the guard has to survive.
 	let target = victim.to_str().expect("utf-8");
 	let mut header = tar::Header::new_gnu();

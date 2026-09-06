@@ -20,11 +20,11 @@ fn a_well_formed_value_renders_as_a_compact_json_line() {
 
 /// The fix for #1366: a `Value` that cannot be serialised must not silently
 /// emit `""`. `format_event` returns the empty string (so the NDJSON stream
-/// stays well-formed — a single missing row is recoverable), and the cause is
+/// stays well-formed, and a single missing row is recoverable), and the cause is
 /// logged at `debug` so the operator can find it.
 ///
 /// `serde_json::Value` itself never fails to serialise, so we wrap it in a
-/// custom serialiser that always errors — the shape of the failure is the
+/// custom serialiser that always errors: the shape of the failure is the
 /// contract under test, not the specific payload.
 #[test]
 fn an_unserialisable_value_drops_the_row_and_logs_debug() {

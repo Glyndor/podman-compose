@@ -20,7 +20,7 @@ const BINARY_UNITS: [&str; 7] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
 /// Decimal units, largest exponent last. `EB` is 1000^6; `u64::MAX` is a little
 /// over 18 of them, so this ladder covers the whole input type too.
 ///
-/// `kB` with a lowercase k, which is the SI prefix for kilo — `K` is kelvin.
+/// `kB` with a lowercase k, which is the SI prefix for kilo; `K` is kelvin.
 /// This is not pedantry about the standard: it is what the tools this table is
 /// compared against print. `podman images` rendered `805 kB` on Podman 5.7.0,
 /// and every other prefix from mega up is uppercase in the same output.
@@ -59,13 +59,13 @@ pub(crate) enum SizeShape {
 	/// `805kB`, `1.01GB`.
 	///
 	/// This is what podman and docker print, measured on Podman 5.7.0 and
-	/// docker compose v5.1.3 rather than assumed — `podman images` rendered
+	/// docker compose v5.1.3 rather than assumed: `podman images` rendered
 	/// `1.01 GB`, `101 MB` and `103 MB`, and `docker compose images` rendered
 	/// `98.2MB`, all three digits wide. A fixed decimal count cannot express it:
 	/// `98.23MB` and `8.71MB` disagree about how many decimals the reference
 	/// uses because the reference is not counting decimals at all.
 	///
-	/// The digit count is also what keeps the column from breathing — every
+	/// The digit count is also what keeps the column from breathing: every
 	/// value is three digits plus its unit, whatever its magnitude.
 	Significant { digits: usize },
 	/// Up to `parts` whole components, largest first, zeros skipped:
@@ -73,7 +73,7 @@ pub(crate) enum SizeShape {
 	///
 	/// No caller yet: the surfaces that want it are `ps --size` and the volume
 	/// accounting in #1304. Exercised by this module's tests meanwhile, which is
-	/// what the allow covers — it is scoped to the three composite items rather
+	/// what the allow covers; it is scoped to the three composite items rather
 	/// than the module, so anything else going dead here still warns.
 	#[allow(dead_code)]
 	Composite { parts: usize },
@@ -138,7 +138,7 @@ impl SizeFormat {
 	/// means should not have to learn a second rule for `1GB 512MB 200kB`.
 	///
 	/// This is the default *component count*, not a floor on the output. A value
-	/// with fewer components than that still renders only the ones it has —
+	/// with fewer components than that still renders only the ones it has:
 	/// three is what a caller gets when it does not choose, never padding.
 	///
 	/// [`DurationFormat::default_parts`]: super::DurationFormat::default_parts
@@ -164,7 +164,7 @@ enum Precision {
 impl Precision {
 	/// Decimal places for a value already reduced onto its unit.
 	///
-	/// Callers hand over a value of at least one — unit selection guarantees it,
+	/// Callers hand over a value of at least one; unit selection guarantees it,
 	/// since a rung is only taken once the value reaches it. A smaller value is
 	/// still answered rather than underflowing, counting the leading zero as the
 	/// one digit before the point.
@@ -235,7 +235,7 @@ fn single(bytes: u64, base: SizeBase, precision: Precision) -> String {
 	let mut value = bytes as f64 / divisor as f64;
 	let mut decimals = precision.decimals_for(value);
 	// Rounding can carry the value onto the next rung: 1048575 bytes is
-	// 1023.999 KiB, which prints as `1024.00KiB` — right arithmetic, and the
+	// 1023.999 KiB, which prints as `1024.00KiB`: right arithmetic, and the
 	// same unit-boundary artefact the ladder exists to avoid. Promote once,
 	// which is enough: the value was below `step` before rounding, so it cannot
 	// land more than one rung high. At the top rung there is nowhere to go, so

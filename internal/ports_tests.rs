@@ -59,7 +59,7 @@ fn ipv6_bracketed() {
 #[test]
 fn ipv6_bracketed_container_only_has_no_host_port() {
 	// `[ip]:container` (no published host port) binds the IPv6 address and
-	// lets Podman assign the host port — the no-host-port arm of parse_with_ip.
+	// lets Podman assign the host port, the no-host-port arm of parse_with_ip.
 	let ports = parse_one_short("[::1]:80");
 	assert_eq!(ports.len(), 1);
 	assert_eq!(ports[0].container_port, 80);

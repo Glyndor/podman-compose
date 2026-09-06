@@ -57,7 +57,7 @@ impl Engine {
 		} = self.run_overrides.clone();
 		let no_tty = self.run_no_tty;
 		// Same rule as `exec`: a TTY on both ends by default, `-T` to opt out,
-		// and only when stdin is actually a terminal — so a script or a pipeline
+		// and only when stdin is actually a terminal, so a script or a pipeline
 		// keeps the streaming path it has always had, unchanged.
 		let want_tty = crate::engine::wants_interactive_run(no_tty, detach);
 		// `--env-file` and `-l/--label` are carried on the engine (not
@@ -75,7 +75,7 @@ impl Engine {
 
 		// Compose `run` brings up the service's `depends_on` services first (and
 		// waits on their conditions), unless `--no-deps` is given. The service
-		// itself is excluded — only its transitive dependencies are started.
+		// itself is excluded; only its transitive dependencies are started.
 		if !no_deps {
 			let deps: Vec<String> =
 				super::targets::expand_targets(file, &[service_name.to_string()], false)
@@ -170,7 +170,7 @@ impl Engine {
 				.push(crate::compose::types::PortMapping::Short(p));
 		}
 		// Non-TTY forces Podman's multiplexed log framing, which is what the
-		// streaming path below decodes — TTY mode sends raw bytes with no 8-byte
+		// streaming path below decodes: TTY mode sends raw bytes with no 8-byte
 		// header and would garble that reader. The interactive path does not use
 		// that reader at all: it attaches to the raw stream, which is exactly the
 		// framing a TTY produces. So the two are consistent, not contradictory.
@@ -236,7 +236,7 @@ impl Engine {
 		// don't accumulate orphaned 'Created' containers.
 		// Interactive runs create first and start later, with the attach in
 		// between: a container started before anything is listening loses
-		// whatever it printed in that gap, and for `run` — a one-shot command —
+		// whatever it printed in that gap, and for `run`, a one-shot command,
 		// that gap is often the entire output.
 		if let Err(e) = self
 			.create_and_start(&run_name, service_name, &run_service, file, !want_tty)

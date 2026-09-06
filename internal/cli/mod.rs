@@ -21,19 +21,19 @@ pub(crate) use types::{
 /// (bold, underline, dim) and no explicit foreground colour, which means
 /// nothing elsewhere.
 ///
-/// No slot sets an explicit `AnsiColor`, `error`/`invalid` excepted — those are
+/// No slot sets an explicit `AnsiColor`, `error`/`invalid` excepted: those are
 /// status colours (red), not identity, and stay. An explicit `White` was tried
 /// first, on the reasoning that *some* colour should mark headings; measured
 /// against the same reference palette this branch's tests pin
-/// (`ui::palette_tests`), it read 1.82:1 on a white terminal background — worse
-/// than the green/cyan it replaced — and bold commonly promotes `White` to the
+/// (`ui::palette_tests`), it read 1.82:1 on a white terminal background, worse
+/// than the green/cyan it replaced, and bold commonly promotes `White` to the
 /// terminal's bright-white ANSI code, which measured 1.00:1 on white, i.e.
 /// invisible. Leaving the foreground unset uses the terminal's own default
 /// text colour instead, which is readable on both themes by construction: it
 /// is what the terminal owner already chose for their body text.
 ///
 /// All eight slots are still explicitly set, even where that means an empty
-/// style — clap's own `plain()` already leaves `error:` unstyled while podup
+/// style: clap's own `plain()` already leaves `error:` unstyled while podup
 /// printed it bold red, so nothing here may silently fall back to a starting
 /// point that disagreed with the rest of the binary.
 const HELP_STYLES: clap::builder::Styles = clap::builder::Styles::plain()
@@ -49,7 +49,7 @@ const HELP_STYLES: clap::builder::Styles = clap::builder::Styles::plain()
 /// Read `--ansi` straight off argv, before clap parses anything.
 ///
 /// clap renders `--help` inside the parse call, and the colour choice was only
-/// applied after it returned — so `podup --ansi never --help` came out coloured
+/// applied after it returned, so `podup --ansi never --help` came out coloured
 /// while `NO_COLOR=1 podup --help` did not. One flag, two answers.
 ///
 /// Accepts both spellings clap does (`--ansi never`, `--ansi=never`) and is
@@ -92,7 +92,7 @@ pub(crate) fn ansi_from_argv<I: Iterator<Item = String>>(args: I) -> Option<Ansi
 #[command(
 	name = "podup",
 	// clap renders `--version` as `{name} {version}`, so the derived default gave
-	// `podup 3.3.0` while the `version` subcommand gave `podup version v3.3.0` —
+	// `podup 3.3.0` while the `version` subcommand gave `podup version v3.3.0`,
 	// two answers to the same question, and neither caller can tell which one it
 	// is going to get. Measured on docker-compose v5.1.3: `version` and
 	// `--version` are byte-identical (`Docker Compose version v5.1.3`) and only
@@ -165,7 +165,7 @@ pub(crate) struct Cli {
 	/// emits during `up`/`create`/`run`/`exec` (e.g. `network_mode: host`,
 	/// `privileged: true`, `pid: host`, `container:<id>` namespace sharing).
 	/// Operators who wrote the compose file deliberately use this to silence
-	/// the per-run warning. `podup config` still surfaces the active modes —
+	/// the per-run warning. `podup config` still surfaces the active modes, since
 	/// that command is the "show me what will happen" path, where the
 	/// warning is the whole point.
 	// `global` so it works on every subcommand that may build a container spec

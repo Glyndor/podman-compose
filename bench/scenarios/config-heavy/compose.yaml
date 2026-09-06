@@ -1,6 +1,6 @@
 # Parse-heavy: the one scenario with no engine in it at all.
 #
-# `config` reads, interpolates, merges and re-renders — pure client-side work,
+# `config` reads, interpolates, merges and re-renders: pure client-side work,
 # so the numbers carry no container noise and no daemon variance. It is also
 # what CI does most often, to validate a compose file before deploying it.
 #
@@ -10,7 +10,7 @@
 #
 # Dependencies are deliberately SHALLOW. An earlier version of this file chained
 # all 24 services one after another, and podman-compose took 7.4s on it against
-# 0.10s for the same file with the chain removed — a 70x cost in dependency
+# 0.10s for the same file with the chain removed, a 70x cost in dependency
 # resolution, not in parsing. Leaving the chain in would have made this scenario
 # report that number as a parse cost, which is not what it is. The deep-chain
 # scenario is where dependency shape belongs.

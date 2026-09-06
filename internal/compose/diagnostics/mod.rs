@@ -5,7 +5,7 @@
 //! The cost of that leniency is silent drops: a typo or an unmapped compose
 //! feature would just vanish. This pass closes that gap by reporting every key
 //! or field podup parses but cannot translate, so nothing is ignored without
-//! the operator hearing about it — the same guarantee that lets podup absorb
+//! the operator hearing about it, the same guarantee that lets podup absorb
 //! future Docker/Podman compose additions gracefully.
 
 use super::types::ComposeFile;
@@ -128,8 +128,8 @@ fn unknown_top_level_keys(file: &ComposeFile, out: &mut Vec<String>) {
 	}
 }
 
-/// Service keys that matched no known field. A likely typo — e.g.
-/// `enviroment:` — is easy to miss when it just vanishes, so surface it.
+/// Service keys that matched no known field. A likely typo, e.g.
+/// `enviroment:`, is easy to miss when it just vanishes, so surface it.
 fn unknown_service_keys(file: &ComposeFile, out: &mut Vec<String>) {
 	for (service, def) in &file.services {
 		for key in def.unknown.keys() {

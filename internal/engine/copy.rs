@@ -99,7 +99,7 @@ impl Engine {
 
 	/// Copy with `docker compose cp` options: `--index` (target a specific
 	/// replica), `-L/--follow-link` (follow host symlinks when uploading) and
-	/// `-a/--archive` (accepted for compatibility — see [`CpOptions::archive`]).
+	/// `-a/--archive` (accepted for compatibility; see [`CpOptions::archive`]).
 	pub async fn cp_with_options(
 		&self,
 		file: &ComposeFile,
@@ -162,7 +162,7 @@ impl Engine {
 		// Two destination shapes, and only one of them can be streamed.
 		//
 		// An existing directory goes straight to `extract_tar_guarded`, which
-		// walks the archive once — so the body can be piped into it and nothing
+		// walks the archive once, so the body can be piped into it and nothing
 		// accumulates. That is also the shape that moves bulk data (`cp
 		// svc:/var/lib/data ./backup/`), which is why it is the one worth
 		// streaming.
@@ -202,21 +202,21 @@ impl Engine {
 
 	/// Push a host file or directory into a service container.
 	///
-	/// # Concurrency contract — read before touching the two HEAD + PUT sequence
+	/// # Concurrency contract: read before touching the two HEAD + PUT sequence
 	///
 	/// `cp_to_container` issues two `HEAD /archive` requests with the PUT
 	/// between them, so a concurrent mutation in the window could land a
 	/// successful-but-wrong-state PUT. The two callers in the codebase are
 	/// the CLI `cp` subcommand and the `watch` sync path, both of which are
 	/// called only while the per-project lock ([`crate::engine::lock`]) is
-	/// held by the mutating stage — `lock_project` serialises a single
+	/// held by the mutating stage: `lock_project` serialises a single
 	/// `podup` process against any other `podup` process working on the same
 	/// project, closing the **cross-invocation** case.
 	///
-	/// The **within-invocation** case — a foreign actor (a manual
+	/// The **within-invocation** case, a foreign actor (a manual
 	/// `podman exec`, another compose stack on the same machine, the user
 	/// running `podman cp` in another shell) mutating the destination
-	/// between the two HEADs — is closed by libpod itself: the archive PUT
+	/// between the two HEADs, is closed by libpod itself: the archive PUT
 	/// extracts into a directory that we have just confirmed exists and is
 	/// a directory, so a foreign `rm -rf` racing in is rejected by the
 	/// second PUT, not silently succeeded. The `extract_stat_path` HEAD
@@ -312,12 +312,12 @@ impl Engine {
 	}
 
 	/// PUT a gzipped tar to a container's archive endpoint at `dir`, extracting
-	/// it there, and confirm it landed — the upload path shared by `cp` and
+	/// it there, and confirm it landed, the upload path shared by `cp` and
 	/// `watch` sync.
 	///
 	/// #1097: on Podman 6 the archive endpoint applies the tar and then closes
 	/// the connection *without* an HTTP response, which hyper reports as
-	/// `IncompleteMessage` even though the copy landed (the content does appear —
+	/// `IncompleteMessage` even though the copy landed (the content does appear,
 	/// measured on 6.0.1; every raw request to the same endpoint gets a clean
 	/// 200, so the trigger is client-side and could not be stripped out). To tell
 	/// that apply-then-close apart from a *genuine* upload failure (a dropped
@@ -328,7 +328,7 @@ impl Engine {
 	/// This used to compare the entry's mtime before and after and require it to
 	/// move. That signal cannot express the question: Podman 6 reports the mtime
 	/// to whole seconds, so two copies inside one second look identical
-	/// (#1270 — three failures in six back-to-back copies, measured), and
+	/// (#1270: three failures in six back-to-back copies, measured), and
 	/// re-copying an *unchanged* file is undetectable at any resolution because
 	/// the extracted file takes the source's own mtime.
 	///
@@ -363,7 +363,7 @@ impl Engine {
 		// This used to read the entry's mtime *before* the PUT and check that it
 		// moved afterwards. That cannot work: Podman 6 reports the mtime to
 		// whole seconds, so two copies inside one second are indistinguishable
-		// — measured at three failures in six back-to-back copies (#1270) — and
+		// (measured at three failures in six back-to-back copies, #1270), and
 		// copying an unchanged file twice is undetectable at any resolution,
 		// because the extracted file takes the source's own mtime.
 		//
@@ -409,7 +409,7 @@ impl Engine {
 		// The upload finished but its result could not be confirmed. Say so, with
 		// an actionable hint, instead of surfacing the raw transport error.
 		Err(ComposeError::Copy(format!(
-			"the upload to {dir} could not be confirmed — the container runtime closed the \
+			"the upload to {dir} could not be confirmed: the container runtime closed the \
 			 connection without a response and the destination did not change. The copy may \
 			 or may not have landed; check {dir} in the container."
 		)))
@@ -420,7 +420,7 @@ impl Engine {
 /// nothing to compare.
 ///
 /// Only a regular file has a size the archive preserves. A directory upload
-/// stays unverifiable and therefore fail-closed, which is what it was before —
+/// stays unverifiable and therefore fail-closed, which is what it was before:
 /// a directory entry's own size says nothing about whether its children
 /// arrived. A source that cannot be stat'd is `None` for the same reason:
 /// unknown must not become a guess.
@@ -440,7 +440,7 @@ pub(super) fn uploaded_entry_size(src: &std::path::Path) -> Option<u64> {
 /// Only the size for now. The mtime is deliberately not part of it: the archive
 /// sets it from the source, but Podman reports it to whole seconds while the
 /// source's own mtime carries sub-second precision, so comparing the two would
-/// re-introduce a resolution mismatch — this time as a false *negative* on a
+/// re-introduce a resolution mismatch, this time as a false *negative* on a
 /// copy that did land.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ExpectedEntry {
@@ -518,12 +518,12 @@ fn parse_endpoint(s: &str) -> Option<(&str, &str)> {
 	if s == "-" {
 		return None;
 	}
-	// `SERVICE:PATH` — colon must not be the first character and path cannot be empty.
+	// `SERVICE:PATH`: colon must not be the first character and path cannot be empty.
 	let (svc, path) = s.split_once(':')?;
 	if svc.is_empty() || path.is_empty() {
 		return None;
 	}
-	// On Windows, an absolute path like `C:\path` has a single-char drive prefix —
+	// On Windows, an absolute path like `C:\path` has a single-char drive prefix,
 	// treat those as local paths, not service endpoints. This must NOT apply on
 	// Unix, where a one-character service name (`c:/path`) is perfectly valid and
 	// would otherwise be rejected as a bogus "drive".

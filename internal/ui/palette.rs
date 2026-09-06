@@ -59,7 +59,7 @@ pub(crate) fn supports_wide_palette(
 /// Read once and cached: the environment does not change under a running
 /// command, and every styled cell would otherwise pay two `var_os` calls.
 ///
-/// The Windows argument is `cfg!(windows)` — the target, not a runtime probe of
+/// The Windows argument is `cfg!(windows)`, the target, not a runtime probe of
 /// virtual-terminal processing. That is sufficient because this is only ever
 /// consulted after the colour gate has decided to emit colour at all, which
 /// already required a terminal and a permitting `--ansi`/`NO_COLOR`; and on a
@@ -85,7 +85,7 @@ use std::collections::HashMap;
 /// Give each name its own palette slot, walking them in sorted order.
 ///
 /// Sequential rather than hashed: a hash does not know how many services exist,
-/// so it collides well before the palette is full — measured on a four-service
+/// so it collides well before the palette is full: measured on a four-service
 /// project, two came out the same colour, and over twenty colours five services
 /// still collide about 42% of the time.
 ///
@@ -108,7 +108,7 @@ pub(crate) fn assign(names: &[String]) -> HashMap<String, usize> {
 /// never registered.
 ///
 /// The fallback matters for anything podup renders but did not resolve from the
-/// compose file — an orphan container, a project listed by `ls`. A stable wrong
+/// compose file: an orphan container, a project listed by `ls`. A stable wrong
 /// colour reads better than no colour at all, and the hash is what guarantees
 /// the same label always lands on the same slot.
 pub(crate) fn colour_for(label: &str, map: &HashMap<String, usize>) -> usize {

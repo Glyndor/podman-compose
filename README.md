@@ -23,7 +23,7 @@ curl -fsSL https://apt.glyndor.net/install/podup | sudo sh
 
 That is the whole install on Debian and Ubuntu. It registers the signed Glyndor
 apt repository, verifies the archive key's fingerprint before trusting it, and
-installs podup with apt — so upgrades and signing-key renewals arrive through
+installs podup with apt, so upgrades and signing-key renewals arrive through
 `apt upgrade` like any other package. Root is needed because it installs
 packages. It leaves nothing of its own behind: the download is removed, and so
 is anything it had to install just to check the key.
@@ -54,23 +54,23 @@ socket still has to be listening:
 systemctl --user enable --now podman.socket
 ```
 
-### Optional — macOS
+### Optional: macOS
 
 ```sh
 brew install glyndor/tap/podup
 ```
 
-### Optional — Windows
+### Optional: Windows
 
 ```powershell
 scoop bucket add glyndor https://github.com/Glyndor/scoop-bucket
 scoop install podup
 ```
 
-Scoop clones the bucket with git, so git has to be installed first — Scoop's own
+Scoop clones the bucket with git, so git has to be installed first; Scoop's own
 installer does not bring it.
 
-### Optional — Linux without apt
+### Optional: Linux without apt
 
 ```sh
 curl -fsSL https://glyndor.net/podup/install/unix | bash
@@ -110,12 +110,12 @@ podup tracks the **latest stable Podman** and supports its **last two majors,
 Podman 5.x and 6.x**. It talks to Podman's native libpod API, requesting the
 `/v5.0.0/libpod` path that Podman 6 still serves; the gate is the major version
 the engine reports, so it needs **Podman ≥ 5.0**. When a new major ships, it is
-added and the oldest is dropped — but only once the **newest LTS of each
+added and the oldest is dropped, but only once the **newest LTS of each
 distribution family carries the new one or better**, so nobody on a current
 release is stranded. Both supported majors run the
 integration suite in CI on every engine change (Fedora 44 for the latest 5.x,
 rawhide for 6.x). Many distributions still ship 4.x, so `podman --version` is
-worth checking before installing — and a distribution never changes its Podman
+worth checking before installing, and a distribution never changes its Podman
 major version mid-release, so an LTS that shipped below the floor stays below
 it for its whole supported life.
 
@@ -187,8 +187,8 @@ sequenceDiagram
 Peak memory and per-operation latency against docker-compose and podman-compose,
 **all three driving the same rootless Podman**, same digest-pinned images,
 median of 10 measured runs (12 iterations, 2 warm-up discarded), on podup 5.7.1.
-podup is fastest in all 29 measured rows, though three teardown rows —
-`deep-chain`, `many-services` and `multi-healthcheck` — win by less than their
+podup is fastest in all 29 measured rows, though three teardown rows
+(`deep-chain`, `many-services` and `multi-healthcheck`) win by less than their
 own standard deviation and should be read as ties; the widest gaps are the ones
 with many services.
 

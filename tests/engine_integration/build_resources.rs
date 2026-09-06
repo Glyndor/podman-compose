@@ -25,7 +25,7 @@ async fn file_config_bound() {
 	engine.up(&file).await.unwrap();
 	// Read the config from inside the container. Asserting only that `up` and
 	// `down` succeed passes just as happily when the config is missing, empty or
-	// unreadable — the mount is not the effect, the content is.
+	// unreadable: the mount is not the effect, the content is.
 	let read = engine
 		.exec_with_options(
 			&file,
@@ -171,7 +171,7 @@ async fn named_volume_with_driver_opts() {
 
 	engine.up(&file).await.unwrap();
 	// The `:z` relabel is not optional. This volume binds a host directory, and
-	// on an SELinux-enforcing host the container is denied the write without it —
+	// on an SELinux-enforcing host the container is denied the write without it,
 	// which is what reddened the Podman 5 leg of pull request #1278 while passing
 	// on my machine, where SELinux is not enabled. The same trap is recorded in
 	// .github/podman-known-failures-5 for run_flags::engine_run_applies_volume_
@@ -179,8 +179,8 @@ async fn named_volume_with_driver_opts() {
 	//
 	// The driver_opts bind the volume to this temp directory, so a file written
 	// at /cache in the container has to appear on the host here. Without the opts
-	// taking effect the container would still get a working /cache — an ordinary
-	// local volume — and `up` would return Ok either way, which is exactly what
+	// taking effect the container would still get a working /cache (an ordinary
+	// local volume) and `up` would return Ok either way, which is exactly what
 	// this test used to check.
 	engine
 		.test_exec_capture(

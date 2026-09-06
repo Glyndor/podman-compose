@@ -261,7 +261,7 @@ fn native_secret_without_mode_defaults_to_0444() {
 #[test]
 fn secret_mode_leading_zero_is_octal() {
 	// `0444` (leading-zero octal, the Compose Specification spelling) parses as
-	// octal 0o444, not decimal 444 (which would fail) — issue #2.
+	// octal 0o444, not decimal 444 (which would fail); issue #2.
 	let p = plans("services:\n  web:\n    image: x\n    secrets:\n      - source: tok\n        mode: 0444\nsecrets:\n  tok:\n    content: data\n");
 	assert_eq!(p[0].mode, Some(0o444));
 }

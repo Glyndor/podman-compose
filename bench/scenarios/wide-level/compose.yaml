@@ -3,7 +3,7 @@
 # `up` creates each dependency level with bounded concurrency
 # (MAX_LIFECYCLE_CONCURRENCY = 16), so a wide level is created in batches. Under
 # a level barrier, NOTHING in level 1 may start until the whole of level 0 has
-# been created — including services it does not depend on. A per-service DAG
+# been created, including services it does not depend on. A per-service DAG
 # starts a dependent the moment its own dependencies are up.
 #
 # 41 services in level 0 (2.5 batches) and one dependent behind exactly one of
@@ -13,7 +13,7 @@
 #   podup            809 ms
 #   docker compose   129 ms
 #
-# A two-service level shows nothing (see `deep-chain`) — readiness is already
+# A two-service level shows nothing (see `deep-chain`): readiness is already
 # gated per dependency. It is the batching that costs.
 services:
   anchor:

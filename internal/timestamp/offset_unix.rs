@@ -25,15 +25,15 @@ pub(super) fn local_offset_seconds(unix_secs: i64) -> Option<i64> {
 	//
 	// The known hazard with this family is `tzset`, which reads the `TZ`
 	// environment variable and races a concurrent `setenv`. podup never sets an
-	// environment variable at runtime — the only writes are in test processes,
-	// and no test calls this — so the race has no second party. A returned null
+	// environment variable at runtime (the only writes are in test processes,
+	// and no test calls this) so the race has no second party. A returned null
 	// means libc could not resolve a zone at all and is handled rather than
 	// assumed away.
 	let result = unsafe { libc::localtime_r(&time, &mut tm) };
 	// Deleting this check survives the whole suite, and that is a statement
 	// about reach rather than about the tests: `localtime_r` returns null only
-	// when libc cannot resolve a zone at all — a missing or corrupt
-	// `/etc/localtime`, or a `TZ` it cannot parse — and no in-process test can
+	// when libc cannot resolve a zone at all (a missing or corrupt
+	// `/etc/localtime`, or a `TZ` it cannot parse) and no in-process test can
 	// produce that without replacing libc. The branch it guards is reachable in
 	// production and is exercised from the caller side instead:
 	// `render_with_offset(_, None)` has its own test, so what happens when the

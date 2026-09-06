@@ -56,7 +56,7 @@ pub(crate) fn validate_project_name(project: &str) -> podup::Result<()> {
 
 /// Whether a command is scoped purely by the `podup.project` label and never
 /// reads service definitions, so it can run against a project with no compose
-/// file present — matching `docker compose -p NAME events`/`ps`. These commands
+/// file present, matching `docker compose -p NAME events`/`ps`. These commands
 /// tolerate a missing compose file at startup instead of erroring `FileNotFound`.
 pub(crate) fn is_label_only(command: &Commands) -> bool {
 	matches!(command, Commands::Events { .. } | Commands::Ps { .. })
@@ -133,9 +133,9 @@ pub(crate) fn internal_error_notice() -> String {
 ///
 /// The match is anchored to the exact prefix the standard library uses, because
 /// a bare substring search over the panic text is far too wide: it exits 0 for
-/// **any** panic whose message happens to mention a broken pipe — an
+/// **any** panic whose message happens to mention a broken pipe (an
 /// `.expect()` on an unrelated io error, or a Podman error quoting a downstream
-/// EPIPE — and with `panic = "abort"` this hook is the only thing between a
+/// EPIPE) and with `panic = "abort"` this hook is the only thing between a
 /// panic and the exit status, so a real crash would report success and print
 /// nothing. Pure so it can be unit-tested.
 pub(crate) fn is_broken_pipe_panic(msg: &str) -> bool {
@@ -151,7 +151,7 @@ pub(crate) fn is_broken_pipe_panic(msg: &str) -> bool {
 
 /// Initialize the global tracing subscriber, written to stderr in the
 /// `podup: <level>: <msg>` format so stdout stays a clean pipe. `default_level`
-/// is the floor used when `RUST_LOG` is unset — `warn` for most commands (so the
+/// is the floor used when `RUST_LOG` is unset: `warn` for most commands (so the
 /// forward-compat "unknown field" notices are never silently dropped), `info`
 /// for interactive long-running ones like `watch` that should surface their
 /// per-action progress. `RUST_LOG` always overrides.
@@ -195,7 +195,7 @@ pub(crate) fn run_overrides_for(command: &Commands) -> podup::RunOverrides {
 /// Whether `run` was given `-T/--no-TTY`.
 ///
 /// Carried on the engine rather than on `RunOverrides`, which is public and not
-/// `#[non_exhaustive]` — a new field there is a breaking change, which is what
+/// `#[non_exhaustive]`, where a new field is a breaking change, which is what
 /// cargo-semver-checks reported when the field was tried there.
 pub(crate) fn run_no_tty_for(command: &Commands) -> bool {
 	matches!(command, Commands::Run { no_tty, .. } if *no_tty)
@@ -218,7 +218,7 @@ pub(crate) fn run_labels_for(command: &Commands) -> Vec<String> {
 ///
 /// Split from the two call sites so the choice is testable: both arms used to
 /// live inside `parse_cli`, which calls `process::exit` and so cannot be
-/// exercised by a unit test at all — the coloured arm was unreachable from the
+/// exercised by a unit test at all: the coloured arm was unreachable from the
 /// suite, and adding it dropped coverage below the gate.
 ///
 /// Which sink to ask about is the caller's business and differs between them:
@@ -248,7 +248,7 @@ fn help_for(root: clap::Command, args: impl Iterator<Item = String>) -> clap::bu
 	// Build first. An unbuilt tree has not propagated the binary name or the
 	// global options down to its subcommands, so a subcommand plucked out of it
 	// renders `Usage: generate <COMMAND>` instead of
-	// `Usage: podup generate [OPTIONS] <COMMAND>` — the same text `--help` on
+	// `Usage: podup generate [OPTIONS] <COMMAND>`, the same text `--help` on
 	// that group already produces.
 	let mut cmd = root;
 	cmd.build();
@@ -321,7 +321,7 @@ pub(crate) fn parse_cli() -> Cli {
 			}
 			// `MissingSubcommand` is the same situation wearing a different hat.
 			// `arg_required_else_help` only fires when there are NO arguments at
-			// all, and an env-sourced one counts — so with `COMPOSE_PROJECT_NAME`
+			// all, and an env-sourced one counts, so with `COMPOSE_PROJECT_NAME`
 			// or `PODMAN_SOCKET` exported, which is the normal state of a real
 			// deployment, bare `podup` printed a wall of forty-five subcommand
 			// names instead of its help. Same user, same mistake, worse answer,
@@ -336,7 +336,7 @@ pub(crate) fn parse_cli() -> Cli {
 				// Coloured the same way the `--help` branch above is, but gated on
 				// *stderr* since that is where this goes. Bare `podup` is the first
 				// screen anyone sees after installing, and it was the one help path
-				// that rendered plain — so podup looked like a tool with no colour
+				// that rendered plain, so podup looked like a tool with no colour
 				// while every other screen had it.
 				// Rendered from the command, not from the error: a
 				// `MissingSubcommand` error renders as a one-line complaint plus
@@ -345,7 +345,7 @@ pub(crate) fn parse_cli() -> Cli {
 				//
 				// From the command the user actually reached, not always the root.
 				// `generate` and `autostart` declare `subcommand_required`, so bare
-				// `podup generate` lands here — and rendering the root told them
+				// `podup generate` lands here, and rendering the root told them
 				// about the whole tool while withholding the one thing they needed,
 				// which is what `generate` accepts. Their own `--help` already
 				// answers that correctly; this path did not.
@@ -357,8 +357,8 @@ pub(crate) fn parse_cli() -> Cli {
 			// arg, bad value. Bypass `e.exit()` so the output carries the
 			// `podup:` prefix that `exit_status::print_error` and the
 			// `tracing` formatter both use. `e.exit()` would also write
-			// clap's own (unprefixed) version to stderr — printing the same
-			// complaint twice — so we render it once via
+			// clap's own (unprefixed) version to stderr, printing the same
+			// complaint twice, so we render it once via
 			// `format_clap_error` and exit with the same code clap would have
 			// used.
 			_ => {
@@ -372,7 +372,7 @@ pub(crate) fn parse_cli() -> Cli {
 /// Render a clap error with the binary's `podup: error:` prefix so an argument
 /// typo on the command line looks the same as every other failure path.
 /// clap's own formatter emits a bare `error:` line that doesn't match
-/// `exit_status::print_error` or the `tracing` formatter — a typo reached the
+/// `exit_status::print_error` or the `tracing` formatter: a typo reached the
 /// user as a one-liner while every other error came out bold-red and prefixed.
 ///
 /// The clap-rendered text (which includes the usage block for argument
@@ -387,7 +387,7 @@ fn format_clap_error(err: &clap::error::Error) -> String {
 		render = style.render(),
 		reset = style.render_reset()
 	);
-	// clap's own rendered text starts with the literal "error: " — strip it
+	// clap's own rendered text starts with the literal "error: ", so strip it
 	// and re-emit with our prefix so the bold-red label matches the rest of
 	// the binary. The usage block below is left unchanged.
 	let body = err.to_string();

@@ -1,7 +1,7 @@
 # Debian packaging
 
 podup is distributed for Debian and Ubuntu through the self-hosted signed apt
-repository at [`apt.glyndor.net`](https://apt.glyndor.net) — that is the
+repository at [`apt.glyndor.net`](https://apt.glyndor.net); that is the
 supported path, described below. Inclusion in the official Debian/Ubuntu
 archives is explicitly **not** a goal. The `debian/` directory in this
 repository builds the `.deb` that the apt repository serves; this page covers
@@ -21,24 +21,24 @@ The packaged binary is built with the self-update feature **compiled out**:
 `debian/rules` builds with `--no-default-features --features watch,completions`,
 dropping the `update` feature (and its `ureq` + TLS + Ed25519 stack). This is
 why `podup update` on a deb-installed binary refuses outright and points back to
-the package manager — the capability is absent from the binary, not merely
+the package manager: the capability is absent from the binary, not merely
 gated at runtime by a dpkg-ownership check.
 
 ## Prebuilt .deb from releases
 
-Each tagged release attaches a signed `.deb` per architecture —
+Each tagged release attaches a signed `.deb` per architecture:
 `podup_<version>_amd64.deb` and `podup_<version>_arm64.deb` (each with its
 `.sig`, and an entry in the release `SHA256SUMS`). Each architecture is built
 natively in its own `debian:sid` container (amd64 on an x64 runner, arm64 on an
-arm64 runner — no emulation). Install the one matching your architecture
+arm64 runner, no emulation). Install the one matching your architecture
 directly:
 
 ```bash
 sudo apt install ./podup_<version>_amd64.deb   # or _arm64.deb on aarch64
 ```
 
-`podup update` refuses to self-replace a binary installed this way — it would
-desync dpkg's record of the file — and points back to the package manager;
+`podup update` refuses to self-replace a binary installed this way (it would
+desync dpkg's record of the file) and points back to the package manager;
 upgrade with `apt` instead.
 
 ## apt repository (apt.glyndor.net)
@@ -52,7 +52,7 @@ the release signing key, builds a signed `reprepro` repository, and publishes
 it to Cloudflare R2 behind `apt.glyndor.net`. It is rebuilt fresh each run, so
 it always carries the current version of every package (no old-version
 support). podup's only responsibility is to attach a
-`podup_<version>_<arch>.deb` asset (amd64 and arm64) to each release — which
+`podup_<version>_<arch>.deb` asset (amd64 and arm64) to each release, which
 the `build-deb` matrix in `release.yml` already does.
 
 ### One-line setup
@@ -73,8 +73,8 @@ gpg --show-keys keyring-check/usr/share/keyrings/glyndor.gpg
 ```
 
 Check the printed fingerprint against the one published in the
-[apt repository README](https://github.com/Glyndor/apt#verify-the-signing-key)
-— a channel independent of `apt.glyndor.net`. Only once it matches:
+[apt repository README](https://github.com/Glyndor/apt#verify-the-signing-key),
+a channel independent of `apt.glyndor.net`. Only once it matches:
 
 ```bash
 sudo dpkg -i glyndor-archive-keyring.deb
@@ -90,23 +90,23 @@ check happens before anything in it can execute.
 
 The signing key ships as the `glyndor-archive-keyring` package, so apt owns the
 key file. When the key is rotated or its expiry extended, a new keyring version
-is published and `apt upgrade` installs it — nothing for users to re-run.
+is published and `apt upgrade` installs it, with nothing for users to re-run.
 
 > **Debian compatibility note:** the MSRV is 1.85, which Debian trixie ships, so
 > trixie and sid can both build the package.
 
 ## What the skeleton covers
 
-- `debian/control` — source/binary stanzas, build dependencies, `Depends: podman
+- `debian/control`: source/binary stanzas, build dependencies, `Depends: podman
   (>= 5.0), unattended-upgrades, glyndor-archive-keyring`. The third is what aims
   the second: it ships the `.sources` file and the `Allowed-Origins` entry, so
   without it unattended-upgrades runs and never looks at Glyndor. A fork
   publishing its own archive must declare `Provides: glyndor-archive-keyring` on
   its own keyring package, or this relationship cannot be satisfied by it.
-- `debian/rules` — debhelper with cargo overrides, `--locked` release build, tests run during the build
-- `debian/podup.1` + `debian/podup.manpages` — the man page, installed by `dh_installman`
-- `debian/copyright` — DEP-5, MIT
-- Source format `3.0 (native)` — the repository is upstream
+- `debian/rules`: debhelper with cargo overrides, `--locked` release build, tests run during the build
+- `debian/podup.1` + `debian/podup.manpages`: the man page, installed by `dh_installman`
+- `debian/copyright`: DEP-5, MIT
+- Source format `3.0 (native)`: the repository is upstream
 
 ## Not the official Debian/Ubuntu archive
 

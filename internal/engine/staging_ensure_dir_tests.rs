@@ -41,7 +41,7 @@ fn symlinked_dir_is_rejected_not_healed() {
 	// SAFETY: geteuid takes no arguments, touches no memory and cannot fail.
 	let euid = unsafe { libc::geteuid() };
 	assert!(ensure_private_dir(&link, euid).is_err());
-	// Target permissions stay untouched — no chmod through the link.
+	// Target permissions stay untouched: no chmod through the link.
 	let meta = std::fs::metadata(&target).expect("metadata");
 	assert_eq!(meta.mode() & 0o777, 0o755);
 }

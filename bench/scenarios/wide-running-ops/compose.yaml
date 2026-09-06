@@ -1,6 +1,6 @@
 # Read-path cost across many containers, which running-ops (one service) cannot
 # show. `ps` renders a table of twelve rows, `logs` aggregates twelve streams and
-# prefixes each line with its service — the work grows with the container count,
+# prefixes each line with its service, so the work grows with the container count,
 # and every tool does it differently.
 services:
   svc01:

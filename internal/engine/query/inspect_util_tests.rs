@@ -1,6 +1,6 @@
 /// A process can name itself, and `top` prints that name. Without escaping,
 /// a container process called `\x1b[31mevil` repaints the reader's terminal
-/// — the one table in podup that formatted by hand rather than through
+/// the one table in podup that formatted by hand rather than through
 /// `fit_cell`, which has sanitized since it was written.
 #[test]
 fn top_escapes_control_characters_from_process_argv() {
@@ -121,7 +121,7 @@ fn top_pads_columns_to_the_widest_cell() {
 	let lines = super::process_table(&titles, &processes).unwrap().render();
 	assert_eq!(lines.len(), 3);
 	// The invariant is that the second column starts at one offset on every
-	// line, header included — not any particular prefix. Asserting a literal
+	// line, header included, not any particular prefix. Asserting a literal
 	// `"1      "` pinned the old hand-rolled aligner's two-space join, so it
 	// failed when `top` moved onto the shared table for no reason a reader of
 	// `top` would care about.

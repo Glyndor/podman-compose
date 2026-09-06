@@ -14,7 +14,7 @@ use crate::error::{ComposeError, Result};
 /// anything is created) and a 1-based `--index`. Each name is either the
 /// unsuffixed base (the sole replica) or `{base}-{n}`.
 ///
-/// `--index n` targets the replica numbered `n` — by name, not by position —
+/// `--index n` targets the replica numbered `n` by name, not by position,
 /// so it stays correct after a runtime `scale`/`up --scale` and regardless of
 /// the order Podman lists containers; `0` is rejected (indexes are 1-based);
 /// `None` picks the lowest-numbered replica. Pure so it is unit-testable

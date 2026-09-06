@@ -1,7 +1,7 @@
 //! Network configuration types for both top-level networks and per-service attachments.
 //!
 //! [`NetworkConfig`] describes a named network in the `networks:` top-level block.
-//! [`ServiceNetworks`] is the per-service attachment — either a bare list of names
+//! [`ServiceNetworks`] is the per-service attachment: either a bare list of names
 //! or a map with [`ServiceNetworkConfig`] options (aliases, IP, priority, etc.).
 
 use indexmap::IndexMap;
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use super::Labels;
 
-/// `networks:` value at service level — absent, a bare list of network names, or a detailed map.
+/// `networks:` value at service level: absent, a bare list of network names, or a detailed map.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(untagged)]
 pub enum ServiceNetworks {

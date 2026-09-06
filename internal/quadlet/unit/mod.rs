@@ -28,7 +28,7 @@ use super::QuadletUnit;
 /// unit.
 ///
 /// This is deliberately separate from the `Label=podup.project=<project>`
-/// line each unit also carries (kept for runtime scoping — Podman uses it for
+/// line each unit also carries (kept for runtime scoping, since Podman uses it for
 /// container/secret lookups). A compose service's user-supplied `labels:` are
 /// rendered into the same section as that `Label=` line, in the same
 /// `Key=Value` shape, so a service declaring `labels: {podup.project: other}`
@@ -44,14 +44,14 @@ fn owner_marker(project: &str) -> String {
 /// Resolve a compose-relative path against the compose base directory.
 ///
 /// Compose interprets a relative path against the compose file's directory.
-/// systemd interprets one against **the unit file's** directory — units are
+/// systemd interprets one against **the unit file's** directory: units are
 /// installed under `~/.config/containers/systemd`, which is not where the
 /// project lives. Any path a generated unit carries must therefore be made
 /// absolute here, or it silently resolves somewhere else once installed.
 ///
 /// An already-absolute path is returned untouched, and `.` means the base
 /// directory itself. A leading `./` is stripped so the result stays clean
-/// (`/base/src`, not `/base/./src`) — cosmetic, both resolve identically.
+/// (`/base/src`, not `/base/./src`), cosmetic since both resolve identically.
 fn abs_against(base_dir: &std::path::Path, path: &str) -> String {
 	let p = std::path::Path::new(path);
 	if p.is_absolute() {

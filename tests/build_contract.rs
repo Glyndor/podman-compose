@@ -20,7 +20,7 @@ use tempfile::tempdir;
 /// on stderr.
 ///
 /// It used `print!`, contradicting the documented promise that stdout stays
-/// pipeable — the one thing a caller redirecting `podup build > log` relies on,
+/// pipeable, the one thing a caller redirecting `podup build > log` relies on,
 /// and the same promise `config` and `generate quadlet` are built around.
 #[tokio::test]
 async fn build_writes_the_image_id_to_stdout() {

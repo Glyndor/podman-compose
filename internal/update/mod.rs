@@ -5,7 +5,7 @@
 //! `SHA256SUMS` manifest. The manifest's Ed25519 signature is verified against
 //! the public keys embedded in this binary (`verify::RELEASE_PUBKEYS`); only
 //! then is the binary's digest checked against the manifest and the running
-//! executable atomically replaced. Every step fails closed — a missing key,
+//! executable atomically replaced. Every step fails closed: a missing key,
 //! bad signature, or checksum mismatch aborts before anything is written.
 
 mod github;

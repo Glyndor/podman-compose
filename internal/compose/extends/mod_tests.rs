@@ -9,7 +9,7 @@ fn svc(image: &str) -> Service {
 	}
 }
 
-// merge_service — scalar fields
+// merge_service: scalar fields
 
 #[test]
 fn merge_override_image_wins() {
@@ -27,7 +27,7 @@ fn merge_base_image_used_when_override_missing() {
 	assert_eq!(merged.image.as_deref(), Some("nginx:1.24"));
 }
 
-// merge_service — env vars (override wins per key)
+// merge_service: env vars (override wins per key)
 
 #[test]
 fn merge_env_vars_override_wins_on_conflict() {
@@ -73,7 +73,7 @@ fn merge_env_vars_base_key_preserved_when_not_overridden() {
 	assert_eq!(env.get("BASE_ONLY").and_then(|v| v.as_deref()), Some("yes"));
 }
 
-// merge_service — labels (merged, override wins on conflict)
+// merge_service: labels (merged, override wins on conflict)
 
 #[test]
 fn merge_labels_both_preserved() {
@@ -97,7 +97,7 @@ fn merge_labels_both_preserved() {
 	assert_eq!(lm.get("env").map(|s| s.as_str()), Some("prod"));
 }
 
-// resolve_extends_same_file — cycle detection
+// resolve_extends_same_file: cycle detection
 
 #[test]
 fn cycle_detection_returns_error() {

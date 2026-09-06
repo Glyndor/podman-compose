@@ -174,7 +174,7 @@ async fn engine_images_lists_service_images() {
 /// `Engine::port` returns `Result<()>` and writes the binding to stdout, so this
 /// can only assert that a published port resolves without error. The binding
 /// itself is checked where it is observable, in
-/// `stats_flags::cli_port_prints_the_published_binding` — this test used to be
+/// `stats_flags::cli_port_prints_the_published_binding`; this test used to be
 /// named for a return value the API does not have.
 #[tokio::test]
 async fn engine_port_resolves_a_published_port() {
@@ -249,7 +249,7 @@ async fn engine_cp_to_container_uploads_file() {
 	let src = local_file.to_str().unwrap().to_string();
 	let dst = "web:/tmp".to_string();
 	let result = engine.cp(&file, &src, &dst).await;
-	// `cp` reporting success is not the same as the file arriving — that exact
+	// `cp` reporting success is not the same as the file arriving: that exact
 	// false success is what #1097 was on Podman 6, where libpod accepted the
 	// archive, closed the connection without a response, and podup called it done.
 	// Read the copy back out of the container before tearing anything down.
@@ -321,7 +321,7 @@ async fn restart_scaled_service_all_replicas() {
 	);
 }
 
-/// Unassertable here, and — unlike `top` and `images` — **not covered anywhere
+/// Unassertable here and, unlike `top` and `images`, **not covered anywhere
 /// else either**. `logs` on a scaled service prints, so the library returns
 /// nothing to check, and no CLI test drives a scaled project through it. The
 /// claim in the name, that every replica is included, is currently unverified.
@@ -365,8 +365,8 @@ async fn top_scaled_service_all_replicas() {
 	engine.down(&file).await.unwrap();
 }
 
-/// #1250: a project where one service has already run to completion — a
-/// `migrate` that exits 0 is the everyday shape — used to abort `top` on the
+/// #1250: a project where one service has already run to completion (a
+/// `migrate` that exits 0 is the everyday shape) used to abort `top` on the
 /// stopped container, losing the services it had not reached yet and exiting
 /// non-zero. Measured against `docker compose top` v5.1.3 on the same Podman
 /// socket: it omits the stopped service, prints the rest and exits 0.
@@ -386,7 +386,7 @@ async fn top_skips_a_stopped_service_and_reports_the_rest() {
 	engine.up(&file).await.unwrap();
 
 	// `migrate` has to have actually exited before `top` runs, or this passes for
-	// the wrong reason — `up` returns once the container is started, not once it
+	// the wrong reason: `up` returns once the container is started, not once it
 	// is done, so without this the test could exercise two running services and
 	// prove nothing. `wait` blocks until it stops, which is deterministic where
 	// a sleep is not.
@@ -418,8 +418,8 @@ async fn exec_scaled_service_targets_first_replica() {
 
 	engine.up(&file).await.unwrap();
 	// Leave a mark instead of echoing, and read it from BOTH replicas. "targets
-	// the first replica" has two halves, and an exec that hit replica 2 — or one
-	// that somehow hit both — returned Ok just as happily as the right one.
+	// the first replica" has two halves, and an exec that hit replica 2, or one
+	// that somehow hit both, returned Ok just as happily as the right one.
 	engine
 		.exec_with_options(
 			&file,

@@ -89,7 +89,7 @@ pub(crate) fn build_mounts_all(
 						if b.create_host_path.unwrap_or(false) && !src.is_empty() {
 							// Resolve exactly like the mount source (expand `~`, anchor a
 							// relative path to the project dir) so the directory is created
-							// at the path actually bind-mounted — not a literal `~` dir.
+							// at the path actually bind-mounted, not a literal `~` dir.
 							let abs = super::container::resolve_bind_source(src, base_dir);
 							if let Err(e) = std::fs::create_dir_all(&abs) {
 								tracing::warn!("create_host_path: failed to create {abs}: {e}");
@@ -136,7 +136,7 @@ pub(crate) fn build_mounts_all(
 		}
 	}
 
-	// Top-level `tmpfs:` shorthand — equivalent to volumes with type=tmpfs.
+	// Top-level `tmpfs:` shorthand, equivalent to volumes with type=tmpfs.
 	for entry in service.tmpfs.to_list() {
 		mounts.push(spec::parse_tmpfs_string(&entry));
 	}

@@ -1,6 +1,6 @@
 use super::*;
 
-/// A non-console handle is declined rather than failing — the path
+/// A non-console handle is declined rather than failing: the path
 /// `podup exec` takes inside a pipeline, which must keep working.
 ///
 /// Asked of an explicit `NUL` handle rather than of ambient stdin: the

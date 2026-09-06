@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use podup::ComposeError;
 
 /// Validate an explicit `--project-directory`: it must exist and be a directory.
-/// A `None` (unset) directory is always fine — it is derived from the compose
+/// A `None` (unset) directory is always fine: it is derived from the compose
 /// file's location. Matches `docker compose`, which errors on a missing working
 /// directory instead of silently accepting it.
 pub(crate) fn validate_project_directory(dir: Option<&Path>) -> podup::Result<()> {
@@ -61,7 +61,7 @@ pub(crate) fn resolve_compose_files(explicit: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 /// Override-file names, in the compose-spec precedence order. Only the first one
-/// present is used — docker compose does not merge two overrides.
+/// present is used; docker compose does not merge two overrides.
 const OVERRIDE_FILE_CANDIDATES: [&str; 4] = [
 	"compose.override.yaml",
 	"compose.override.yml",
@@ -75,7 +75,7 @@ const OVERRIDE_FILE_CANDIDATES: [&str; 4] = [
 /// Base file plus `docker-compose.override.yml` is how nearly every repository
 /// separates dev from prod, and docker compose merges it automatically whenever
 /// no explicit `-f` is given. podup ran the base alone and said nothing: wrong
-/// image tags, wrong published ports, missing dev bind mounts, exit 0 — about a
+/// image tags, wrong published ports, missing dev bind mounts, exit 0, about a
 /// file the user never named on the command line, so nothing in the invocation
 /// hinted at what went wrong.
 ///
@@ -96,7 +96,7 @@ fn override_for(base: &Path) -> Option<PathBuf> {
 /// The label is read back by `ls` from a different working directory than the
 /// one the project was started in, so a relative path there would be
 /// meaningless. Falls back to the path as given when the filesystem cannot
-/// resolve it — a best-effort label must never fail the command that sets it.
+/// resolve it; a best-effort label must never fail the command that sets it.
 pub(crate) fn absolute(path: &Path) -> PathBuf {
 	std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }

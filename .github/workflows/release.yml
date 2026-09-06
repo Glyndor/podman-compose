@@ -62,7 +62,7 @@ jobs:
         # is a separate hand-maintained file. 1.9.0 shipped with the bump applied
         # to Cargo.toml but not here, so the release carried podup_1.8.0_*.deb:
         # apt saw the version it already had, reported no upgrade, and Debian
-        # users were stranded — with no self-update either, since podup redirects
+        # users were stranded, with no self-update either, since podup redirects
         # a dpkg-owned binary to `apt upgrade`. The tag check above cannot catch
         # this; only comparing the two versions can.
         run: |
@@ -81,7 +81,7 @@ jobs:
 
       - name: Cargo.lock must record the released version
         # Cargo.lock carries podup's own version too, and `cargo build --locked`
-        # in the build jobs would catch a stale one — but only after the matrix
+        # in the build jobs would catch a stale one, but only after the matrix
         # has started, mid-release. Gate it here in verify, before anything is
         # built, so all three version files (Cargo.toml, debian/changelog,
         # Cargo.lock) are proven to agree at the same fail-fast point. Match the
@@ -250,8 +250,8 @@ jobs:
           PYTHONUTF8: "1"
         run: |
           # The installer/updater verifies this Ed25519 signature; a release
-          # without it cannot be consumed. Rotation is by dual-TRUST — consumers
-          # bake both accepted public keys — so only the active key signs here,
+          # without it cannot be consumed. Rotation is by dual-TRUST (consumers
+          # bake both accepted public keys) so only the active key signs here,
           # producing the single .sig every verifier reads. Fail closed when the
           # key is absent instead of publishing unsigned binaries.
           if [ -z "$GLYNDOR_RELEASE_ED25519_KEY" ]; then
@@ -446,12 +446,12 @@ jobs:
         # lists only that platform's dependencies").
         #
         # cargo-cyclonedx's --target uses cargo's --filter-platform resolution,
-        # which needs only the triple, not an installed std — so the six
+        # which needs only the triple, not an installed std, so the six
         # cross-platform binary targets resolve here without `rustup target add`.
         # The binaries carry the default feature set; the .debs are built
         # --no-default-features --features watch,completions (debian/rules), so
         # their SBOMs pass the same flags or they would misdeclare the package.
-        # License attribution (NOTICES.html) stays a single union — over-listing
+        # License attribution (NOTICES.html) stays a single union: over-listing
         # licenses is the safe direction for attribution, never under-listing.
         run: |
           cargo install --locked cargo-cyclonedx --version "=0.5.9"
@@ -466,7 +466,7 @@ jobs:
               --override-filename "${out}.cdx" "$@"
           }
 
-          # Binaries — default feature set, one SBOM per target triple.
+          # Binaries: default feature set, one SBOM per target triple.
           gen_sbom podup-linux-x86_64        x86_64-unknown-linux-musl
           gen_sbom podup-linux-arm64         aarch64-unknown-linux-musl
           gen_sbom podup-darwin-arm64        aarch64-apple-darwin
@@ -474,7 +474,7 @@ jobs:
           gen_sbom podup-windows-x86_64.exe  x86_64-pc-windows-msvc
           gen_sbom podup-windows-arm64.exe   aarch64-pc-windows-msvc
 
-          # Debian packages — the packaged binary drops the `update` feature and
+          # Debian packages: the packaged binary drops the `update` feature and
           # links glibc (gnu), not musl. Name each SBOM after its own .deb.
           for arch in amd64 arm64; do
             case "$arch" in
@@ -642,12 +642,12 @@ jobs:
           set -euo pipefail
           # The asset-contract gate compares install.sh against this file and
           # answers "do the two agree on the names". It cannot answer "does the
-          # release produce them" — a workflow file is a statement of intent,
+          # release produce them": a workflow file is a statement of intent,
           # not proof that a step ran. This is where that question is
           # answerable: everything is built, signed and checksummed, and the
           # release is not immutable yet. The script derives what to look for
           # from install.sh's own ${BASE_URL} fetches, so it covers
-          # SHA256SUMS.sig too — install.sh aborts without it, and nothing
+          # SHA256SUMS.sig too: install.sh aborts without it, and nothing
           # upstream of here ever checked it was produced.
           python3 scripts/verify-release-assets.py \
             --workdir . \

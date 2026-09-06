@@ -1,4 +1,4 @@
-//! `include:` directive — merging externally included compose files.
+//! `include:` directive: merging externally included compose files.
 //!
 //! Included files are merged into the parent: services, volumes, networks,
 //! secrets, configs, and models from the included file are added only if the
@@ -13,7 +13,7 @@ use crate::error::{ComposeError, Result};
 /// [`ComposeError::Include`] so a consumer matching on the variant can tell the
 /// failure originated from an included file rather than the top-level compose
 /// file. A missing included file is not the same as a missing main file, and
-/// an invalid-YAML included file is not the same as a malformed main file —
+/// an invalid-YAML included file is not the same as a malformed main file:
 /// the variant lets a handler branch on the difference, and the message names
 /// the included path so the operator can find it.
 pub(super) fn parse_included_file(

@@ -2,7 +2,7 @@
 //! Podman SpecGenerator fields: `security_opt` decomposition, `device_cgroup_rules`
 //! parsing, and CDI device injection. Podman 5.x has no `security_opt` or
 //! `cdi_devices` SpecGenerator field, and `device_cgroup_rule` is structured, not
-//! a string list — sending the compose shapes verbatim silently drops them (or,
+//! a string list, and sending the compose shapes verbatim silently drops them (or,
 //! for cgroup rules, fails the request), so each is converted here.
 
 use tracing::warn;
@@ -29,7 +29,7 @@ pub(crate) fn cdi_device(name: String) -> LinuxDevice {
 }
 
 /// Decomposed `security_opt:` values, matching Podman's SpecGenerator security
-/// fields (it has no single `security_opt` field — see [`parse_security_opts`]).
+/// fields (it has no single `security_opt` field; see [`parse_security_opts`]).
 #[derive(Default)]
 pub(crate) struct SecurityOptions {
 	pub selinux_opts: Vec<String>,

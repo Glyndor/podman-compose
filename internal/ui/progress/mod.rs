@@ -5,7 +5,7 @@
 //! colour choice, never from the command: `up` on a tty repaints a tail region,
 //! `up` in a pipe emits the same events as plain append-only lines. **Animation
 //! in a CI log is a defect**, and so is a CI log that says less than the
-//! terminal did — both renderers see every event, including the intermediate
+//! terminal did: both renderers see every event, including the intermediate
 //! transitions the old output dropped entirely.
 //!
 //! Everything goes to stderr. stdout stays a clean pipe, which is what lets
@@ -43,7 +43,7 @@ const TICK: std::time::Duration = std::time::Duration::from_millis(100);
 /// Process-global for the same reason the colour choice is: one CLI invocation
 /// runs one lifecycle command, and threading a handle through every engine call
 /// site would change 21 signatures to say something none of them decides. A
-/// library embedder never gets one — [`begin`] is a no-op unless the CLI turned
+/// library embedder never gets one; [`begin`] is a no-op unless the CLI turned
 /// progress on.
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 
@@ -148,7 +148,7 @@ pub fn begin(resources: impl IntoIterator<Item = (Kind, String)>) {
 	// The flag goes up *after* the session is installed: a `finish` racing the
 	// install sees either no session (`SESSION_OPEN` false → no lock taken) or
 	// a fully-built session. The reverse order would let `finish` take the
-	// lock only to find an empty session and return false — same result, more
+	// lock only to find an empty session and return false: same result, more
 	// work.
 	SESSION_OPEN.store(true, std::sync::atomic::Ordering::Release);
 	if live {
@@ -387,7 +387,7 @@ enum Sink {
 /// Hand a recorded event to whichever renderer owns it.
 ///
 /// The plain sink writes the same line the tree has always written, through
-/// [`super::write_progress_line`] rather than `progress_line` — going back
+/// [`super::write_progress_line`] rather than `progress_line`, because going back
 /// through the routing that sent the event here would be a loop, and it is what
 /// made a piped `up` print nothing at all the first time this was wired up: the
 /// board swallowed every line and no renderer put one back.
@@ -551,7 +551,7 @@ pub fn end() {
 	#[cfg(test)]
 	capture::record_end();
 	if !SESSION_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel) {
-		// No board was ever opened — the flag is the single source of truth
+		// No board was ever opened; the flag is the single source of truth
 		// for that. Drop it first so a racing `finish` doesn't take the lock
 		// just to find an empty session (#1364).
 		buffer_drain();
@@ -612,7 +612,7 @@ fn repaint() {
 		return;
 	};
 	// Re-read the width every repaint, so a resize mid-command does not leave
-	// every later line wrapping — and wrapping is what breaks the arithmetic.
+	// every later line wrapping, and wrapping is what breaks the arithmetic.
 	// Only the width is re-read; the terminal+colour decision is cached at
 	// `begin` (#1364).
 	let width = live_width().unwrap_or(0);

@@ -2,7 +2,7 @@
 //!
 //! serde's tolerance of a merge key depends on the type behind it, so the tags
 //! are resolved on the raw `Value` first and the merged document is what gets
-//! deserialized — the type never sees a `<<:` key.
+//! deserialized; the type never sees a `<<:` key.
 
 use std::collections::HashMap;
 
@@ -13,7 +13,7 @@ use crate::error::{ComposeError, Result};
 /// the size of such a document. serde_yaml_ng already aborts deeply *nested*
 /// alias expansion (its repetition limit), but a flat document with many alias
 /// references to a non-trivial anchor expands *linearly* while the `Value` tree
-/// is built and can exhaust memory — a ~46 KB file can allocate gigabytes. Real
+/// is built and can exhaust memory: a ~46 KB file can allocate gigabytes. Real
 /// compose files use a handful of anchors, so these caps never trigger in
 /// practice; the worst-case expansion they allow (refs × doc size) stays bounded.
 const MAX_ALIAS_REFS: usize = 100;
@@ -55,7 +55,7 @@ pub(super) fn deserialize_with_merge_interp(
 	Ok(file)
 }
 
-/// Produce the interpolated, merge-key-resolved YAML `Value` for `content` — the
+/// Produce the interpolated, merge-key-resolved YAML `Value` for `content`, the
 /// exact transformation [`deserialize_with_merge_interp`] applies before it
 /// deserializes into a [`ComposeFile`], stopping one step short.
 ///
@@ -102,7 +102,7 @@ fn interpolate_value(value: &mut serde_yaml::Value, vars: &HashMap<String, Strin
 			// Pre-check: only rebuild the mapping when something inside actually
 			// carries a `$`. Without this gate every mapping allocates a fresh
 			// `serde_yaml::Mapping` and re-inserts every key/value on every parse
-			// — for a 100-service file with ~10 fields each that is ~10k key/value
+			// For a 100-service file with ~10 fields each that is ~10k key/value
 			// pairs moved for free (#1364). Scalar strings are already gated on
 			// `s.contains('$')`; this mirrors that gate for the parent node.
 			if !mapping_needs_interp(map) {
@@ -195,14 +195,14 @@ fn guard_alias_expansion(content: &str) -> Result<()> {
 	if content.len() > MAX_ALIAS_DOC_BYTES {
 		return Err(ComposeError::Unsupported(format!(
 			"compose document uses YAML aliases and is {} bytes; documents using anchors/aliases \
-			 must be at most {MAX_ALIAS_DOC_BYTES} bytes — inline the repeated content instead",
+			 must be at most {MAX_ALIAS_DOC_BYTES} bytes; inline the repeated content instead",
 			content.len()
 		)));
 	}
 	if refs > MAX_ALIAS_REFS {
 		return Err(ComposeError::Unsupported(format!(
 			"compose document uses {refs} YAML alias references; at most {MAX_ALIAS_REFS} are \
-			 allowed — inline the repeated content instead"
+			 allowed; inline the repeated content instead"
 		)));
 	}
 	Ok(())
@@ -240,7 +240,7 @@ fn guard_flow_depth(content: &str) -> Result<()> {
 
 /// Count YAML alias references (`*anchor`) outside quoted scalars and comments.
 ///
-/// A heuristic — it does not fully parse YAML — but it only needs to bound a
+/// A heuristic (it does not fully parse YAML) but it only needs to bound a
 /// DoS and it is conservative: `*` inside single/double quotes or after `#` is
 /// ignored, and an alias is counted only when `*` sits at a node position and is
 /// followed by an anchor-name character.
@@ -274,7 +274,7 @@ fn count_alias_refs(content: &str) -> usize {
 
 /// Recursively resolve YAML merge keys (`<<: *anchor`) in a `Value` tree.
 ///
-/// serde_yaml_ng does not expose `apply_merge()` — this replaces it.
+/// serde_yaml_ng does not expose `apply_merge()`, so this replaces it.
 /// Merge semantics: keys from the anchor fill in only where the child has no value.
 fn apply_merge_keys(value: &mut serde_yaml::Value) {
 	match value {

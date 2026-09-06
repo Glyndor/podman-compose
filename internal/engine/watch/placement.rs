@@ -79,7 +79,7 @@ pub(super) fn plan_sync_placement(root: &Path, changed: &Path, target: &str) -> 
 /// docker-compose `watch` only reacts to write/create/remove/rename changes. The
 /// vendored notify inotify backend also emits `Access` events (it sets
 /// `WatchMask::OPEN`), so merely opening/reading a watched file would otherwise
-/// fire a sync — and the sync's own read of the source re-opens the path,
+/// fire a sync, and the sync's own read of the source re-opens the path,
 /// generating fresh `Access` events that feed back into another sync. Filtering
 /// to create/modify/remove (rename is a `Modify(Name(..))`) matches compose
 /// semantics and breaks that feedback loop.

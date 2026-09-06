@@ -46,7 +46,7 @@ pub struct BindOptions {
 	pub selinux: Option<String>,
 }
 
-/// Sub-options for a `volume`-type mount — nocopy flag and optional driver config.
+/// Sub-options for a `volume`-type mount: nocopy flag and optional driver config.
 ///
 /// `#[non_exhaustive]` (3.0.0): see [`BindOptions`].
 #[non_exhaustive]
@@ -69,7 +69,7 @@ pub struct VolumeOptions {
 	/// A podup extension, like its two siblings below: the Compose
 	/// Specification defines no per-mount hardening flags on the long form,
 	/// while the short form has always carried them as raw mount options
-	/// (`cache:/app/cache:noexec`). The long form deserved the same reach —
+	/// (`cache:/app/cache:noexec`). The long form deserved the same reach:
 	/// these are the standard mount-hardening trio, and a compose file that
 	/// spells a mount out longhand should not lose them (#1160).
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -96,7 +96,7 @@ pub struct DriverConfig {
 	pub options: HashMap<String, String>,
 }
 
-/// Sub-options for a `tmpfs`-type mount — size and mode.
+/// Sub-options for a `tmpfs`-type mount: size and mode.
 ///
 /// `#[non_exhaustive]` (3.0.0): see [`BindOptions`].
 #[non_exhaustive]
@@ -172,7 +172,7 @@ fn int_mode_bits(n: u32) -> u32 {
 	u32::from_str_radix(&n.to_string(), 8).unwrap_or(n)
 }
 
-/// A volume mount entry — either a short-form string or a long-form typed block.
+/// A volume mount entry: either a short-form string or a long-form typed block.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant)]
@@ -184,7 +184,7 @@ pub enum VolumeMount {
 		/// Mount type selecting which options block applies.
 		#[serde(rename = "type")]
 		volume_type: VolumeType,
-		/// Mount source — host path, volume name, or omitted for anonymous/tmpfs.
+		/// Mount source: host path, volume name, or omitted for anonymous/tmpfs.
 		#[serde(default, skip_serializing_if = "Option::is_none")]
 		source: Option<String>,
 		/// Mount target path inside the container.
@@ -248,7 +248,7 @@ pub struct VolumeConfig {
 	pub unknown: indexmap::IndexMap<String, serde_yaml::Value>,
 }
 
-/// Reference to a named config from a service — short form (name only) or long form with mount target.
+/// Reference to a named config from a service: short form (name only) or long form with mount target.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum ServiceConfigRef {
@@ -297,7 +297,7 @@ impl ServiceConfigRef {
 	}
 }
 
-/// Reference to a named secret from a service — short form (name only) or long form with mount target.
+/// Reference to a named secret from a service: short form (name only) or long form with mount target.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum ServiceSecretRef {

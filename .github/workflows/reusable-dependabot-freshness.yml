@@ -4,7 +4,7 @@ name: Dependabot freshness (reusable)
 # calling repository.
 #
 # The companion guard `schedule-freshness.yml` fails when a *workflow* stops
-# firing. Dependabot is not a workflow — it is an integration with its own
+# firing. Dependabot is not a workflow; it is an integration with its own
 # schedule, and a silent Dependabot emits nothing. "All up to date" and
 # "Dependabot is dead" produce the same signal: silence. This job converts
 # that silence into a red check on ordinary work, by treating the newest
@@ -42,8 +42,8 @@ name: Dependabot freshness (reusable)
 # cannot elevate beyond the permissions of the workflow that calls it, and
 # reading public PR history through the API needs that scope.
 #
-# Add the check only once Dependabot has opened at least one PR in the repo
-# — with nothing on record the job reports that as a failure, which for a
+# Add the check only once Dependabot has opened at least one PR in the repo.
+# With nothing on record the job reports that as a failure, which for a
 # live Dependabot is exactly right (it means we cannot even prove Dependabot
 # is alive here).
 #
@@ -126,15 +126,15 @@ jobs:
           # jq avoids the GitHub API's known wrinkle where
           # `state=all&sort=created&per_page=1` does not always include
           # closed/merged PRs in the sort order one would expect, and depends
-          # on the bot author being a queryable user login (it is —
-          # dependabot[bot] — not the app slug `app/dependabot`).
+          # on the bot author being a queryable user login (it is
+          # dependabot[bot], not the app slug `app/dependabot`).
           #
           # The window has to be paged, not fixed. A single page of 20 is a
           # window on *total* PR activity, not on Dependabot's: in a busy
           # repository the bot's newest pull request falls off the end and the
           # check reports it as never having run. Measured on Glyndor/podup,
           # where the twenty newest PRs contained none from Dependabot while
-          # ten sat within the newest forty — the gate failed on a repository
+          # ten sat within the newest forty, so the gate failed on a repository
           # where Dependabot had opened ten pull requests that same day.
           #
           # Three pages of 100 is a 300-PR window, and the loop stops at the
@@ -176,7 +176,7 @@ jobs:
             printf '%s\n' "$behind" | sed 's/^/  /'
             echo "A silent Dependabot reports nothing, so treat this as the alert it never sent." >&2
             echo "GitHub runs Dependabot on its own schedule, hours late; a small overrun right at the boundary" >&2
-            echo "is not the problem — a multiple of the period is. Check dependabot.yml is still on the default" >&2
+            echo "is not the problem; a multiple of the period is. Check dependabot.yml is still on the default" >&2
             echo "branch and that the package ecosystem is configured, then disable/enable Dependabot to" >&2
             echo "re-register it, and check the next scheduled scan rather than the next few minutes." >&2
             exit 1

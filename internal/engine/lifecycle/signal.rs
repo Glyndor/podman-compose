@@ -2,7 +2,7 @@
 //!
 //! `kill` forwards the requested signal to libpod as a `signal=` query
 //! parameter. An empty (or whitespace-only) value renders as `signal=`, which
-//! libpod silently treats as the default SIGKILL — so an unset shell variable
+//! libpod silently treats as the default SIGKILL, so an unset shell variable
 //! passed via `-s "$SIG"` would destroy every targeted container with no
 //! warning. To match `docker compose`'s up-front validation, the signal is
 //! checked here before any request is issued.

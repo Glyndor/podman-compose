@@ -170,7 +170,7 @@ fn format_ports_expands_a_collapsed_range() {
 
 #[test]
 fn format_port_record_does_not_overflow_u16_on_pathological_range() {
-	// `host_port`/`container_port`/`range` come straight from libpod's JSON —
+	// `host_port`/`container_port`/`range` come straight from libpod's JSON:
 	// untrusted input. host_port=65535 with a range of 2 needs
 	// `host_port + (range - 1)` = 65536, which does not fit in a u16: it
 	// wraps to 0 in release and panics under overflow-checks (this test runs
@@ -234,7 +234,7 @@ fn health_is_derived_from_status_text() {
 	);
 	assert_eq!(health_from_status("Exited (1) 4 seconds ago"), "");
 	// A restarting container with no healthcheck must not be misread as
-	// "starting" health — only the real `health: starting` token counts.
+	// "starting" health; only the real `health: starting` token counts.
 	assert_eq!(health_from_status("Restarting (1) 3 seconds ago"), "");
 }
 
@@ -310,7 +310,7 @@ fn a_start_time_in_the_future_clamps_to_zero() {
 /// useful fact about it. The case that actually exercises the guard is
 /// **paused**: it has a real `StartedAt` and is not running, so without the
 /// check it would claim `Up 1h` for a container that is doing nothing. The
-/// first version of this test used an exited container and proved nothing —
+/// first version of this test used an exited container and proved nothing:
 /// that path returns from the exit-code branch before the guard is reached, so
 /// deleting the guard left it green.
 #[test]
@@ -414,7 +414,7 @@ fn the_size_cell_matches_what_podman_prints() {
 /// `virtual` is the image's own size, **not** the sum of the two. On a
 /// container with a small writable layer the two are indistinguishable at three
 /// significant digits, so this uses the three real containers whose readings
-/// actually differ — otherwise the test passes under either reading and pins
+/// actually differ; otherwise the test passes under either reading and pins
 /// nothing.
 #[test]
 fn virtual_is_the_image_size_and_not_the_total() {
@@ -460,7 +460,7 @@ fn a_zero_byte_writable_layer_still_renders() {
 }
 
 /// The JSON path carries the raw counts, and `null` when the size was not
-/// requested — the same distinction the table draws, so a machine consumer can
+/// requested, the same distinction the table draws, so a machine consumer can
 /// tell "not asked" from "empty" too.
 #[test]
 fn the_json_row_distinguishes_an_absent_size_from_a_zero() {

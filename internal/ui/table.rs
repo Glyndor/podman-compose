@@ -11,7 +11,7 @@ const ELLIPSIS: char = '…';
 /// Fit `cell` into exactly `width` display columns: when it overflows, keep the
 /// leading `width - 1` chars and append an ellipsis; otherwise left-pad with
 /// spaces. Counts `char`s (not bytes) so multi-byte cells truncate on a char
-/// boundary and stay aligned. A `width` of 0 returns the cell unchanged — used
+/// boundary and stay aligned. A `width` of 0 returns the cell unchanged, used
 /// for the trailing column, which is never padded or truncated.
 pub fn fit_cell(cell: &str, width: usize) -> String {
 	let cell = &sanitize_cell(cell);
@@ -31,8 +31,8 @@ pub fn fit_cell(cell: &str, width: usize) -> String {
 ///
 /// Cell contents are not ours: an image tag, a container name, a volume driver
 /// and a process `argv` all come from outside podup. A raw `\x1b[` in one of
-/// them repaints the caller's terminal, and — now that columns carry colour of
-/// their own — desynchronises podup's own resets, so the rest of the table
+/// them repaints the caller's terminal and, now that columns carry colour of
+/// their own, desynchronises podup's own resets, so the rest of the table
 /// inherits whatever the injected sequence set.
 ///
 /// Escaping happens before padding, so the width the column reserves is the
@@ -74,7 +74,7 @@ pub struct Table {
 	caps: Vec<Option<usize>>,
 	/// The column (if any) whose cells are colourised by container status.
 	status_col: Option<usize>,
-	/// The column (if any) carrying an identity — a service or container name —
+	/// The column (if any) carrying an identity, a service or container name,
 	/// tinted with that identity's stable colour.
 	identity_col: Option<usize>,
 	/// The column (if any) holding a yes/no answer where `yes` is the one worth
@@ -125,8 +125,8 @@ impl Table {
 	/// Tint column `col` with each row's stable identity colour, so the same
 	/// service or container is the same colour in every command that lists it.
 	///
-	/// The palette deliberately excludes red, green and yellow — those carry
-	/// status meaning — so an identity colour can never be misread as a state.
+	/// The palette deliberately excludes red, green and yellow, which carry
+	/// status meaning, so an identity colour can never be misread as a state.
 	pub fn identity_col(mut self, col: usize) -> Self {
 		self.identity_col = Some(col);
 		self
@@ -137,7 +137,7 @@ impl Table {
 	///
 	/// Deliberately not [`Table::status_col`], which would paint `yes` green.
 	/// Green means healthy/up everywhere else in this CLI, and the column this
-	/// was written for — `volumes`' `EXTERNAL` — is not reporting health. It
+	/// was written for (`volumes`' `EXTERNAL`) is not reporting health. It
 	/// reports the one volume podup will refuse to delete, so a `down -v` that
 	/// leaves something standing is explicable. That is a caution, and yellow is
 	/// already the band this CLI uses for *survives*.
@@ -151,8 +151,8 @@ impl Table {
 	/// For a table where most columns are scaffolding and one or two carry the
 	/// answer. `top` is the case: eight columns of process bookkeeping around the
 	/// command line, which is the reason anyone runs it. Dimming is not a
-	/// meaning — unlike the status and caution colours it says nothing about the
-	/// value — so it composes with them rather than competing.
+	/// meaning: unlike the status and caution colours it says nothing about the
+	/// value, so it composes with them rather than competing.
 	pub fn dim_cols(mut self, cols: &[usize]) -> Self {
 		self.dim_cols = cols.to_vec();
 		self
@@ -171,7 +171,7 @@ impl Table {
 	/// The two differ where the column shows something longer than the identity:
 	/// `ps` prints the full container name `proj-web-1` while `logs` prefixes the
 	/// project-stripped `web-1`. Keying both on `web-1` is what makes one
-	/// container the same colour in both commands — which is the entire point of
+	/// container the same colour in both commands, which is the entire point of
 	/// a stable palette.
 	pub fn push_keyed(&mut self, cells: Vec<String>, key: String) {
 		self.rows.push(cells);
@@ -258,7 +258,7 @@ impl Table {
 	}
 
 	/// Render the table as plain (uncoloured) lines: the header first, then one
-	/// line per row, columns aligned and over-cap cells truncated. Pure — used by
+	/// line per row, columns aligned and over-cap cells truncated. Pure, used by
 	/// the unit tests and shared with [`Table::print`].
 	pub fn render(&self) -> Vec<String> {
 		let widths = self.widths();
@@ -277,8 +277,8 @@ impl Table {
 		crate::ui::print_bold_header(&self.format_row(&self.headers, &widths, false));
 		// Every column marker that can tint a cell has to appear here, or a table
 		// that uses only that marker renders plain. `caution_col` was added
-		// without being listed, and it went unnoticed because its first caller —
-		// `volumes` — also sets `identity_col`, so the gate happened to be open.
+		// without being listed, and it went unnoticed because its first caller,
+		// `volumes`, also sets `identity_col`, so the gate happened to be open.
 		let colour = self.colours_any_column() && super::stdout_colored();
 		for (i, row) in self.rows.iter().enumerate() {
 			let key = self.keys.get(i).and_then(Option::as_deref);

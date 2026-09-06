@@ -1,4 +1,4 @@
-//! Terminal styling — the single place that decides whether to colour output and
+//! Terminal styling: the single place that decides whether to colour output and
 //! holds the palette, so colour stays consistent and always honours `--ansi`,
 //! `NO_COLOR`, and whether the target stream is a TTY.
 //!
@@ -79,7 +79,7 @@ static PROGRESS_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// `logs` prefixes lines with the project-stripped `web-1`; `ps` prints the full
 /// container name `proj-web-1`; the progress lines print the full name too.
 /// Hashing whatever string each site happens to hold gives the same container a
-/// different colour in each command — which defeats the point of a stable
+/// different colour in each command, which defeats the point of a stable
 /// palette. Stripping the project first makes one container one colour.
 static PROJECT: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
 
@@ -95,7 +95,7 @@ static PROJECT_PREFIX: std::sync::RwLock<String> = std::sync::RwLock::new(String
 /// Record the project name for identity colouring. Set once per invocation
 /// per project: two `Engine` values alive in one process must each register
 /// their own project name, and the last `set_project` wins for the global
-/// `PROJECT` — but every project's services live under its own key in the
+/// `PROJECT`, but every project's services live under its own key in the
 /// service registry, so neither evicts the other.
 pub fn set_project(name: &str) {
 	if let Ok(mut slot) = PROJECT.write() {
@@ -133,7 +133,7 @@ static SERVICES: std::sync::RwLock<
 /// same project this is a no-op: registration has no project key to live
 /// under. Every CLI command and the engine call site already calls
 /// [`set_project`] first. Without any registration every label falls back
-/// to the per-label hash, which still works — it just cannot promise two
+/// to the per-label hash, which still works; it just cannot promise two
 /// services differ.
 pub fn set_services(names: &[String]) {
 	let project = match PROJECT.read() {
@@ -160,7 +160,7 @@ pub fn set_services(names: &[String]) {
 /// The stable identity colour for a container or service label, keyed on the
 /// label with the project prefix removed.
 ///
-/// Callers pass whatever they display — `proj-web-1`, `web-1`, `web` — and get
+/// Callers pass whatever they display (`proj-web-1`, `web-1`, `web`) and get
 /// the same colour for the same container, which is what makes `ps`, `logs`,
 /// `stats` and the progress lines agree.
 pub fn identity_style(label: &str) -> Style {
@@ -171,7 +171,7 @@ pub fn identity_style(label: &str) -> Style {
 /// this exists as its own, unrendered step.
 ///
 /// First tries every project registered in [`SERVICES`], stripping each
-/// project's `"{name}-"` prefix in turn — a label from a project whose
+/// project's `"{name}-"` prefix in turn, so a label from a project whose
 /// [`set_project`] was overwritten by another engine in the same process
 /// still resolves correctly (#1517). If no project matched, falls back to
 /// the legacy [`PROJECT_PREFIX`]-stripped lookup so `proj-web-1` and
@@ -196,7 +196,7 @@ pub(crate) fn identity_slot(label: &str) -> usize {
 	}
 	// No project's services matched. Strip the currently-set project prefix
 	// (cached in PROJECT_PREFIX so the per-call `format!` is not re-paid)
-	// and look up the bare key — the legacy single-engine behaviour that
+	// and look up the bare key, the legacy single-engine behaviour that
 	// `every_spelling_of_one_container_gets_one_colour` pins (#1364).
 	let prefix = PROJECT_PREFIX
 		.read()
@@ -279,7 +279,7 @@ pub fn progress_line(kind: &str, name: &str, action: &str) {
 /// Write one progress line to stderr, with no board routing.
 ///
 /// Split out of [`progress_line`] because the plain sink has to emit exactly
-/// this and cannot go back through the routing that sent it here — that would
+/// this and cannot go back through the routing that sent it here; that would
 /// be a loop. It is also the reason the two sinks cannot drift: there is one
 /// line format, used by both.
 pub(crate) fn write_progress_line(kind: &str, name: &str, action: &str) {
@@ -299,16 +299,16 @@ pub(crate) fn write_progress_line(kind: &str, name: &str, action: &str) {
 
 /// The colour band for a lifecycle verb.
 ///
-/// Every verb used to be the same green, so `Volume data Removed` — which
-/// destroys data and cannot be undone — was styled exactly like `Started`. The
+/// Every verb used to be the same green, so `Volume data Removed`, which
+/// destroys data and cannot be undone, was styled exactly like `Started`. The
 /// bands say what kind of thing happened: something now exists (green),
 /// something stopped but survives (yellow), something is gone (red), nothing
 /// changed (dim).
 fn action_style(action: &str) -> Style {
 	let a = action.to_ascii_lowercase();
 	// `unpaused` is checked before `paus` on purpose. It reaches the green arm
-	// either way — a container resuming is a thing becoming active, which is what
-	// green means here — but only by falling through, and adding `unpause` to the
+	// either way (a container resuming is a thing becoming active, which is what
+	// green means here) but only by falling through, and adding `unpause` to the
 	// yellow arm's prefixes would silently invert it. Naming it pins the intent.
 	// `fail` joins the red arm so a row closing with verb "Failed" reads as a
 	// failure in colour, not just in word (#1347).
@@ -339,13 +339,13 @@ pub fn progress_note(msg: &str) {
 	let _ = writeln!(anstream::stderr(), "{msg}");
 }
 
-/// Print a result line to stdout — used by `run -d` to echo the started
+/// Print a result line to stdout, used by `run -d` to echo the started
 /// container's name so scripts capturing stdout get the id, matching
 /// `docker compose run -d`. A no-op unless [`set_progress`] enabled progress
 /// output, so embedders and machine paths stay silent.
 ///
 /// The result line is the one thing scripts capture from stdout, so a failed
-/// write is a real error (exit non-zero), not something to swallow — except a
+/// write is a real error (exit non-zero), not something to swallow, except a
 /// broken pipe, which follows the process-wide quiet-exit convention.
 pub fn result_line(msg: &str) -> std::io::Result<()> {
 	use std::io::Write;
@@ -361,8 +361,8 @@ pub fn result_line(msg: &str) -> std::io::Result<()> {
 /// Print a `label: value` line where the label is scaffolding and the value
 /// carries the meaning.
 ///
-/// `autostart status` is the densest meaning-per-line surface in the CLI — six
-/// consecutive yes/no answers — and it was entirely monochrome, so finding the
+/// `autostart status` is the densest meaning-per-line surface in the CLI, six
+/// consecutive yes/no answers, and it was entirely monochrome, so finding the
 /// one line that answers "is it running?" meant reading all six. The label is
 /// dimmed and the value tinted by its own status meaning, which covers systemd's
 /// vocabulary as well as Podman's.
@@ -375,7 +375,7 @@ pub fn print_labelled(label: &str, value: &str) {
 
 /// [`print_labelled`] with the value's meaning stated rather than inferred.
 ///
-/// Some values are prose, not a state word — `XDG_RUNTIME_DIR unset (systemctl
+/// Some values are prose, not a state word: `XDG_RUNTIME_DIR unset (systemctl
 /// --user needs a user session)` is the answer to a yes/no question written as a
 /// sentence. `Some(true)`/`Some(false)` colours it green/red; `None` falls back
 /// to reading the text.
@@ -405,7 +405,7 @@ pub fn print_labelled_with(label: &str, value: &str, good: Option<bool>) {
 ///
 /// `autostart status` needed it: with no unit file on disk, systemd's
 /// `is-enabled` answers `not-found`, which the status vocabulary reads as an
-/// error and paints red — while the `installed: no` line directly above it says
+/// error and paints red, while the `installed: no` line directly above it says
 /// the same thing about the same unit and was dim. Two colours for one fact, and
 /// the alarming one belonged to the case where nothing is wrong.
 ///
@@ -426,7 +426,7 @@ pub fn print_labelled_neutral(label: &str, value: &str) {
 	);
 }
 
-/// Bold — table headers and emphasis.
+/// Bold, for table headers and emphasis.
 pub fn bold() -> Style {
 	Style::new().bold()
 }
@@ -445,7 +445,7 @@ pub fn print_bold_header(cols: &str) {
 	);
 }
 
-/// Print a bold header tinted with its identity colour — used where a block is
+/// Print a bold header tinted with its identity colour, used where a block is
 /// headed by a container name rather than by column titles.
 pub fn print_identity_header(name: &str) {
 	use std::io::Write;
@@ -458,7 +458,7 @@ pub fn print_identity_header(name: &str) {
 	);
 }
 
-/// Bold red — the `error:` label.
+/// Bold red, for the `error:` label.
 pub fn error_style() -> Style {
 	Style::new().bold().fg_color(Some(AnsiColor::Red.into()))
 }
@@ -491,7 +491,7 @@ const SERVICE_PALETTE: [AnsiColor; 6] = [
 /// Looks up `name` in every project's services registered in [`SERVICES`],
 /// first match wins. Two `Engine` values alive in one process own separate
 /// maps under separate project keys, so neither evicts the other (#1517).
-/// Falls back to the per-label hash when nothing is registered — the same
+/// Falls back to the per-label hash when nothing is registered, the same
 /// fallback [`palette::colour_for`] has always used for an undeclared label.
 ///
 /// Split out so a routing regression can be asserted on the slot itself: the
@@ -525,7 +525,7 @@ pub fn service_style(name: &str) -> Style {
 /// it would pass or fail on test scheduling.
 ///
 /// The narrow branch takes a slot assigned against the WIDE palette's size, so
-/// it must wrap again — indexing a six-element array with a slot up to 19 is
+/// it must wrap again: indexing a six-element array with a slot up to 19 is
 /// the out-of-bounds bug the old hash's `assert!` used to guard.
 fn slot_to_style(slot: usize, wide: bool) -> Style {
 	if wide {
@@ -540,7 +540,7 @@ fn slot_to_style(slot: usize, wide: bool) -> Style {
 ///
 /// The `pub(crate)` counterpart to [`identity_style`]/[`service_style`] for a
 /// caller that needs to resolve its *own* slot (e.g. the log-prefix module,
-/// which must never let its routing collapse into a raw per-label hash — see
+/// which must never let its routing collapse into a raw per-label hash; see
 /// `engine::query::log_prefix::prefix_slot`) rather than one of the two
 /// label-keyed lookups here.
 pub(crate) fn style_for_slot(slot: usize) -> Style {
@@ -550,8 +550,8 @@ pub(crate) fn style_for_slot(slot: usize) -> Style {
 /// Whether an `Exited (N)` / `exited(N)` label reports a clean finish.
 ///
 /// A container that ran to completion is not a failure, and colouring it red
-/// says it is. One-shot services — migrations, seeds, a `command` that simply
-/// ends — spend their whole life in this state, so red here is not a rare
+/// says it is. One-shot services (migrations, seeds, a `command` that simply
+/// ends) spend their whole life in this state, so red here is not a rare
 /// cosmetic slip but the normal reading of a healthy project.
 fn is_clean_exit(lower: &str) -> bool {
 	// `exited (0)` and `exited(0)`, but not `exited (07)` or `exited (10)`.
@@ -639,7 +639,7 @@ pub fn action_or_status_style(word: &str) -> Option<Style> {
 ///
 /// `ls` reports a project as `running(1), exited(1)`, and styling that as one
 /// string made the first matching substring win: `exit` came first, so a project
-/// with a service up rendered **entirely red** — visually identical to one that
+/// with a service up rendered **entirely red**, visually identical to one that
 /// is completely dead. Splitting first means each state carries its own colour
 /// and the mixed case reads as mixed.
 ///

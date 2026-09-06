@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regression test for .github/scripts/sign.py — five fail-closed controls.
+# Regression test for .github/scripts/sign.py: five fail-closed controls.
 #
 # sign.py signs release artifacts with the org Ed25519 key. It refuses to
 # produce a signature in five places; this fixture walks every one of them
@@ -80,16 +80,16 @@ sk = Ed25519PrivateKey.generate()
 # private_bytes with TraditionalOpenSSL + NoEncryption returns the 32-byte
 # seed prefixed by a 16-byte PKCS#8 header for a total of 48 bytes; the
 # 32-byte seed sits at the END (the cryptography docs pin this). We use
-# the public_key().public_bytes() form instead — it is stable across
-# cryptography versions — and we derive the matching seed by re-running
+# the public_key().public_bytes() form instead (it is stable across
+# cryptography versions) and we derive the matching seed by re-running
 # `from_private_bytes` on a chosen 32-byte input. See below.
 pk_raw = sk.public_key().public_bytes(
 	serialization.Encoding.Raw,
 	serialization.PublicFormat.Raw,
 )
 # Build a 32-byte seed from sk. cryptography >=42 exposes
-# `private_bytes(Raw, Raw, NoEncryption)` which is the bare 32-byte seed
-# — try that first, fall back to deriving from the public key only when
+# `private_bytes(Raw, Raw, NoEncryption)` which is the bare 32-byte seed.
+# Try that first, fall back to deriving from the public key only when
 # the installed version does not support the Raw/Raw form.
 try:
 	seed = sk.private_bytes(
@@ -132,7 +132,7 @@ rc=$?
 set -e
 [[ $rc -eq 1 ]] || fail "expected exit 1 for argv<2, got $rc"
 # Usage is the script's __doc__. The distinctive fragment is the "Usage:" line
-# plus the description of how the key is passed — both must appear.
+# plus the description of how the key is passed; both must appear.
 grep -q "^Usage:" "$stderr1" || fail "expected 'Usage:' on stderr, got: $(cat "$stderr1")"
 grep -q "GLYNDOR_RELEASE_ED25519_KEY" "$stderr1" || fail "expected 'GLYNDOR_RELEASE_ED25519_KEY' on stderr (the env var it explains), got: $(cat "$stderr1")"
 echo "  OK    argv<2 → exit 1 with usage on stderr"
@@ -170,7 +170,7 @@ for case in unset empty whitespace; do
 		set -e
 		;;
 	whitespace)
-		# Three spaces — the .strip() in sign.py must turn this into ""
+		# Three spaces: the .strip() in sign.py must turn this into ""
 		# before the `if not seed_b64` check fires.
 		set +e
 		env GLYNDOR_RELEASE_ED25519_KEY="   " python3 "$SIGN_PY" "$tmp1/data" \
@@ -191,8 +191,8 @@ echo "  OK    unset / empty / whitespace all hit the refusal guard"
 # Part 3: the seed is not valid base64. validate=True must reject URL-safe
 # -/_ and stray characters (both are rejected by strict b64 decoding).
 #
-# The fixture must be valid in every other respect — the same input file,
-# the same invocation shape — so the rejection is unambiguously about the
+# The fixture must be valid in every other respect (the same input file,
+# the same invocation shape) so the rejection is unambiguously about the
 # base64 shape.
 #
 # Three sub-cases:
@@ -216,7 +216,7 @@ GOOD_SEED="$(cat "$seed_b64_file")"
 # further padding. This is the form we use to construct bad seeds: a
 # `-`/`_`/`!` inserted anywhere yields a 45-char string that
 #   * validate=True rejects outright ("Only base64 data is allowed")
-#   * validate=False ACCEPTS — the lenient decoder drops the stray
+#   * validate=False ACCEPTS: the lenient decoder drops the stray
 #     character and decodes the remaining 44 chars (with the trailing
 #     '=') to 32 bytes. This discrimination is what the test proves:
 #     the guard fails closed ONLY because validate=True is set.
@@ -235,7 +235,7 @@ for case in dash underscore stray; do
 	rc=$?
 	set -e
 	[[ $rc -eq 1 ]] || fail "case $case: expected exit 1, got $rc"
-	# The distinctive fragment: "is not valid base64" — this is the
+	# The distinctive fragment: "is not valid base64", which is the
 	# branch's error prefix. Asserting only "exit 1" would be satisfied
 	# by the length-guard below, which is a different guard.
 	grep -q "is not valid base64" "$stderr3" \
@@ -277,7 +277,7 @@ echo "  OK    bad-base64 seed rejected; valid 32-byte seed passes the base64 gua
 echo "Part 4: wrong-length seed → exit 1 with 'must decode to 32 bytes'"
 
 # Build a deterministic N-byte raw seed and base64-encode it (trivially
-# valid base64 — the rejection is solely about length). The seed bytes
+# valid base64; the rejection is solely about length). The seed bytes
 # are not a real key; the test only cares that the length-guard fires.
 gen_wrong_len() {
 	local out_var="$1" raw_len="$2"
@@ -333,7 +333,7 @@ echo "  OK    31/33-byte seeds rejected with 'must decode to 32 bytes'; 32-byte 
 #
 # A file-exists assertion would pass for a signature of the wrong bytes
 # (e.g. one made with a different key). The test therefore re-derives the
-# public key from the seed and verifies the signature under it — the same
+# public key from the seed and verifies the signature under it, the same
 # loop a consumer (install.sh / install.ps1 / internal/update/verify.rs)
 # would run on a freshly signed release.
 # -----------------------------------------------------------------------------
@@ -345,7 +345,7 @@ gen_test_key "$seed_b64_file5" "$seed_raw_file5" "$pub_raw_file5"
 GOOD_SEED5="$(cat "$seed_b64_file5")"
 printf 'fixture-payload-for-sign.py-test' > "$tmp5/data"
 
-# Default output path: <input>.sig — exercise that branch.
+# Default output path: <input>.sig; exercise that branch.
 stderr5="$tmp5/err" stdout5="$tmp5/out"
 set +e
 run_sign "$GOOD_SEED5" "$tmp5/data" "" "$stdout5" "$stderr5"
@@ -357,7 +357,7 @@ set -e
 # Verify the signature. A file-exists assertion would pass a wrong-key
 # signature; this is what the consumers actually do, so the test mirrors
 # them. The signature MUST verify under the public key derived from the
-# seed that sign.py used. The pubkey is 32 raw bytes — round-tripping it
+# seed that sign.py used. The pubkey is 32 raw bytes, and round-tripping it
 # through bash $() would mangle non-printable bytes, so we pass the file
 # path and let python read it.
 verify_out="$tmp5/verify_out" verify_err="$tmp5/verify_err"
@@ -440,7 +440,7 @@ data = open(sys.argv[2], "rb").read()
 pk = open(sys.argv[3], "rb").read()
 try:
 	Ed25519PublicKey.from_public_bytes(pk).verify(sig, data)
-	sys.exit("negative-control: a signature under a different key VERIFIED under our public key — the test would prove nothing")
+	sys.exit("negative-control: a signature under a different key VERIFIED under our public key; the test would prove nothing")
 except InvalidSignature:
 	pass
 PY

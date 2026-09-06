@@ -8,7 +8,7 @@ use crate::libpod::Client;
 
 fn engine(project: &str) -> Engine {
 	// The map is built without any socket call (the shared futures are lazy),
-	// so a client bound to a never-opened path is enough — no runtime needed.
+	// so a client bound to a never-opened path is enough, with no runtime needed.
 	let client = Client::new("/tmp/podup-readiness-test.sock");
 	Engine::with_base_dir(client, project.into(), std::env::temp_dir())
 }
@@ -20,8 +20,8 @@ fn enabled_all(file: &crate::compose::types::ComposeFile) -> HashSet<String> {
 #[test]
 fn shares_one_poller_per_service_healthy_container() {
 	// web and api both wait on db with `service_healthy`; cache is waited on
-	// with `service_started` (never polled). Exactly one shared entry — db's
-	// container — must result, not one per dependent.
+	// with `service_started` (never polled). Exactly one shared entry, db's
+	// container, must result, not one per dependent.
 	let yaml = "\
 services:
   db:
@@ -80,7 +80,7 @@ services:
 fn sharing_a_poller_preserves_the_error_variant() {
 	// Regression guard for the public error contract: sharing the poller must
 	// not change which variant `up()` returns. Both reconstructible causes are
-	// asserted by variant, not by message — the wrapper displays transparently,
+	// asserted by variant, not by message: the wrapper displays transparently,
 	// so a message assertion would have passed while the contract was broken.
 	let timeout = Arc::new(ComposeError::HealthCheckTimeout("db-1".into()));
 	assert!(matches!(

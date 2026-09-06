@@ -167,7 +167,7 @@ fn parse_braced_var_underscore_name_is_valid() {
 #[test]
 fn parse_unterminated_modifier_is_error() {
 	// `${TAG:-latest` (no closing `}`) must not swallow the rest of the input as
-	// the default value — it is reported as a malformed substitution.
+	// the default value; it is reported as a malformed substitution.
 	let mut it = peekable("TAG:-latest\nmore: data\n");
 	let err = parse_braced_var(&mut it).expect_err("missing close brace must error");
 	assert!(

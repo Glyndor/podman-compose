@@ -155,8 +155,8 @@ pub(crate) fn restore_from_backup(target: &Path, backup: &Path) -> crate::Result
 
 /// How long to keep retrying a spawn that reports ETXTBSY.
 ///
-/// The window is short by nature — it lasts only as long as some other process
-/// holds a write descriptor to the file across its own exec — so a second is
+/// The window is short by nature (it lasts only as long as some other process
+/// holds a write descriptor to the file across its own exec) so a second is
 /// generous. Bounded on purpose: a binary that is genuinely unrunnable must
 /// reach the rollback, not wedge the updater retrying forever.
 #[cfg(unix)]
@@ -165,7 +165,7 @@ const TEXT_FILE_BUSY_BUDGET: std::time::Duration = std::time::Duration::from_sec
 /// Spawn `target --version`, retrying while the kernel says the file is still
 /// open for writing somewhere.
 ///
-/// ETXTBSY is not a property of the binary — it means another process holds a
+/// ETXTBSY is not a property of the binary: it means another process holds a
 /// write descriptor to it across its own `exec`, and `O_CLOEXEC` does not close
 /// that window. Treating it as a failed self-test rolls back a signed, verified,
 /// perfectly good update over a race that resolves in milliseconds, and tells
@@ -260,7 +260,7 @@ pub(crate) fn self_test(target: &Path, expected_version: &str) -> crate::Result<
 	if !reported_matches {
 		return Err(ComposeError::Update(format!(
 			"updated binary reports {:?} instead of the resolved release version \
-			 {expected_version} — possible release-metadata tampering (rollback)",
+			 {expected_version}; possible release-metadata tampering (rollback)",
 			out.trim()
 		)));
 	}
@@ -314,8 +314,8 @@ pub(crate) fn write_temp(tmp: &Path, new_bytes: &[u8], target: &Path) -> crate::
 		//
 		// **Neither flag is reachable from a test, and that is a property of what
 		// they guard rather than a gap.** The `remove_file` above already unlinks
-		// any symlink planted beforehand — measured: after it, the link is gone
-		// and its victim is untouched — so what is left for these flags is the
+		// any symlink planted beforehand (measured: after it, the link is gone
+		// and its victim is untouched) so what is left for these flags is the
 		// window *between* that unlink and this open. Closing a race is exactly
 		// the thing an in-process test cannot enter. Mutations removing either
 		// one survive the suite; the third property of this call, the 0600 mode,
@@ -390,7 +390,7 @@ pub(crate) fn swap_into_place(tmp: &Path, target: &Path) -> crate::Result<()> {
 		std::fs::rename(target, &backup).map_err(|e| rename_error(e, target))?;
 	}
 	if let Err(e) = std::fs::rename(tmp, target) {
-		// Roll back so the user is not left without a binary — but only when
+		// Roll back so the user is not left without a binary, but only when
 		// we created the backup in this call. A pre-existing `.old` (the L5
 		// swap path) is the caller's responsibility to restore.
 		if target_existed {

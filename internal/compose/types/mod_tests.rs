@@ -58,7 +58,7 @@ secrets:
 fn strip_ignored_unknown_keys_drops_non_extension_at_every_level() {
 	// Unknown keys at the top level, in a service, a service sub-object
 	// (deploy), a network, and a volume are all dropped, while `x-*` extension
-	// keys at any level survive — so the rendered config agrees with the
+	// keys at any level survive, so the rendered config agrees with the
 	// diagnostics that flagged the rest as ignored.
 	let yaml = r#"
 bogus_top: 1

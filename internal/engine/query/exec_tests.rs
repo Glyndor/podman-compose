@@ -67,7 +67,7 @@ fn map_not_running_maps_404_and_stopped() {
 fn exec_start_timeout_with_user_names_the_user() {
 	use crate::libpod::PodmanError;
 	// A client-side head timeout (the wedged-launch symptom) becomes a clear,
-	// fast ExecFailed naming the likely culprit — never the raw socket-timeout.
+	// fast ExecFailed naming the likely culprit, never the raw socket-timeout.
 	let timeout = PodmanError::Api {
 		status: 0,
 		message: format!(

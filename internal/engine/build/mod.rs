@@ -3,7 +3,7 @@
 //! [`Engine::pull_image`] fetches a pre-built image from a registry.
 //! [`Engine::build_service`] compiles a build context tar, passes it to the
 //! Podman libpod API, and applies any extra tags. Multi-stage targets are
-//! passed as the `target=` query parameter — the full Dockerfile is always sent.
+//! passed as the `target=` query parameter; the full Dockerfile is always sent.
 
 mod context;
 mod pull;
@@ -37,7 +37,7 @@ type ResolvedBuildSecrets = (Vec<(String, Vec<u8>)>, Vec<String>);
 
 /// How `build_service` sends the context to the libpod build endpoint.
 enum BodyPlan {
-	/// A Git/URL context — Podman clones it server-side, so the body is empty.
+	/// A Git/URL context: Podman clones it server-side, so the body is empty.
 	Empty,
 	/// A local context, streamed to the socket from a `spawn_blocking` tar writer
 	/// so its size never drives the process's RSS.
@@ -122,7 +122,7 @@ impl BuildOptions {
 /// build saw 524288, with `ulimits=["nofile=1234:1234"]` it saw 1234.
 ///
 /// An unrecognised name is dropped rather than forwarded. The value reaches a
-/// query string, so an unknown name is either a typo or an injection attempt —
+/// query string, so an unknown name is either a typo or an injection attempt,
 /// the same reasoning the container-side `build_ulimits` applies.
 fn render_build_ulimits(build: &BuildConfig) -> Vec<String> {
 	build

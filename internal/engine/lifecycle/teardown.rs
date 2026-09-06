@@ -48,7 +48,7 @@ impl Engine {
 		// Best-effort across every level/container/network/volume so one failure
 		// never leaves the rest of the teardown undone, but the first real
 		// REMOVAL failure is remembered and returned at the end instead of being
-		// swallowed into a warning — a `down` whose container/network/volume
+		// swallowed into a warning: a `down` whose container/network/volume
 		// removal genuinely fails (storage error, active exec session) must exit
 		// non-zero, not print a warning and exit 0 (#598). A stalled or failed
 		// `stop` does NOT count towards this: the force-remove below SIGKILLs the
@@ -56,16 +56,16 @@ impl Engine {
 		// outcome is aggregated. A 404 (already gone) stays an idempotent no-op
 		// throughout.
 		//
-		// Levels are walked strictly in order — every container in one level is
+		// Levels are walked strictly in order: every container in one level is
 		// attempted before the next level starts, preserving the dependency
-		// inversion above — but the containers *within* one level tear down
+		// inversion above, but the containers *within* one level tear down
 		// concurrently via `join_bounded`, which returns results in input
 		// (service, then container) order rather than completion order. That
 		// keeps "the first error" deterministic regardless of which container
 		// happens to finish first: `first_error` picks the earliest in that
 		// fixed order, and since levels themselves are visited in a fixed
 		// sequence, only the first level with any failure can ever set
-		// `first_err` — a later level's failure is never mistaken for "first".
+		// `first_err`, so a later level's failure is never mistaken for "first".
 		let mut first_err: Option<crate::error::ComposeError> = None;
 
 		for level in &levels {
@@ -75,7 +75,7 @@ impl Engine {
 				// Act only on containers Podman actually has. A defined-but-never-
 				// created service (or one already torn down) has no live
 				// containers, so it contributes nothing here rather than
-				// synthesizing predicted names and POSTing stop/rm to them —
+				// synthesizing predicted names and POSTing stop/rm to them:
 				// those 404 and, pre-fix, leaked warnings. docker compose
 				// enumerates by label and treats "nothing there" as a quiet
 				// idempotent no-op (#758).
@@ -130,7 +130,7 @@ impl Engine {
 			// compose file *declares*, which is not the same set as the networks
 			// that exist. `delete_ok` throws away the boolean that tells the two
 			// apart, so every 404 arrived here as `Ok(())` and was announced as a
-			// removal — measured on a project that had never been created,
+			// removal: measured on a project that had never been created,
 			// `down -v` reported removing two networks and a volume, none of
 			// which had ever existed. The `Err(404)` arm below was unreachable
 			// for the same reason: the layer underneath had already turned the
@@ -138,13 +138,13 @@ impl Engine {
 			crate::ui::progress::start("Network", &network_name, "Removing");
 			match self.client.delete_existed(&net_path).await {
 				Ok(true) => crate::ui::progress_line("Network", &network_name, "Removed"),
-				// The network was already gone (404) — nothing to do, but the row
+				// The network was already gone (404), so nothing to do, but the row
 				// has to close, or the live board leaves it spinning on
 				// `Removing` forever (#1347).
 				Ok(false) => crate::ui::progress_line("Network", &network_name, "Absent"),
 				Err(e) => {
 					tracing::warn!("could not remove network {network_name}: {e}");
-					// Close the row visibly — a `down` whose removal genuinely
+					// Close the row visibly: a `down` whose removal genuinely
 					// failed previously hid the failure behind a spinner (#1347).
 					crate::ui::progress_line("Network", &network_name, "Failed");
 					first_err.get_or_insert(crate::error::ComposeError::Podman(e));
@@ -152,9 +152,9 @@ impl Engine {
 			}
 		}
 
-		// Sweep any remaining project networks by label — the implicit
+		// Sweep any remaining project networks by label: the implicit
 		// `<project>_default` (present only when the file was normalized), or a
-		// network whose compose key changed — mirroring the container sweep so
+		// network whose compose key changed, mirroring the container sweep so
 		// teardown is complete regardless of how the file was parsed. Only
 		// podup-labelled networks match, so external networks are never touched.
 		// This is a supplementary catch-all on top of the file-driven network
@@ -180,12 +180,12 @@ impl Engine {
 				);
 				// See the network loop above: only a delete that found something
 				// may be reported, and a volume is the object where a false
-				// "Removed" is worst — it names data the operator believes is
+				// "Removed" is worst: it names data the operator believes is
 				// gone.
 				crate::ui::progress::start("Volume", &volume_name, "Removing");
 				match self.client.delete_existed(&vol_path).await {
 					Ok(true) => crate::ui::progress_line("Volume", &volume_name, "Removed"),
-					// The volume was already gone (404) — nothing to do, but the
+					// The volume was already gone (404), so nothing to do, but the
 					// row has to close, or the live board leaves it spinning on
 					// `Removing` forever (#1347).
 					Ok(false) => crate::ui::progress_line("Volume", &volume_name, "Absent"),
@@ -201,7 +201,7 @@ impl Engine {
 		}
 
 		// Internal native secrets are podup-owned (not user data), so remove
-		// them unconditionally — independent of `remove_volumes`.
+		// them unconditionally, independent of `remove_volumes`.
 		let secrets = self.remove_internal_secrets(file).await;
 
 		// Close the board before returning, on every path: the region hides the
@@ -217,7 +217,7 @@ impl Engine {
 
 	/// Remove the images used by the project's services (`down --rmi`). With
 	/// `local_only`, only images of services that build locally (a `build:`
-	/// section) are removed — matching `docker compose down --rmi local`.
+	/// section) are removed, matching `docker compose down --rmi local`.
 	pub async fn remove_service_images(&self, file: &ComposeFile, local_only: bool) -> Result<()> {
 		// Aggregate like every sibling loop in this teardown: complete the sweep,
 		// then report the first real failure. Warning and returning Ok meant
@@ -234,7 +234,7 @@ impl Engine {
 				None => continue,
 			};
 			// Do NOT force: a force-removal cascades to every container using the
-			// image — including ones owned by other compose projects that share it
+			// image, including ones owned by other compose projects that share it
 			// (e.g. two stacks both on `nginx:latest`). docker compose leaves an
 			// in-use image in place, so an "in use" conflict is a skip, not a
 			// failure.
@@ -243,7 +243,7 @@ impl Engine {
 				Ok(_) => crate::ui::progress_line("Image", &image, "Removed"),
 				Err(e) if e.is_status(404) => {}
 				Err(e) if e.is_image_in_use() => {
-					tracing::debug!("image {image} is still in use — skipping removal")
+					tracing::debug!("image {image} is still in use; skipping removal")
 				}
 				Err(e) => {
 					tracing::warn!("could not remove image {image}: {e}");

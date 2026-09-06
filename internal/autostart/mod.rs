@@ -1,7 +1,7 @@
 //! `podup autostart` service mode: a single rootless `systemctl --user` unit that
 //! brings a compose stack up at boot.
 //!
-//! Everything here is user-scope only — the unit lives under
+//! Everything here is user-scope only: the unit lives under
 //! `${XDG_CONFIG_HOME:-~/.config}/systemd/user/` and every action goes through
 //! `systemctl --user` / `loginctl`. No root, no `sudo`, nothing under `/etc` or
 //! the system systemd. External-command calls go through the `SystemCtl` seam so
@@ -62,7 +62,7 @@ impl SystemCtl for RealSystemCtl {
 /// default `DefaultTimeoutStopUSec` is 90s. `podup stop` honours each
 /// container's own grace period, so a stack whose slowest container needs more
 /// than that stops cleanly when a human runs it and gets killed mid-stop at
-/// reboot — the difference only shows up during an unattended shutdown, which
+/// reboot; the difference only shows up during an unattended shutdown, which
 /// is the worst version of it.
 ///
 /// `None` when no service sets one, or when none parses, so the unit simply
@@ -79,7 +79,7 @@ pub fn max_stop_grace_secs(file: &crate::compose::types::ComposeFile) -> Option<
 
 /// Options for [`install`].
 ///
-/// `#[non_exhaustive]`: see [`ServiceUnitOpts`] — same reason, same construction
+/// `#[non_exhaustive]`: see [`ServiceUnitOpts`], same reason, same construction
 /// pattern.
 #[non_exhaustive]
 #[derive(Default)]
@@ -186,7 +186,7 @@ fn quadlet_units_present(project: &str) -> Vec<PathBuf> {
 	found
 }
 
-/// Whether linger is enabled for `user` (so the user manager — and the stack —
+/// Whether linger is enabled for `user` (so the user manager, and the stack,
 /// survives logout and starts at boot). Parses `loginctl show-user <user>
 /// --value --property=Linger`, treating any error/unexpected output as "off".
 fn linger_enabled<S: SystemCtl>(sc: &S, user: &str) -> bool {
@@ -427,13 +427,13 @@ fn place_update_units<S: SystemCtl>(
 	Ok(())
 }
 
-/// Whether systemd knows anything about `unit` — loaded, enabled, running, or
+/// Whether systemd knows anything about `unit`: loaded, enabled, running, or
 /// merely present as a fragment.
 ///
 /// `systemctl is-active` exits **4** for a unit it has never heard of and
 /// something else for every other state (0 active, 3 inactive/failed/activating).
 /// That numeric 4 is the only reliable "there is nothing here" signal: the
-/// message text is localised, and the *fragment file* is not a proxy for it —
+/// message text is localised, and the *fragment file* is not a proxy for it:
 /// measured, a unit whose file is deleted out of band stays loaded, enabled and
 /// running, and `disable --now` still exits 0, removes its `.wants/` symlink and
 /// stops it. Gating on the file would delete the only way out of that state.
@@ -450,7 +450,7 @@ fn unit_is_known<S: SystemCtl>(sc: &S, unit: &str) -> bool {
 /// Uninstall the service-mode autostart unit: disable + stop it, remove the unit
 /// file, and reload the user manager.
 ///
-/// Idempotent — uninstalling when nothing is installed is a quiet no-op — but a
+/// Idempotent: uninstalling when nothing is installed is a quiet no-op, but a
 /// `disable` that genuinely fails is reported rather than swallowed, so the
 /// command cannot claim success while the service is still enabled and running.
 ///
@@ -467,7 +467,7 @@ pub fn uninstall<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<()> {
 	// there. `disable --now` is idempotent across every state it can be in
 	// (enabled, never enabled, running, stopped, fragment deleted out of band),
 	// so the only case worth skipping is the one where systemd has never heard
-	// of it — which is exactly what `unit_is_known` answers.
+	// of it, which is exactly what `unit_is_known` answers.
 	if unit_is_known(sc, &unit_name) {
 		checked(
 			sc.systemctl(&["disable", "--now", &unit_name]),
@@ -523,7 +523,7 @@ pub fn uninstall<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<()> {
 }
 
 /// Which autostart mode, if any, is installed for a project. Service and quadlet
-/// mode cannot coexist — each install refuses the other — so at most one is present.
+/// mode cannot coexist (each install refuses the other) so at most one is present.
 /// `uninstall` uses this to remove whichever is there without the caller naming a
 /// mode (and mistakenly no-op'ing against the wrong one).
 pub enum InstalledMode {
@@ -531,7 +531,7 @@ pub enum InstalledMode {
 	Service,
 	/// Quadlet `<project>-*.container` units are present.
 	Quadlet,
-	/// Neither — nothing is installed.
+	/// Neither: nothing is installed.
 	None,
 }
 
@@ -672,7 +672,7 @@ pub fn collect_status<S: SystemCtl>(sc: &S, project: &str) -> StatusReport {
 pub fn status<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<()> {
 	let r = collect_status(sc, project);
 	// Every line here is a yes/no an operator is scanning for, and the whole
-	// screen was one colour — so "is it actually running?" meant reading six
+	// screen was one colour, so "is it actually running?" meant reading six
 	// labels to find the one word that answers it. The label is scaffolding
 	// (dimmed); the value carries the meaning (tinted by what it says).
 	let row = |label: &str, value: &str| {
@@ -685,7 +685,7 @@ pub fn status<S: SystemCtl>(sc: &S, project: &str) -> crate::Result<()> {
 	}
 	// With no unit file on disk, systemd's answers to both questions are the same
 	// negative the `installed: no` line above already gave, and neither is a
-	// failure — but `is-enabled` returns the word `not-found`, which the status
+	// failure, but `is-enabled` returns the word `not-found`, which the status
 	// vocabulary reads as an error and paints red. So an uninstalled project
 	// reported one dim `no` and one red `not-found` about the same unit.
 	//

@@ -22,13 +22,13 @@ pub(crate) struct LiveContainer {
 	pub state: String,
 }
 
-/// Whether a container in this state is currently active — i.e. `stop` would
+/// Whether a container in this state is currently active, i.e. `stop` would
 /// actually transition it. A `running` or `paused` container is stopped; a
 /// `created`/`exited`/`dead`/… one is already not running, so stopping it is a
 /// no-op that must not be reported as "stopped" (#876). Pure for unit testing.
 ///
 /// Unused in production since the per-service lifecycle commands stopped
-/// filtering by state themselves (#1363) — kept here for the unit test that
+/// filtering by state themselves (#1363), kept here for the unit test that
 /// pins its truth table.
 #[allow(dead_code)]
 pub(crate) fn state_is_active(state: &str) -> bool {
@@ -170,8 +170,8 @@ impl Engine {
 	/// Surplus containers are stopped and removed concurrently so a large
 	/// scale-down costs roughly one grace period rather than one per replica.
 	///
-	/// Best-effort across every surplus replica — one that fails to stop/remove
-	/// must not block the rest from being reclaimed — but the first real
+	/// Best-effort across every surplus replica (one that fails to stop/remove
+	/// must not block the rest from being reclaimed) but the first real
 	/// failure is remembered and returned once every replica has been
 	/// attempted, so `scale`/`up --scale` does not exit 0 with a surplus
 	/// replica silently left running (#598).
@@ -341,7 +341,7 @@ impl Engine {
 	/// replicas are kept on purpose so a service scaled beyond its static
 	/// compose count (or never reaped by a prior `down`) is not silently
 	/// dropped from the bucket. The static-name fallback for a service absent
-	/// from the map is the *caller's* responsibility — this helper returns an
+	/// from the map is the *caller's* responsibility; this helper returns an
 	/// empty vec for one, since it does not see the compose file.
 	pub(crate) async fn live_project_replicas_sorted(
 		&self,
@@ -399,7 +399,7 @@ impl Engine {
 	/// (`top`), where a stopped replica has to be skipped rather than asked: the
 	/// libpod endpoints answer a non-running container with an HTTP 500, which
 	/// callers must not have to tell apart from a real failure by parsing its
-	/// message. There is no fallback to statically-derived names — a service
+	/// message. There is no fallback to statically-derived names: a service
 	/// that was never created has nothing running, so it yields an empty vec
 	/// instead of a phantom name.
 	pub(crate) async fn running_replica_names(&self, service_name: &str) -> Result<Vec<String>> {

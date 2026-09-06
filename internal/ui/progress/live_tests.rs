@@ -1,8 +1,8 @@
 use super::*;
 
 /// The interrupt handler is claimed once per process, however many regions a
-/// run opens. Two in one invocation — a `stats` after an `up` inside an
-/// embedding crate — must not stack handlers, since each would race to call
+/// run opens. Two in one invocation (a `stats` after an `up` inside an
+/// embedding crate) must not stack handlers, since each would race to call
 /// `process::exit`.
 ///
 /// The only test in the crate that may call this: the latch is

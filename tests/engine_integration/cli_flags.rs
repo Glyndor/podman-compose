@@ -488,7 +488,7 @@ async fn cli_config_resolve_image_digests_pins_digest() {
 }
 
 /// #1184: `config` left `env_file` unresolved, so a service taking its whole
-/// environment from a file rendered with no `environment:` at all — the one
+/// environment from a file rendered with no `environment:` at all: the one
 /// command you use to ask what will actually run pointed away from the answer.
 /// docker compose materialises it and drops the key; measured against
 /// docker compose v5.1.3 on this exact input.

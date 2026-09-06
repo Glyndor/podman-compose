@@ -6,7 +6,7 @@ whose command failed (rc != 0), and reports median / p95 / stdev / n per
 (tool, scenario, op) for three metrics: wall-clock seconds, peak resident memory
 (max RSS), and CPU time. Emits results/report.md and results/summary.json.
 
-raw.csv and summary.json stay in seconds at full precision — one canonical unit.
+raw.csv and summary.json stay in seconds at full precision, one canonical unit.
 Only the report picks a readable one, per row (see row_unit).
 
 No number is invented here: every statistic is computed from the measured rows,
@@ -29,7 +29,7 @@ ENGINE = os.path.join(HERE, "results", "engine")
 def read_engine():
 	"""Which engine docker-compose drove, as recorded by run.sh next to raw.csv.
 
-	Empty when the file is absent — an older results directory, or a run where
+	Empty when the file is absent: an older results directory, or a run where
 	docker-compose was not measured at all.
 	"""
 	try:
@@ -41,7 +41,7 @@ def read_engine():
 # Preferred ordering only. Anything measured but not listed here is appended
 # rather than dropped: this list silently discarded four scenarios' worth of
 # results (config-heavy, wide-running-ops, deep-chain, wide-level) because it was
-# a filter, not an order — 972 rows measured, four scenarios never printed.
+# a filter, not an order: 972 rows measured, four scenarios never printed.
 SCEN_ORDER = [
 	"single", "multi-healthcheck", "deep-chain", "wide-level", "scale",
 	"network-ipam", "volume-heavy", "secrets", "warm-restart", "many-services",
@@ -97,8 +97,8 @@ def row_unit(cells, metric):
 	Returns (suffix, multiplier, decimals).
 
 	One unit per row, applied to every tool in it. Choosing per cell would break
-	the comparison the reader actually makes — one tool against another on the
-	same operation — by putting "90 ms" next to "0.11 s". Across rows the
+	the comparison the reader actually makes (one tool against another on the
+	same operation) by putting "90 ms" next to "0.11 s". Across rows the
 	workloads differ anyway, so a row is the widest scope where a shared unit
 	still means something.
 
@@ -116,8 +116,8 @@ def row_unit(cells, metric):
 		return ("ms", 1000.0, 1)
 	# Above a minute, seconds stop being readable at a glance: a scenario that
 	# takes two minutes printed as `120.000 s` makes the reader do the division.
-	# No published row reaches this yet — the slowest is `wide-level up` at 9.7 s
-	# for docker-compose — but the tier belongs here before a long scenario is
+	# No published row reaches this yet (the slowest is `wide-level up` at 9.7 s
+	# for docker-compose) but the tier belongs here before a long scenario is
 	# added rather than after, when the fix competes with reading the results.
 	if values and max(values) >= 60.0:
 		return ("min", 1.0 / 60.0, 2)
@@ -240,7 +240,7 @@ def main():
 				 "same compose file per scenario.\n")
 
 	metric_table(
-		"Wall-clock — pure tool comparison (all drive Podman)",
+		"Wall-clock, pure tool comparison (all drive Podman)",
 		"Lower is better. Median with p95 and stdev in parentheses. Each row "
 		"carries one unit, picked from the largest value in it, so the tools in "
 		"a row stay directly comparable; raw.csv and summary.json keep every "
@@ -250,14 +250,14 @@ def main():
 		"rather than at a Docker daemon.",
 		same, wall)
 	metric_table(
-		"Memory + CPU — pure tool comparison (all drive Podman)",
+		"Memory + CPU, pure tool comparison (all drive Podman)",
 		"Peak resident memory (max RSS) and CPU time of the tool process per "
 		"command, median. This is the client-side cost of running the tool: "
 		"podup is a static binary talking to the Podman service, podman-compose "
 		"is Python shelling out to `podman`.",
 		same, mem)
 	metric_table(
-		"Wall-clock — cross-engine stack (different daemon)",
+		"Wall-clock, cross-engine stack (different daemon)",
 		"docker-compose drives dockerd, so these are an end-to-end stack "
 		"comparison, not pure-tool. Only present when a Docker Engine was "
 		"available on the benchmark host.",
@@ -269,14 +269,14 @@ def main():
 
 	if self_test:
 		# The self-test runs on six fixture rows. Writing them out would replace a
-		# real report and summary — the output of a benchmark that takes the better
+		# real report and summary, the output of a benchmark that takes the better
 		# part of an hour and cannot be recomputed, since raw.csv is the only copy.
 		# Printed, not just built: the fixtures exist to exercise the formatting,
 		# and a table nobody looks at cannot show that a row picked the wrong
 		# unit or that a cell came out empty.
 		print("\n".join(lines))
 		# Exercise the budget gate in both directions. The fixture rows are
-		# synthetic, so they are not measured against the real budget — but a gate
+		# synthetic, so they are not measured against the real budget, but a gate
 		# nobody has watched fail is decoration, and this is the only place the
 		# shared-CI smoke run can watch it.
 		# The unit tiers, exercised rather than assumed: a row is rendered in one
@@ -322,7 +322,7 @@ def check_memory_budget(summary):
 	someone decided to, not a number that drifts inside a script.
 	"""
 	if not os.path.exists(BUDGET):
-		print(f"no memory budget at {BUDGET} — skipping the check", file=sys.stderr)
+		print(f"no memory budget at {BUDGET}; skipping the check", file=sys.stderr)
 		return 0
 	with open(BUDGET) as f:
 		budget = float(f.read().strip())

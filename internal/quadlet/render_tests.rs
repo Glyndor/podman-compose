@@ -253,8 +253,8 @@ fn escape_word_split_value_with_whitespace_is_quoted() {
 
 #[test]
 fn escape_trailing_backslash_is_quoted_and_escaped() {
-	// A value ending in a backslash would otherwise continue onto — and
-	// swallow — the next directive line; it must be quoted and escaped.
+	// A value ending in a backslash would otherwise continue onto, and
+	// swallow, the next directive line; it must be quoted and escaped.
 	let out = escape_unit_value("Environment", "WINPATH=C:\\tmp\\");
 	assert!(!out.ends_with('\\') || out.ends_with("\\\""));
 	assert_eq!(out, "\"WINPATH=C:\\\\tmp\\\\\"");

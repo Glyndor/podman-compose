@@ -101,7 +101,7 @@ pub fn merge_env(
 /// `config` is meant to render the canonical, fully-resolved model, and docker
 /// compose materialises `env_file` there. Leaving it unresolved meant a service
 /// that takes its whole environment from a file rendered with no `environment:`
-/// at all — so the one command you reach for to ask "what will this actually run"
+/// at all, so the one command you reach for to ask "what will this actually run"
 /// pointed away from the answer rather than merely omitting it (#1184).
 ///
 /// Precedence is the same as at run time: `environment:` wins over `env_file:`,

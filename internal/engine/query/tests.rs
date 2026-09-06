@@ -19,7 +19,7 @@ fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
 }
 
 /// #598: `--remove-orphans` that can't remove every orphan (e.g. an active
-/// exec session) must not exit 0 with one silently left behind — but a
+/// exec session) must not exit 0 with one silently left behind, but a
 /// sibling orphan that removes cleanly must still be reclaimed.
 #[tokio::test]
 #[cfg(unix)]
@@ -131,7 +131,7 @@ async fn logs_targets_every_live_replica_after_scale() {
 ///
 /// #1445 collapsed the per-service `live_replica_names` resolution into a
 /// single bulk fetch (`live_project_replicas_sorted`), so the per-service
-/// error path this test used to drive no longer exists — there is one
+/// error path this test used to drive no longer exists: there is one
 /// container-list call for the whole project, not one per service, so a
 /// per-service 500 is no longer reachable in this code. The companion
 /// `logs_fails_when_no_service_resolves_at_all` covers the only failure
@@ -232,7 +232,7 @@ fn is_valid_log_time_classifies_forms() {
 /// partial result left to protect.
 ///
 /// An unreachable engine made `logs` print nothing and exit 0, which is
-/// indistinguishable from a project that simply has no logs — so a health check
+/// indistinguishable from a project that simply has no logs, so a health check
 /// or deploy gate built on `compose logs` read success from an engine that was
 /// not there. Every service 500s here, so no target survives.
 ///
@@ -323,7 +323,7 @@ fn an_unreadable_state_counts_as_a_break() {
 	// The rule that is easy to get backwards, and the one that matters most: the
 	// severed connection that ends the stream is usually the same one the
 	// re-check needs, so reading "could not tell" as a clean end turns every
-	// transport failure back into exit 0. Measured — the permissive version
+	// transport failure back into exit 0. Measured: the permissive version
 	// reported a still-running container as stopped when the socket restarted
 	// under an attached `logs -f`.
 	assert!(stream_broke_mid_output(None));

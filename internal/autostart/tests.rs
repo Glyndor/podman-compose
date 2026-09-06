@@ -230,7 +230,7 @@ fn uninstall_reports_a_failed_disable() {
 }
 
 /// Uninstalling when systemd has never heard of the unit stays a silent
-/// no-op. `is-active` exit 4 ("no such unit") is the signal — not the unit
+/// no-op. `is-active` exit 4 ("no such unit") is the signal, not the unit
 /// file, which is a poor proxy: a fragment deleted out of band leaves the
 /// unit loaded, enabled and running, and only `disable --now` clears it.
 #[test]
@@ -259,7 +259,7 @@ fn uninstall_disables_a_known_unit_whose_file_is_already_gone() {
 	with_env(|root| {
 		let path = root.join("systemd/user/podup-app.service");
 		assert!(!path.exists());
-		// Default `is_active_code` is 0 — systemd knows the unit.
+		// Default `is_active_code` is 0: systemd knows the unit.
 		let sc = FakeCtl::new();
 		uninstall(&sc, "app").expect("uninstall must still succeed");
 		let calls = sc.systemctl_log();

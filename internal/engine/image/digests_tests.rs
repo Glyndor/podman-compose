@@ -93,7 +93,7 @@ async fn service_without_image_is_not_inspected() {
 async fn image_without_digest_warns_and_leaves_image_unchanged() {
 	let file = file_with(&[("local", Some("built-locally"))]);
 	// The fake responds with an inspect body that carries no
-	// `RepoDigests` — the "locally built image" case.
+	// `RepoDigests`: the "locally built image" case.
 	let fake = fake_podman::start(|_, _| {
 		(
 			200,
@@ -136,7 +136,7 @@ async fn first_inspect_failure_aborts_with_the_offending_service_named() {
 	let client = fake.client();
 
 	let err = resolve_image_digests(&client, &file).await.unwrap_err();
-	// `matches!` on a distinctive fragment, not `is_err()` — the test
+	// `matches!` on a distinctive fragment, not `is_err()`: the test
 	// has to fail when the wrong service is named.
 	let msg = match err {
 		ComposeError::Build(m) => m,
@@ -194,7 +194,7 @@ async fn missing_image_404_is_a_hard_error_naming_the_service() {
 /// A two-failure fixture driven through `buffer_unordered` does **not**
 /// discriminate: the in-process fake answers fast enough that completion
 /// order coincides with submission order, so the assertion passes with the
-/// sort removed. Measured — three runs, three passes, with the sort
+/// sort removed. Measured: three runs, three passes, with the sort
 /// commented out. That is the vacuous shape this file must not carry, so
 /// the property is pinned directly instead.
 #[test]

@@ -247,7 +247,7 @@ fn warns_on_remaining_unmapped_build_fields() {
 		);
 	}
 	// `build.ulimits` was on this list, wrongly: the libpod build endpoint takes
-	// a `ulimits` parameter and applies it. Measured on podman 5.7.0 — the same
+	// a `ulimits` parameter and applies it. Measured on podman 5.7.0: the same
 	// build saw `ulimit -n` of 524288 without it and 1234 with it. Reporting it
 	// as unmapped now would send the reader looking for a workaround that is not
 	// needed.

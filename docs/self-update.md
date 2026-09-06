@@ -5,8 +5,8 @@ run resolves the newest release, verifies it, and installs it; `--check` reports
 whether a newer release exists and then stops, downloading nothing and never
 touching the installed binary; `--force` reinstalls the latest release even when
 it is not newer than the current build. The design goal is that **the update
-source is impossible to tamper with**: no attacker — even one who controls the
-network or the download host — can make `podup` install a modified binary.
+source is impossible to tamper with**: no attacker, not even one who controls the
+network or the download host, can make `podup` install a modified binary.
 
 ## Trust anchor
 
@@ -30,7 +30,7 @@ relied on for integrity.
    here without downloading anything.
 2. **Refuse a package-manager-managed binary.** If the running executable is
    owned by a package manager, `podup update` refuses **before downloading
-   anything** and names that manager's own command instead — overwriting the
+   anything** and names that manager's own command instead, because overwriting the
    file in place would desync its records. This applies even with `--force`.
    Three are recognised:
 
@@ -44,7 +44,7 @@ relied on for integrity.
    other two are read off the path: `brew` would cost a process spawn on every
    update to learn a prefix already visible in the path, and Scoop is a
    PowerShell function rather than an executable, so there is nothing to spawn.
-   Both path checks are shaped to fail one way only — a layout that merely looks
+   Both path checks are shaped to fail one way only: a layout that merely looks
    like theirs refuses an update that would have worked, which is visible and
    recoverable, rather than missing one and rewriting a file its manager still
    believes it knows.
@@ -57,8 +57,8 @@ relied on for integrity.
    half the story: unattended-upgrades installs only from origins its own
    configuration permits, and the rule permitting Glyndor is shipped by
    `glyndor-archive-keyring`. A machine with podup and without that package is
-   never upgraded automatically, and — because the rule that would have fixed it
-   travels in the update it never receives — never finds out. So the refusal
+   never upgraded automatically and, because the rule that would have fixed it
+   travels in the update it never receives, never finds out. So the refusal
    reads apt's merged configuration once, at that moment only, and appends the
    reason and the remedy when nothing will act.
 
@@ -70,7 +70,7 @@ relied on for integrity.
    all, nothing is said: that is a machine the question does not apply to rather
    than a broken one.
 3. Fetch `SHA256SUMS` and `SHA256SUMS.sig` and **verify the Ed25519 signature**
-   of `SHA256SUMS` against the embedded public key — *before* the binary is
+   of `SHA256SUMS` against the embedded public key, *before* the binary is
    downloaded, so a tampered or unsigned release is rejected without first
    buffering a large attacker-controlled payload. A missing/placeholder key,
    malformed signature, or bad signature aborts here. The manifest and signature
@@ -89,7 +89,7 @@ from a generic `1`) and leaves the installed binary untouched.
 ## install.sh
 
 The one-line installer applies the same fail-closed policy. With a release
-public key configured (the default — the key ships embedded in the script), the
+public key configured (the default, since the key ships embedded in the script), the
 **Ed25519 signature check is mandatory**: it requires `python3` with the
 `cryptography` package and refuses to install if the check cannot run, so the
 pinned key is never silently bypassed. The GitHub build-provenance attestation
@@ -101,14 +101,14 @@ Ed25519 signature before installing it as root.
 
 ### Version self-test (rollback gate)
 
-The signed manifest binds the asset bytes but **not** the release tag — a CDN
+The signed manifest binds the asset bytes but **not** the release tag. A CDN
 or transparent proxy able to spoof release metadata could replay an older,
 *legitimately* signed binary and matching `SHA256SUMS`, and both would still
 verify. Both `install.sh` and `install.ps1` therefore run the staged binary's
 `--version` and pin it to the resolved tag (resolved via the GitHub releases
 API when `PODUP_VERSION=latest`, or used as-is when an explicit `vX.Y.Z` is
 given). The comparison is **strict equality with one optional `v` prefix**, so
-a `3.7.0-dev` report does not slip past a `3.7.0` check — that is the rollback
+a `3.7.0-dev` report does not slip past a `3.7.0` check: that is the rollback
 case this gate exists to reject. A mismatch removes the staged file and aborts
 the install with exit code `1`; the operator sees:
 
@@ -123,20 +123,20 @@ and a failed self-test there rolls back to the previous binary.
 
 `install.sh` and `install.ps1` are themselves listed in the signed `SHA256SUMS`
 manifest and carry their own `install.sh.sig` / `install.ps1.sig`, so a user
-pinning a version can verify the script before piping it to a shell — the script
+pinning a version can verify the script before piping it to a shell, so the script
 is no longer the one unverifiable link in the chain.
 
 The embedded Python in both installers classifies a verification failure into
 two distinct exit codes, so the calling shell can report the right problem to
 the user:
 
-- **rc=1 (signature mismatch, `Fail`)** — every embedded key rejected the
+- **rc=1 (signature mismatch, `Fail`)**: every embedded key rejected the
   signature. Treat as a release-tampering problem; do not retry.
-- **rc=3 (key malformed, `Fail`)** — at least one embedded key was set but
+- **rc=3 (key malformed, `Fail`)**: at least one embedded key was set but
   could not be decoded into a 32-byte Ed25519 point. This is a user-side
   configuration problem (a bad `PODUP_RELEASE_PUBKEY_B64` /
   `PODUP_RELEASE_PUBKEY2_B64` override, a stray whitespace, a non-base64
-  character), not a release-tampering problem — the release itself may be
+  character), not a release-tampering problem; the release itself may be
   fine. The CLI distinguishes them so a fork maintainer debugging a
   configuration slip isn't told to chase a phantom signature mismatch.
   `install.sh` maps rc=3 to its own `return 3`; the bash and PowerShell
@@ -155,9 +155,9 @@ adding a `PODUP_RELEASE_PUBKEY3_B64` to `install.sh` is a one-line change when
 a third key is needed. Slot 0 holds the active key; later slots are the empty
 rotation slots, populated only during a rotation. Embedded in three places:
 
-- `internal/update/verify.rs` — `RELEASE_PUBKEYS[0]` and `[1]` (raw 32 bytes).
-- `install.sh` — `PODUP_RELEASE_PUBKEY_B64` and `PODUP_RELEASE_PUBKEY2_B64`.
-- `install.ps1` — `PubKeyB64` and `PubKey2B64`.
+- `internal/update/verify.rs`: `RELEASE_PUBKEYS[0]` and `[1]` (raw 32 bytes).
+- `install.sh`: `PODUP_RELEASE_PUBKEY_B64` and `PODUP_RELEASE_PUBKEY2_B64`.
+- `install.ps1`: `PubKeyB64` and `PubKey2B64`.
 
 A signature is trusted if it validates under **any** non-empty key. If every key
 is zeroed, both the binary and the installer fail closed and install nothing.
@@ -165,7 +165,7 @@ is zeroed, both the binary and the installer fail closed and install nothing.
 ### Key rotation
 
 Because each binary accepts up to two keys, the signing key can be rotated
-**without stranding installed binaries** — provided the outgoing private key is
+**without stranding installed binaries**, provided the outgoing private key is
 still available to sign the migration release. A two-release transition first
 ships the new key alongside the old (signed by the old key), so binaries already
 in the field accept the next release and gain the new key; a later release then
@@ -202,27 +202,27 @@ PY
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
-The release also ships a CycloneDX SBOM **per artifact** — one for each binary
+The release also ships a CycloneDX SBOM **per artifact**: one for each binary
 (e.g. `podup-linux-x86_64.cdx.json`) and each Debian package
 (`podup_<version>_amd64.deb.cdx.json`), listing only that target's actual
-dependencies rather than a union across every platform — plus a third-party
+dependencies rather than a union across every platform, plus a third-party
 license attribution (`NOTICES.html`). Each carries a detached `.sig` that
 verifies against the same key.
 
 ## Air-gapped installation
 
-Networks that block outbound GitHub have no opt-out from verification — they
+Networks that block outbound GitHub have no opt-out from verification; they
 carry the artifacts across the boundary instead:
 
 1. On a connected host, download the platform binary, `SHA256SUMS`,
    `SHA256SUMS.sig` (and optionally the SBOM/NOTICES and their `.sig` files).
 2. Transfer them to the isolated host on approved media.
 3. Verify the Ed25519 signature and checksum there with the offline snippet
-   above — the embedded key is the trust anchor, so no network is needed.
+   above: the embedded key is the trust anchor, so no network is needed.
 4. Install the verified binary manually (`install -m 0755 podup-linux-x86_64
    /usr/local/bin/podup`).
 
 For building from source in an air-gapped environment, vendor the crates on a
 connected host (`cargo vendor vendor`), include the `vendor/` tree in the source
-tarball, and build the Debian package offline — `debian/rules` automatically
+tarball, and build the Debian package offline; `debian/rules` automatically
 switches Cargo to `--frozen --offline` when `vendor/` is present.

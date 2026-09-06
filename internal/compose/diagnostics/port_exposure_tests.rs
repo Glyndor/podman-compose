@@ -41,8 +41,8 @@ fn does_not_warn_on_short_port_with_loopback_ip() {
 	);
 }
 
-/// `0.0.0.0:5432:5432` does the same bind as the IP-less short form — every
-/// interface — but the operator typed it explicitly. Warning here would
+/// `0.0.0.0:5432:5432` does the same bind as the IP-less short form, every
+/// interface, but the operator typed it explicitly. Warning here would
 /// train the reader to ignore this warning, so this is the case that looks
 /// wrong but is deliberate.
 #[test]
@@ -68,7 +68,7 @@ fn does_not_warn_when_service_has_no_ports() {
 }
 
 /// A service with only `expose:` (no `ports:`) is reachable to peers on the
-/// same compose network but not on the host — same case as no ports at all.
+/// same compose network but not on the host, the same case as no ports at all.
 #[test]
 fn does_not_warn_on_expose_only() {
 	let msgs =
@@ -173,7 +173,7 @@ fn does_not_warn_on_ipv6_short_port() {
 	);
 }
 
-/// Two ports on the same service: one with IP, one without — only the
+/// Two ports on the same service: one with IP, one without; only the
 /// IP-less one warns.
 #[test]
 fn warns_only_for_ip_less_port_in_mixed_list() {

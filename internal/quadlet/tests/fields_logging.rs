@@ -45,7 +45,7 @@ services:
 	);
 }
 
-/// An explicit `logging:` block overrides the default — the rendered unit
+/// An explicit `logging:` block overrides the default: the rendered unit
 /// carries the user's driver and options, not the default (#1354).
 #[test]
 fn logging_user_override_replaces_the_default() {

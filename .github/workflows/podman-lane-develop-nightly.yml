@@ -1,5 +1,5 @@
 name: podman-lane (develop nightly)
-# Nightly live-Podman coverage on the `develop` branch — early-warning signal
+# Nightly live-Podman coverage on the `develop` branch: early-warning signal
 # for coverage drift that the `main` nightly (#1326) cannot see (#1380).
 #
 # The `main` nightly runs on the default branch only, so a regression landing on
@@ -11,7 +11,7 @@ name: podman-lane (develop nightly)
 #
 # Coverage is the only output consumed. The suite's pass/fail gate is unchanged
 # from the per-PR lane and still lives there; this job is an observation
-# (per #1326's own recommendation — a second instrumented build per PR is too
+# (per #1326's own recommendation; a second instrumented build per PR is too
 # expensive to gate on).
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ permissions:
 jobs:
   podman-vm:
     runs-on: ubuntu-24.04
-    # Same wall-clock budget as the per-PR lane (#1338) — the coverage run
+    # Same wall-clock budget as the per-PR lane (#1338): the coverage run
     # serialises a second instrumented build inside the VM, and the Podman 6
     # leg finished at 89% of this budget on the most recent measurement.
     timeout-minutes: 95
@@ -89,7 +89,7 @@ jobs:
                 # Emit exactly one `PODUP_COVERAGE=<pct>` line for the gate step
                 # to parse. The previous script printed the coverage only as part
                 # of the tail output, which the gate's `grep -oE 'PODUP_COVERAGE=…'`
-                # never matched — the gate treated the whole run as a missing
+                # never matched, so the gate treated the whole run as a missing
                 # number and exited 0 with a `::warning::`. Branch is fixed in
                 # one place so the gate (the contract the lane actually measures)
                 # sees a clean number.
@@ -115,7 +115,7 @@ jobs:
           L="$RUNNER_TEMP/vm.log"
           COV=$(grep -oE 'PODUP_COVERAGE=[^ ]+' "$L" | tail -1 | cut -d= -f2)
           if [ -z "$COV" ]; then
-            echo "::warning::no coverage number reported on develop — VM did not complete the run or the instrumented build failed"
+            echo "::warning::no coverage number reported on develop; the VM did not complete the run or the instrumented build failed"
             tail -20 "$L"
             exit 0
           fi
@@ -124,11 +124,11 @@ jobs:
           # Nightly floor on develop: same 88% the `main` nightly applies
           # (#1326), reported on the Podman 6 leg. A regression that
           # takes develop below 88% is the early warning this workflow
-          # exists to surface — the same shape of break, in the half-life
+          # exists to surface: the same shape of break, in the half-life
           # before the next release PR.
           # `cargo llvm-cov` emits a percent like `91.30%`. Strip the
           # trailing `%` and the fractional part (`cut -d. -f1`) so
-          # `printf '%d'` gets an integer — `printf '%.0f' "91.30"` errors
+          # `printf '%d'` gets an integer: `printf '%.0f' "91.30"` errors
           # with `invalid number`, and the whole job fails closed exactly
           # when a regression would otherwise have been missed.
           COV_INT=$(printf '%d' "$(echo "$COV" | tr -dc '0-9.' | cut -d. -f1)")

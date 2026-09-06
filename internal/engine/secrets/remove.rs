@@ -5,10 +5,10 @@
 //! since every secret podup creates carries `podup.project=<proj>`, so a single
 //! pass over it sweeps the declared secrets and the orphans alike.
 //!
-//! Every secret podup creates — including `file:` sources, whose bytes are
+//! Every secret podup creates, including `file:` sources, whose bytes are
 //! copied into a Podman-native secret at `up` time and **persist independently
 //! of any container** (`podman-secret-rm(1)`: the secret lives in the podman
-//! store, not in container state) — is removed on `down`. Without this sweep
+//! store, not in container state), is removed on `down`. Without this sweep
 //! the bytes from a `file:` source survive a `down`/`up` cycle until the next
 //! `up` overwrites them, which is a defence-in-depth gap (#1360): a stale
 //! secret payload outlives the container that read it. A summary log line
@@ -36,7 +36,7 @@ impl Engine {
 		// One list answers the ownership question for every name at once (#1263).
 		// It used to be fetched only for the orphan sweep, *after* each
 		// compose-named secret had already been inspected individually for the
-		// same label — so every label was fetched twice, once per secret and once
+		// same label, so every label was fetched twice, once per secret and once
 		// for all of them.
 		//
 		// The label-carrying list is also a superset of what the compose loops
@@ -68,7 +68,7 @@ impl Engine {
 			}
 			// The list failed. Falling through to an empty set would silently
 			// delete nothing and report a clean teardown, so this drops back to
-			// the per-secret guarded path instead — the same requests as before
+			// the per-secret guarded path instead, the same requests as before
 			// #1263, only reached when the cheap route is unavailable. The orphan
 			// sweep is not possible without a list, which is also how it behaved
 			// before.
@@ -106,7 +106,7 @@ impl Engine {
 		Ok(())
 	}
 
-	/// Names of all native secrets labelled `podup.project=<proj>` — the secrets
+	/// Names of all native secrets labelled `podup.project=<proj>`, the secrets
 	/// podup created for this project. libpod's `/secrets/json` rejects a `label`
 	/// filter (HTTP 500 `invalid filter "label"`), so the full list is fetched and
 	/// filtered client-side by the `podup.project` label.
@@ -154,7 +154,7 @@ impl Engine {
 	/// make: this one is only reachable from a name the list vouched for.
 	///
 	/// Returns `true` when the secret was actually removed (or was already
-	/// absent — a 404 still counts as teardown success). The caller collects
+	/// absent; a 404 still counts as teardown success). The caller collects
 	/// the names for the summary log line.
 	async fn delete_listed_secret(&self, name: &str) -> bool {
 		let path = format!("{API_PREFIX}/secrets/{}", urlencoded(name));
@@ -171,7 +171,7 @@ impl Engine {
 	}
 
 	/// Delete a project-scoped secret, but only after confirming it carries our
-	/// `podup.project=<proj>` label — so a same-named secret the user created by
+	/// `podup.project=<proj>` label, so a same-named secret the user created by
 	/// hand (and which podup never created) is never destroyed on `down`. A
 	/// missing secret (404) is a no-op.
 	///
@@ -190,7 +190,7 @@ impl Engine {
 					== Some(self.project.as_str());
 				if !owned {
 					tracing::warn!(
-						"secret {name} is not labelled podup.project={} — \
+						"secret {name} is not labelled podup.project={}, \
 						 leaving it untouched (not created by podup)",
 						self.project
 					);
@@ -220,7 +220,7 @@ impl Engine {
 /// One summary log line that lists the podup-created secrets removed on
 /// `down`. The per-secret `info` lines stay as the per-record audit;
 /// the summary is the line the operator actually searches for when
-/// the teardown finishes. Empty lists are silent — a `down` with no
+/// the teardown finishes. Empty lists are silent: a `down` with no
 /// declared secrets composes cleanly with the rest of the teardown
 /// without adding noise.
 fn log_removed_secrets(project: &str, removed: &[String]) {

@@ -6,7 +6,7 @@ fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
 	Engine::with_base_dir(client, project.into(), std::env::temp_dir())
 }
 
-/// A libpod stand-in for a host that already has every image asked about — the
+/// A libpod stand-in for a host that already has every image asked about: the
 /// warm state the pull-skip decision turns on. Shared by the three tests that
 /// exercise that decision, so they cannot drift apart on what "already here"
 /// means.
@@ -30,7 +30,7 @@ fn present_image_engine(method: &str, target: &str) -> (u16, String) {
 ///
 /// The prefetch stage checks presence once and returns without pulling, and then
 /// `acquire_service_image` pulled anyway, per service, under the effective
-/// `missing` policy — 42 of the 88 requests a 42-service warm `up` issued, and a
+/// `missing` policy: 42 of the 88 requests a 42-service warm `up` issued, and a
 /// `Pulling` line on the user's terminal for each. docker compose against the
 /// same engine prints none.
 ///
@@ -66,7 +66,7 @@ async fn warm_up_does_not_pull_an_image_the_host_already_has() {
 /// The two services share one image on purpose, with different policies. With
 /// `always` alone the prefetch stage never records the image as present, so the
 /// skip could not fire whatever the policy check said, and the test would pass
-/// for the wrong reason — it did, until a mutation run showed it surviving the
+/// for the wrong reason; it did, until a mutation run showed it surviving the
 /// removal of the very guard it is named for. The `missing` service is what
 /// records the observation, which is the only state where that guard is the one
 /// thing standing between `always` and a skipped registry visit.
@@ -120,7 +120,7 @@ async fn a_platform_pinned_service_still_pulls_an_image_the_host_already_has() {
 /// be silently treated as `missing` and skip the only pull that would have
 /// surfaced the bad value. The host stands in for one that already has the
 /// image (so the skip branch *would* fire), and the assertion is that the
-/// error fires instead — without the fix the call returned `true` and the
+/// error fires instead: without the fix the call returned `true` and the
 /// pull was skipped, leaving `up` to exit 0 with the wrong image.
 #[tokio::test]
 async fn image_already_seen_present_rejects_an_unknown_pull_policy() {
@@ -128,8 +128,8 @@ async fn image_already_seen_present_rejects_an_unknown_pull_policy() {
 	// Pre-populate the prefetch's seen-present set as if a previous
 	// `prefetch_images` had confirmed the image on this host. Without the
 	// fix `image_already_seen_present` would then return `true` for any
-	// service whose effective policy it read as `missing` — including a
-	// typo'd `pull_policy:` — and the only pull that could have surfaced
+	// service whose effective policy it read as `missing`, including a
+	// typo'd `pull_policy:`, and the only pull that could have surfaced
 	// the bad value would be skipped.
 	e.images_seen_present
 		.lock()

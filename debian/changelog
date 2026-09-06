@@ -276,7 +276,7 @@ podup (4.0.0) unstable; urgency=medium
   * Bridge networks are isolated from each other now. Docker does this and
     podman does not, so a service could reach ports on a neighbouring network
     that were never published. Measured with the same experiment on both
-    engines — a listener on an unpublished port in network B, a container in
+    engines: a listener on an unpublished port in network B, a container in
     network A dialling its address: docker 29.6.2 refused, podman 5.7.0
     connected. Inside one network docker connects, which is what makes that a
     measurement of isolation rather than of a broken dial.
@@ -302,8 +302,8 @@ podup (4.0.0) unstable; urgency=medium
     to warn that the condition "is not enforceable in Quadlet"; measured on
     podman 5.7.0 with a probe that takes ten seconds to pass, a dependant now
     starts ten seconds in rather than immediately. The warning is scoped to
-    what genuinely cannot work — a `service_healthy` naming a service with no
-    healthcheck, and `service_completed_successfully` — and names the service
+    what genuinely cannot work (a `service_healthy` naming a service with no
+    healthcheck, and `service_completed_successfully`) and names the service
     at fault.
 
   * `build.ulimits` reaches the build. It was reported as having no libpod
@@ -316,9 +316,9 @@ podup (4.0.0) unstable; urgency=medium
 
   * Namespace validation is per-slot. One allow-list served `pid`, `ipc`,
     `uts`, `cgroup` and `userns_mode`, which made it wrong for four of them.
-    It refused what podman accepts — `ipc: shareable`, and every
+    It refused what podman accepts: `ipc: shareable`, and every
     `userns_mode` value podman offers (`keep-id`, `auto`, `nomap`, and the
-    `keep-id:uid=…` and `auto:size=…` forms) — and accepted what podman
+    `keep-id:uid=…` and `auto:size=…` forms). It also accepted what podman
     refuses, `none` on four slots, which then came back as a libpod error
     naming no field. The error text now lists the modes the slot in hand
     accepts. A short but legal `ns:/x` was also rejected for being shorter
@@ -517,7 +517,7 @@ podup (3.6.0) unstable; urgency=medium
   Incompatible
 
   * `events` prints its TIME column in the reader's own time zone with the
-    offset that applied at that instant — `2026-08-03 09:44:27 -05:00`, matching
+    offset that applied at that instant, `2026-08-03 09:44:27 -05:00`, matching
     `podman events`. It was UTC and said so nowhere, which is worse than either
     alternative: a reader correlating a podup line against `podman events` or
     `journalctl` read it as their own wall clock and was silently wrong by the
@@ -531,8 +531,8 @@ podup (3.6.0) unstable; urgency=medium
     Podman 6 the archive endpoint applies the upload and closes without a
     response, and the confirmation asked whether the destination's mtime had
     moved. That runtime reports the mtime to whole seconds, so two copies inside
-    one second were indistinguishable — three failures in six back-to-back
-    copies, measured — and re-copying an unchanged file could never be confirmed
+    one second were indistinguishable (three failures in six back-to-back
+    copies, measured) and re-copying an unchanged file could never be confirmed
     at all, since the extracted file takes the source's own mtime. The
     confirmation now asks whether the destination matches what was uploaded.
     This matters most for `watch`, which fires on every write to a watched path.
@@ -540,7 +540,7 @@ podup (3.6.0) unstable; urgency=medium
   Added
 
   * `ps -s/--size` adds a SIZE column: what the container has written on top of
-    its image, then the image's own size — `143kB (virtual 225MB)`, the same
+    its image, then the image's own size: `143kB (virtual 225MB)`, the same
     shape `podman ps -s` prints. Opt-in because the runtime walks each
     container's writable layer to answer it.
   * `volumes -s/--size` adds SIZE and RECLAIMABLE. A volume a container still
@@ -587,7 +587,7 @@ podup (3.5.0) unstable; urgency=medium
   Changed
 
   * Sizes and durations now come from one formatter that is total over its input
-    type. `stats` used to saturate at TiB, rendering a petabyte as `1024.0TiB` —
+    type. `stats` used to saturate at TiB, rendering a petabyte as `1024.0TiB`:
     right arithmetic, wrong unit. Its own output is otherwise unchanged.
   * Durations read as up to three components whose units follow the magnitude:
     `5s`, `1h 5m 3s`, `1y 1mo 5d`. A year is 365 days and a month is 30.
@@ -611,8 +611,8 @@ podup (3.4.1) unstable; urgency=medium
   Fixed
 
   * `podup top` no longer aborts when a service has already stopped. A project
-    where anything has run to completion — a `migrate` that exits once is the
-    everyday shape — used to lose the services `top` had not reached yet and
+    where anything has run to completion (a `migrate` that exits once is the
+    everyday shape) used to lose the services `top` had not reached yet and
     exit non-zero. It now skips the stopped container and carries on, matching
     `docker compose top`, which was measured against the same Podman socket.
 
@@ -639,12 +639,12 @@ podup (3.4.0) unstable; urgency=medium
   The library API is unchanged; every item here is command-line output.
 
   * `podup build` writes its output to **stderr**, not stdout. `podup build >
-    build.log` now captures nothing — redirect stderr instead (`2> build.log`,
+    build.log` now captures nothing; redirect stderr instead (`2> build.log`,
     or `> build.log 2>&1`). stdout was documented as a clean pipe and `build`
     was the one command contradicting it.
 
-  * `podup wait` prints one line per container — its name and exit code in
-    aligned columns — instead of a bare exit code per service. Use the new
+  * `podup wait` prints one line per container, its name and exit code in
+    aligned columns, instead of a bare exit code per service. Use the new
     `--format json` for a stable machine-readable form.
 
   * `podup --version` prints `podup version v3.4.0`, matching `podup version`,
@@ -660,7 +660,7 @@ podup (3.4.0) unstable; urgency=medium
 
   * Each service now gets its own identity colour. The palette holds twenty
     colours instead of six and is assigned in sorted order rather than hashed,
-    so two services in a project no longer share a colour — measured on a
+    so two services in a project no longer share a colour: measured on a
     four-service project, two of them did. Every colour reads on a light
     terminal and a dark one alike, and sits away from the red, green and yellow
     that carry status meaning.
@@ -673,8 +673,8 @@ podup (3.4.0) unstable; urgency=medium
     the healthy colour everywhere else in podup and cyan is an identity colour,
     so the two most-read surfaces were competing for one vocabulary.
 
-  * `wait` prints one line per container — its name and exit code, in aligned
-    columns — instead of a bare exit code per service. A scaled service now
+  * `wait` prints one line per container, its name and exit code, in aligned
+    columns, instead of a bare exit code per service. A scaled service now
     reports each replica separately, which is the granularity docker compose
     reports at. New `--format json` emits one NDJSON object per container as
     that container exits.
@@ -700,7 +700,7 @@ podup (3.4.0) unstable; urgency=medium
     scrolling up and staying. In a pipe, a file, CI, under `NO_COLOR` or with
     `--ansi never`, the same events come out as plain append-only lines and no
     escape sequences. Both carry the intermediate transitions (`Creating` then
-    `Created`), which no renderer emitted before — so a log now says more than
+    `Created`), which no renderer emitted before, so a log now says more than
     it used to, never less.
 
   * `pull` reports through the progress layer and emits a matching `Pulled`. It
@@ -727,12 +727,12 @@ podup (3.4.0) unstable; urgency=medium
 
   * Ctrl-C out of a command drawing a live region left the cursor hidden. The
     restore ran from `Drop`, which covers a command that returns and nothing
-    else — Rust terminates on SIGINT without unwinding. `stats` is where it bit
+    else: Rust terminates on SIGINT without unwinding. `stats` is where it bit
     hardest, since Ctrl-C is the normal way to leave it.
 
   * `down` reported removing networks and volumes that never existed. On a
     project name that had never been created it announced three removals,
-    including a data volume — naming data the operator is told is gone.
+    including a data volume, naming data the operator is told is gone.
 
   * `podup --version` printed `podup 3.3.0` while `podup version` printed
     `podup version v3.4.0`, so a script probing the binary got a different
@@ -741,7 +741,7 @@ podup (3.4.0) unstable; urgency=medium
   * `autostart status` coloured `enabled: not-found` red while `installed: no`
     was dim, though both report the same uninstalled unit and neither is a
     failure. A unit that is on disk while systemd cannot find it still reports
-    red — that one is a broken install.
+    red; that one is a broken install.
 
   * `events` painted an event's actor name without escaping it. Names come from
     outside podup, so an escape sequence in one repainted the reader's terminal
@@ -804,7 +804,7 @@ podup (3.2.1) unstable; urgency=medium
 
   * A severed stream is now named `body-unexpected-eof` in podup's diagnostics
     instead of the catch-all `hyper-other`. `IncompleteMessage`, the predicate
-    that sounds like it covers this, is about the message head — a body cut
+    that sounds like it covers this, is about the message head: a body cut
     off mid-flight matched none of hyper's own predicates and fell through to
     the least informative label there is. Measured against a socket that
     severs a chunked body on purpose: both places a cut can land arrive as a
@@ -853,7 +853,7 @@ podup (3.1.0) unstable; urgency=medium
     host file's own permission bits, so 0644 stays 0644 and 0600 stays
     unreadable to a non-root container user. Note the trade: the payload
     is a copy taken at `up`, so editing the host file afterwards no longer
-    reaches an already-running container — recreate it to pick up a new
+    reaches an already-running container; recreate it to pick up a new
     value. An atomic replace never did reach one, since a file bind pins
     the inode.
 
@@ -972,7 +972,7 @@ podup (2.1.0) unstable; urgency=medium
     README and in the autostart guide.
   * `podup` with no subcommand printed a list of forty-five subcommand names
     instead of its help whenever COMPOSE_PROJECT_NAME, PODMAN_SOCKET or
-    COMPOSE_PROFILES was set — the normal state of a deployment. Both cases
+    COMPOSE_PROFILES was set, the normal state of a deployment. Both cases
     print the help now.
   * That help is also coloured, like every other screen. It was the only one
     that was not.
@@ -1013,7 +1013,7 @@ podup (2.0.0) unstable; urgency=medium
     success. The project is still torn down before the code is returned.
   * `--sig-proxy` accepts docker's bare form. It required a value, so
     `docker compose attach --sig-proxy web` failed with a usage error against
-    podup — inside the set of flags whose purpose is that such a script runs
+    podup, inside the set of flags whose purpose is that such a script runs
     unchanged.
   * autostart service mode bounds ExecStop above the project's longest
     stop_grace_period. systemd's own 90s default was cutting a slower stack off
@@ -1043,7 +1043,7 @@ podup (2.0.0) unstable; urgency=medium
   * Output carries colour consistently: one stable colour per container across
     ps, logs, stats, top, events and the up/down progress lines; status words
     tinted by meaning; CPU and memory banded by threshold. Two colours that
-    said the opposite of the truth are fixed — a half-running project rendered
+    said the opposite of the truth are fixed: a half-running project rendered
     entirely red, and a container that finished cleanly rendered as a failure.
     Machine output (--json, --quiet, config, port, wait) stays plain, and
     colour is off automatically when stdout is not a terminal.

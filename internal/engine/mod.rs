@@ -124,7 +124,7 @@ pub struct Engine {
 	///
 	/// Only ever a record of what this engine saw itself, this run: it is not
 	/// persisted and not shared between engines. Two engines against different
-	/// sockets must not pool observations — a process-wide cache would let one
+	/// sockets must not pool observations: a process-wide cache would let one
 	/// skip a pull for an image that only exists on the other's host, which
 	/// matters because podup is consumed as a library and a caller may hold more
 	/// than one engine.
@@ -133,7 +133,7 @@ pub struct Engine {
 	/// warnings the engine emits during `up`/`create`/`run`/`exec`. The
 	/// operator wrote the compose file deliberately, so the default-warning
 	/// behaviour is opt-out per run rather than per command. `config`'s
-	/// surface-mode listing is unaffected — `config` is the "show me what will
+	/// surface-mode listing is unaffected; `config` is the "show me what will
 	/// happen" command, where the warnings stay visible there.
 	pub(super) no_warn: bool,
 	/// The pre-URL-encoded libpod `filters` JSON object that scopes a
@@ -151,7 +151,7 @@ impl Engine {
 	/// If the working directory cannot be resolved (the process's CWD was
 	/// deleted or is unreadable at construction time), the engine falls back
 	/// to an empty `base_dir` and a warning is logged. Callers that need a
-	/// definite base directory — the CLI does — should use
+	/// definite base directory (the CLI does) should use
 	/// [`Engine::with_base_dir`] instead, which surfaces a missing or
 	/// unreadable directory as a hard error rather than a silent empty
 	/// path that later surfaces as a confusing "compose file not found".
@@ -189,7 +189,7 @@ impl Engine {
 		}
 	}
 
-	/// Create an engine with an explicit base directory — use when the compose file is not in the working directory.
+	/// Create an engine with an explicit base directory, for when the compose file is not in the working directory.
 	pub fn with_base_dir(client: Client, project: String, base_dir: PathBuf) -> Self {
 		Self {
 			client,
@@ -543,7 +543,7 @@ impl Engine {
 		let live_by_service = self.live_project_replicas_sorted().await?;
 		let names = match live_by_service.get(service_name) {
 			Some(names) if !names.is_empty() => names.clone(),
-			// Service has no live container yet — fall back to the static
+			// Service has no live container yet, so fall back to the static
 			// compose names so a never-created service still has an
 			// addressable replica.
 			_ => self.replica_names(service_name, service),
@@ -568,7 +568,7 @@ impl Engine {
 /// Serialise `v` to a compact JSON string for embedding into a libpod query
 /// parameter or NDJSON row.
 ///
-/// Six sites flow through this — five in [`build`](super::build) (`cachefrom`,
+/// Six sites flow through this: five in [`build`](super::build) (`cachefrom`,
 /// `buildargs`, `labels`, `secrets`, `cacheto`) and one in
 /// [`events`](super::events) (the `--format json` event row). Each of them
 /// used to call `serde_json::to_string(...).unwrap_or_default()`, which
@@ -596,8 +596,8 @@ pub(super) fn to_query_json<T: serde::Serialize>(what: &str, v: &T) -> Result<St
 /// printed the empty string and exited 0, so a script consuming
 /// `podup <cmd> --format json` received an empty document indistinguishable
 /// from "no results" (#1444). Unlike the NDJSON path in
-/// [`to_query_json`](self)/[`events`](super::events) — where one row can be
-/// dropped and the stream continue — `--format json` is the *whole* output,
+/// [`to_query_json`](self)/[`events`](super::events), where one row can be
+/// dropped and the stream continue, `--format json` is the *whole* output,
 /// so a failure must propagate as an error and exit non-zero.
 ///
 /// `what` names the offending field in the error so the operator sees which
@@ -626,7 +626,7 @@ pub(crate) fn write_frame<W: std::io::Write>(out: &mut W, bytes: &[u8]) -> std::
 ///
 /// The `config` command uses this to surface the active modes at the default
 /// log level (CI logs see them even when the operator never runs `up`). It is
-/// deliberately not gated on `--no-warn` — `config` is the "show me what will
+/// deliberately not gated on `--no-warn`; `config` is the "show me what will
 /// happen" command, where the warning is the whole point. The live
 /// `up`/`create`/`run`/`exec` paths emit the same warnings per-call but honour
 /// `--no-warn`.
