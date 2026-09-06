@@ -162,7 +162,7 @@ fn audit_secret_in_environment_flags_literal_secret_keys() {
 			findings.iter().any(|f| f.check == "secret_in_environment"),
 			"environment: {key}=literal must fire secret_in_environment; got {findings:#?}"
 		);
-		// The reason must name the key without echoing the value back ,
+		// The reason must name the key without echoing the value back:
 		// the literal value would defeat the whole point of the audit.
 		let f = findings
 			.iter()
