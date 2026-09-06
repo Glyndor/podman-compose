@@ -1,7 +1,7 @@
 //! Tar packing and extraction for `cp`.
 //!
 //! The pure, container-free half of `cp`: it moves bytes between the host
-//! filesystem and a tar stream and carries the security hardening — the
+//! filesystem and a tar stream and carries the security hardening: the
 //! zip-slip guard, the extracted-mode sanitization and the docker/podman
 //! destination semantics. Kept synchronous so the guards can be unit-tested
 //! without a container.
@@ -51,7 +51,7 @@ pub(super) fn pack_path(
 /// - `dst` is an existing directory: the archive is extracted into it (a source
 ///   directory lands under its own name).
 /// - `dst` does not exist and the source is a single regular file: its
-///   **content** is written to exactly `dst` — the daemon-supplied entry name is
+///   **content** is written to exactly `dst`; the daemon-supplied entry name is
 ///   ignored, so a hostile image cannot choose the on-host filename (e.g. drop a
 ///   `.bashrc`/`authorized_keys` into the destination directory).
 /// - `dst` does not exist and the source is a directory: `dst` is created and the
@@ -111,7 +111,7 @@ pub(super) fn extract_archive(tar_bytes: &[u8], dst: &Path) -> Result<()> {
 
 /// True when the destination path was written with a trailing path separator
 /// (e.g. `./newdir/`), which `docker cp` treats as an explicit *directory*
-/// destination — it must already exist.
+/// destination; it must already exist.
 fn has_trailing_separator(p: &Path) -> bool {
 	p.as_os_str()
 		.to_string_lossy()
@@ -120,7 +120,7 @@ fn has_trailing_separator(p: &Path) -> bool {
 		.is_some_and(std::path::is_separator)
 }
 
-/// True if any entry in `tar_bytes` is a directory — the signal that the source
+/// True if any entry in `tar_bytes` is a directory, the signal that the source
 /// of a container→host copy was a directory (libpod tars it under its basename),
 /// as opposed to a single file.
 fn archive_contains_dir(tar_bytes: &[u8]) -> Result<bool> {
@@ -164,12 +164,12 @@ fn flatten_single_wrapper_dir(dst: &Path) -> Result<()> {
 /// Extract a (plain, uncompressed) tar archive into `dst_dir`, refusing any
 /// Rebuild the on-disk path `unpack_in` chose for an entry.
 ///
-/// `unpack_in` keeps only [`Component::Normal`] parts — a leading `/` or a `..`
-/// is dropped rather than honoured — so an entry named `/etc/passwd` lands at
+/// `unpack_in` keeps only [`Component::Normal`] parts (a leading `/` or a `..`
+/// is dropped rather than honoured) so an entry named `/etc/passwd` lands at
 /// `dst_dir/etc/passwd`. Reconstructing that path as `dst_dir.join(rel)` is
 /// wrong in exactly that case: [`Path::join`] with an absolute path **discards
 /// the base**, so the follow-up chmod would leave the destination and land on
-/// the real host file — a hostile image could hand back an entry named
+/// the real host file: a hostile image could hand back an entry named
 /// `/home/user/.ssh/id_ed25519` with mode 0o644 and have the copy loosen it.
 /// Mirroring `unpack_in`'s own rule keeps the two in agreement.
 ///
@@ -220,10 +220,10 @@ pub fn extract_tar_guarded<R: std::io::Read>(src: R, dst_dir: &Path) -> Result<(
 			(Some(rel), Some(mode)) => match unpacked_path(dst_dir, &rel) {
 				Some(path) => sanitize_extracted_mode(&path, mode),
 				None => {
-					tracing::warn!("cp: entry with no usable path component — mode not sanitized")
+					tracing::warn!("cp: entry with no usable path component; mode not sanitized")
 				}
 			},
-			_ => tracing::warn!("cp: unreadable entry path or mode — mode not sanitized"),
+			_ => tracing::warn!("cp: unreadable entry path or mode; mode not sanitized"),
 		}
 	}
 	Ok(())

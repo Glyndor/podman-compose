@@ -11,7 +11,7 @@
 //!     dns:   !reset []               # drop the base's dns entirely
 //! ```
 //!
-//! podup accepted both and then **ignored them silently** — `!override` still
+//! podup accepted both and then **ignored them silently**: `!override` still
 //! appended and `!reset` still kept the base. Silently doing the opposite of
 //! what a key asks for is worse than refusing it, and the tags exist precisely
 //! for the cases where the default merge is wrong.
@@ -28,10 +28,10 @@ use serde_yaml::Value;
 /// What a tag asks the merge to do with one key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MergeTag {
-	/// `!override` — take the overriding file's value whole, skipping the
+	/// `!override`: take the overriding file's value whole, skipping the
 	/// combine rule that would otherwise apply.
 	Override,
-	/// `!reset` — drop the key entirely, leaving the type's default.
+	/// `!reset`: drop the key entirely, leaving the type's default.
 	Reset,
 }
 
@@ -40,7 +40,7 @@ pub(crate) type Directives = HashMap<String, HashMap<String, MergeTag>>;
 
 /// Collect the merge tags in a raw compose document.
 ///
-/// Reads the document only for its structure, so interpolation is irrelevant —
+/// Reads the document only for its structure, so interpolation is irrelevant:
 /// a tag is attached to a key, never to a value's contents.
 ///
 /// An unrecognized tag is ignored rather than rejected: the compose spec lets a
@@ -80,7 +80,7 @@ pub(crate) fn collect(raw: &Value) -> Directives {
 /// This has to run before the document is deserialized into typed structs.
 /// Whether a tag is tolerated otherwise depends entirely on the field's Rust
 /// type: `ports` is a `Vec`, which quietly ignores it, but `dns` is an untagged
-/// enum, and serde refuses those outright — so `dns: !reset []` failed the whole
+/// enum, and serde refuses those outright, so `dns: !reset []` failed the whole
 /// file with "failed to parse compose file" while `ports: !reset []` parsed and
 /// did nothing. Two different wrong behaviours for the same tag, decided by an
 /// implementation detail the user cannot see.

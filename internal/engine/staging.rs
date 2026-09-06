@@ -2,8 +2,8 @@
 //!
 //! [`staging_base`] returns a directory that must never be usable by another
 //! local user. On unix it is created 0700 under `$XDG_RUNTIME_DIR` (fallback:
-//! `temp_dir()/podup-<euid>`) and verified — real directory, owned by the
-//! current user, no group/other bits — failing closed on anything else. On
+//! `temp_dir()/podup-<euid>`) and verified (real directory, owned by the
+//! current user, no group/other bits) failing closed on anything else. On
 //! Windows the base lives under the per-user temp directory, whose default
 //! ACLs already restrict access to the owning user; only the non-symlink
 //! directory check applies. [`reject_dangerous_secret_mode`] guards a compose
@@ -23,7 +23,7 @@ use std::path::Path;
 /// name prefix. Matches docker-compose's project-name rule `^[a-z0-9][a-z0-9_-]*$`:
 /// non-empty, bounded, lowercase ASCII letters/digits/`-`/`_` only, and a first
 /// character that is a letter or digit. This rejects a leading separator
-/// (`-rf`, `--all`, `_x` — a latent flag-injection vector for forwarding paths),
+/// (`-rf`, `--all`, `_x`, a latent flag-injection vector for forwarding paths),
 /// uppercase, dots (`.`, `..`, hidden directories, `bad.` trailing-dot names),
 /// and all-separator names.
 pub fn is_safe_project_name(name: &str) -> bool {
@@ -45,7 +45,7 @@ pub fn is_safe_project_name(name: &str) -> bool {
 /// parent in the fallback case, so after creation it is verified to be a
 /// real directory (not a symlink), owned by the current user, with no
 /// group/other permission bits. Anything else aborts (fail closed) instead
-/// of writing secret material under — or later deleting — a path another
+/// of writing secret material under, or later deleting, a path another
 /// local user may control.
 #[cfg(unix)]
 pub(super) fn staging_base() -> Result<PathBuf> {
@@ -72,7 +72,7 @@ pub(super) fn staging_base() -> Result<PathBuf> {
 ///
 /// Unlike `/tmp` on unix, the Windows temp directory resolves under the
 /// user profile and its default ACLs grant access to the owning user only,
-/// so no ownership or permission-bit verification applies — just the
+/// so no ownership or permission-bit verification applies, just the
 /// non-symlink directory check.
 #[cfg(windows)]
 pub(super) fn staging_base() -> Result<PathBuf> {
@@ -82,7 +82,7 @@ pub(super) fn staging_base() -> Result<PathBuf> {
 	if !meta.is_dir() || meta.file_type().is_symlink() {
 		return Err(ComposeError::Unsupported(format!(
 			"staging directory {} is not a private directory owned by the \
-             current user — refusing to use it",
+             current user; refusing to use it",
 			base.display()
 		)));
 	}
@@ -118,7 +118,7 @@ pub(super) fn reject_dangerous_secret_mode(mode: u32, ctx: &str) -> Result<()> {
 ///
 /// `DirBuilder` does not reset permissions on a pre-existing directory, so
 /// a leftover directory we own whose bits drifted is self-healed with a
-/// chmod first — only if it is a real directory (never chmod through a
+/// chmod first, and only if it is a real directory (never chmod through a
 /// symlink; in the worst race the chmod tightens something we own to 0700).
 /// `verify_private_dir` then rejects anything not ours (fail closed).
 #[cfg(unix)]
@@ -149,7 +149,7 @@ fn verify_private_dir(dir: &Path, euid: u32) -> Result<()> {
 	if !meta.is_dir() || meta.uid() != euid || meta.mode() & 0o077 != 0 {
 		return Err(ComposeError::Unsupported(format!(
 			"staging directory {} is not a private directory owned by the \
-             current user — refusing to use it",
+             current user; refusing to use it",
 			dir.display()
 		)));
 	}

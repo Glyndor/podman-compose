@@ -12,7 +12,7 @@ use std::time::Duration;
 /// The two do not divide evenly, and that is visible: 364 days reads `12mo 4d`
 /// while 365 reads `1y`. Twelve thirty-day months are 360 days, not a year. The
 /// alternative is a fractional month (365/12 = 30.4167 days), which no reader
-/// can check by hand — the seam is preferred over the arithmetic nobody can
+/// can check by hand: the seam is preferred over the arithmetic nobody can
 /// verify.
 ///
 /// No week. Unlike a month it has no conventional length in a duration context
@@ -45,7 +45,7 @@ pub(crate) enum DurationFormat {
 	///
 	/// The component count is fixed; which units fill it is not. A span that
 	/// just started shows `5s`, one running an hour shows `1h 5m 3s`, and one
-	/// past a year shows `1y 2mo 3d` — the window slides up the ladder as the
+	/// past a year shows `1y 2mo 3d`: the window slides up the ladder as the
 	/// span grows, so the same width always carries the three units that matter
 	/// at that magnitude.
 	Parts(usize),
@@ -53,7 +53,7 @@ pub(crate) enum DurationFormat {
 	/// For machine reading, or when the reader wants to compare two durations
 	/// rather than skim one.
 	///
-	/// No caller yet — the benchmark aggregation is where it lands, and that is
+	/// No caller yet: the benchmark aggregation is where it lands, and that is
 	/// Python today (`bench/aggregate.py`). Exercised by this module's tests
 	/// meanwhile; the allow is on this variant alone so anything else going dead
 	/// here still warns.

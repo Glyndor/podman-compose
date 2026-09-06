@@ -28,7 +28,7 @@ impl Serialize for AlwaysFails {
 /// The happy path: a `Vec<serde_json::Value>` of the same shape the five
 /// `--format json` call sites serialise round-trips through `to_pretty_json`
 /// unchanged. Parse-and-compare rather than pinning the literal pretty
-/// format — the round-trip is what matters and is portable across minor
+/// format; the round-trip is what matters and is portable across minor
 /// formatting tweaks.
 #[test]
 fn to_pretty_json_serialises_vec_of_json_values() {

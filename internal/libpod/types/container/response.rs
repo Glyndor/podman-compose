@@ -80,7 +80,7 @@ pub struct ContainerListEntry {
 	/// When the container was created, as an RFC 3339 string.
 	///
 	/// Not the docker-compatible `CreatedAt`, which libpod also sends and leaves
-	/// **empty** — measured on Podman 5.7.0. Reading the familiar name gets a
+	/// **empty**, measured on Podman 5.7.0. Reading the familiar name gets a
 	/// blank column, the same trap as `Status` versus `State` above.
 	#[serde(rename = "Created", default)]
 	pub created: String,
@@ -101,7 +101,7 @@ pub struct ContainerSize {
 	#[serde(rename = "rwSize", default)]
 	pub rw: u64,
 	/// The image's own size. This is what `podman ps -s` prints as `virtual`,
-	/// and it is **not** the sum of the two — verified against three containers
+	/// and it is **not** the sum of the two, verified against three containers
 	/// whose two readings differ at three significant digits.
 	#[serde(rename = "rootFsSize", default)]
 	pub root_fs: u64,

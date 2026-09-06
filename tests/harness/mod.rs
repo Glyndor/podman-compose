@@ -20,7 +20,7 @@ pub fn bin() -> &'static str {
 ///
 /// This is the integration suite's guard, not a `podman info` probe. The CI
 /// runner ships a podman binary that is *below podup's floor* with no socket
-/// running, so `podman info` succeeds while every command here fails — the
+/// running, so `podman info` succeeds while every command here fails; the
 /// weaker check let these run in the main CI job and fail for the environment
 /// rather than the code.
 pub async fn podman_up() -> bool {

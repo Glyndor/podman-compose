@@ -75,7 +75,7 @@ fn help_and_version_are_blank_line_framed() {
 }
 
 /// `-t/--timeout` (shutdown grace) is accepted by every command that stops
-/// containers — up, down, stop, restart — matching docker compose.
+/// containers (up, down, stop, restart) matching docker compose.
 #[test]
 fn timeout_flag_is_accepted_by_stop_commands() {
 	for cmd in ["up", "down", "stop", "restart"] {
@@ -180,7 +180,7 @@ fn run_no_rm_parses_and_is_documented() {
 /// docker-compose is inconsistent with itself here: `docker compose run` spells
 /// the long form `--no-TTY` while `docker compose exec` spells it `--no-tty`.
 /// A script copied from either command has to work, so podup accepts both on
-/// both — a superset of docker rather than a guess at which one is canonical.
+/// both: a superset of docker rather than a guess at which one is canonical.
 #[test]
 fn no_tty_accepts_both_spellings_on_run_and_exec() {
 	for cmd in ["run", "exec"] {

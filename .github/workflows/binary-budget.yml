@@ -1,8 +1,8 @@
 # A ceiling on the shipped binary, so an unexplained jump is a red run rather
 # than something noticed in a table months later.
 #
-# The releases standard asks for exactly this — "keep a size budget per artifact;
-# treat a large unexplained growth as a regression to investigate, not ship" —
+# The releases standard asks for exactly this: "keep a size budget per artifact;
+# treat a large unexplained growth as a regression to investigate, not ship",
 # and #1296 gave peak memory one. The binary had none: it went from 7,228,256
 # bytes at v3.3.0 to 7,347,248 on develop with nothing watching.
 #

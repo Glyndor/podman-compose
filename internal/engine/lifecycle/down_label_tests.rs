@@ -29,7 +29,7 @@ fn volume_owned_by_matches_project_label() {
 
 /// #598 (unfixed on this path until now): `down -p PROJECT` with no compose
 /// file only ever warned on a removal failure and unconditionally returned
-/// `Ok`. Two labelled containers, one whose force-remove genuinely fails —
+/// `Ok`. Two labelled containers, one whose force-remove genuinely fails:
 /// `down_by_label` must still attempt (and complete) the other before
 /// exiting non-zero for the first.
 #[tokio::test]
@@ -74,7 +74,7 @@ async fn down_by_label_propagates_a_real_removal_failure_after_completing_the_re
 }
 
 /// A `down -p PROJECT` on an already torn-down project (no live containers,
-/// nothing left to sweep by label) must still exit 0 — idempotency is
+/// nothing left to sweep by label) must still exit 0; idempotency is
 /// preserved on the label-only path exactly as on `Engine::down`.
 #[tokio::test]
 #[cfg(unix)]

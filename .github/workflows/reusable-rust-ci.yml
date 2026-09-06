@@ -9,7 +9,7 @@ on:
         default: "."
       # Pinned, not `stable`: an unpinned toolchain moves on its own the day
       # upstream ships a release, and every consumer's pull requests go red at
-      # once for a change nobody made. That is not hypothetical — Rust 1.97.0
+      # once for a change nobody made. That is not hypothetical: Rust 1.97.0
       # landed on 2026-07-07, widened a clippy lint, and reddened every open PR
       # in podup until the lint was fixed. Bump this pin deliberately, in a
       # pull request of its own, so the lints it gains are read and fixed on
@@ -156,7 +156,7 @@ jobs:
     defaults:
       run:
         # This is the only job that can land on a Windows runner, where the
-        # default shell is PowerShell — and there `$VAR` reads a PowerShell
+        # default shell is PowerShell, and there `$VAR` reads a PowerShell
         # variable, not the environment, so every `env:` value silently becomes
         # an empty string. Pin the shell so steps behave the same on all three
         # OSes, as release.yml's cross-OS matrix already does.

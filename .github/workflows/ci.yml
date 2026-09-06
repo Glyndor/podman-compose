@@ -20,8 +20,8 @@ jobs:
       # gate `rust / Extra platforms` instead, which names no platform. #1552.
       extra-test-os: "[\"macos-latest\", \"windows-latest\"]"
       # Measured against the WHOLE crate, deliberately. The gate used to read 90%
-      # while a `coverage-ignore-regex` hid 36% of the code — 14,432 of 39,681
-      # regions — so it protected 58% of podup at 90% and said nothing about the
+      # while a `coverage-ignore-regex` hid 36% of the code (14,432 of 39,681
+      # regions) so it protected 58% of podup at 90% and said nothing about the
       # rest. The exclusion was justified when those modules ran under a live
       # Podman in this job; `a5cd4b4` removed that in June 2026 and the
       # justification expired with it. Since then the only thing exercising them
@@ -30,7 +30,7 @@ jobs:
       #
       # 79 is lower than 90 and stricter than it was: 100% of the crate at 79
       # leaves nothing invisible, where 90 of 63% left a third of podup
-      # unmeasured. It is a ratchet, not a target — raise it when real coverage
+      # unmeasured. It is a ratchet, not a target: raise it when real coverage
       # rises, never lower it to make a red build green.
       #
       # It is deliberately NOT the measured 78.96%: a floor set exactly at
@@ -39,8 +39,8 @@ jobs:
       # 79, not the org standard's 90, and not because podup is short of it.
       #
       # Measured 2026-08-03: the full suite covers **91.52%** of lines. This job
-      # cannot run it — the integration tests need a live Podman and skip
-      # themselves on a runner without one — so what it measures is `--lib
+      # cannot run it (the integration tests need a live Podman and skip
+      # themselves on a runner without one) so what it measures is `--lib
       # --bins` alone, which is **79.39%**. The two numbers describe different
       # things and only one of them is checkable here.
       #
@@ -49,8 +49,8 @@ jobs:
       # locks in what holds today rather than demanding new work, which is what
       # the testing standard asks for when adopting a floor.
       #
-      # The 90 gate belongs where the tests can actually run — the `podman-vm`
-      # lane — and that is tracked separately rather than papered over here.
+      # The 90 gate belongs where the tests can actually run, in the `podman-vm`
+      # lane, and that is tracked separately rather than papered over here.
       # 72 is lower than 79 and the gate got stricter, not looser. Measured
       # 2026-09-02 with the CI command (cargo llvm-cov --workspace
       # --all-features, no Podman reachable) on the same commit before and

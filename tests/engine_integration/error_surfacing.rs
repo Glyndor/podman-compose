@@ -6,7 +6,7 @@
 //!
 //! `pid: "evil"` is pre-validated by podup (libpod's `ParseNamespace` is the
 //! matching upstream check), so the error is a structured `PodmanError::Field`
-//! naming `service.<name>: pid: ... (value: evil)` — no libpod call, no flake.
+//! naming `service.<name>: pid: ... (value: evil)`, with no libpod call and no flake.
 //! The other fields are accepted by libpod verbatim and surface from the OCI
 //! runtime, the cgroup manager, or the OCI hook path; what we assert there is
 //! that the libpod message is preserved in the surfaced error (not replaced by
@@ -116,7 +116,7 @@ async fn bogus_capability_surfaces_a_field_named_error() {
 	// wire message varies by Podman/OCI version, so we only assert the
 	// surfaced error is a non-zero exit and that the libpod detail
 	// (the offending capability name) reaches stderr. Pre-validation
-	// intentionally does not cover this — podup does not duplicate the
+	// intentionally does not cover this; podup does not duplicate the
 	// OCI runtime's capability allow-list (#1357).
 	if podman().await.is_none() {
 		return;

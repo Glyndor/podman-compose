@@ -1,4 +1,4 @@
-//! Tests for `build_log_config` — the bridge between compose `logging:` and
+//! Tests for `build_log_config`, the bridge between compose `logging:` and
 //! libpod's `LogConfig`. Split from `mod.rs` so the production file stays under
 //! the 500-line cap and each surface (struct vs wire JSON vs malformed input
 //! vs `max-file` drop) gets its own focused case (#1417).
@@ -17,7 +17,7 @@ fn log_config_applies_the_default_when_absent() {
 		.expect("absent -> default, not None");
 	assert_eq!(cfg.driver.as_deref(), Some("k8s-file"));
 	assert_eq!(cfg.size, Some(10 * 1024 * 1024));
-	// `max-size`/`max-file` no longer travel inside options — libpod would
+	// `max-size`/`max-file` no longer travel inside options; libpod would
 	// ignore them there, leaving the container with -1B.
 	assert!(!cfg.options.contains_key("max-size"));
 	assert!(!cfg.options.contains_key("max-file"));
@@ -60,7 +60,7 @@ fn log_config_with_max_size_parses_into_typed_field() {
 	};
 	let cfg = build_log_config("web", Some(&logging)).unwrap().unwrap();
 	assert_eq!(cfg.size, Some(10 * 1024 * 1024));
-	// And on the wire — what libpod actually parses — the key is `size`
+	// And on the wire, what libpod actually parses, the key is `size`
 	// and the value is a number, not the suffixed string under options.
 	let v = serde_json::to_value(&cfg).unwrap();
 	assert_eq!(v["size"], 10 * 1024 * 1024);

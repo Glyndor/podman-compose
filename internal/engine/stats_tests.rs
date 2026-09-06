@@ -1,4 +1,4 @@
-//! Unit tests for `stats` — split out to keep the module inside the source line
+//! Unit tests for `stats`, split out to keep the module inside the source line
 //! limit, following the same `tests.rs` split used by `autostart` and the libpod
 //! client.
 
@@ -33,7 +33,7 @@ fn format_bytes_scales_units() {
 }
 
 /// The edges the scaling test steps over. It goes from 512 straight to 1024, so
-/// the last value that must stay in bytes — and the empty case — were never
+/// the last value that must stay in bytes, and the empty case, were never
 /// pinned, and a threshold with no test on either side of it is where an
 /// off-by-one lives.
 #[test]
@@ -204,7 +204,7 @@ fn stat_tolerates_missing_network() {
 
 #[test]
 fn containers_query_repeats_param_per_container() {
-	// libpod wants `containers` repeated, not comma-joined — a comma-joined
+	// libpod wants `containers` repeated, not comma-joined: a comma-joined
 	// list is read as a single container name and 404s.
 	let mut wanted = HashSet::new();
 	wanted.insert("proj-web-1".to_string());
@@ -229,7 +229,7 @@ fn stats_stream_break_is_fatal_only_while_a_sampled_container_still_runs() {
 	let sampled = name_set(&["proj-web-1", "proj-db-1"]);
 
 	// A sampled container is still running: the stream truncated a live sample,
-	// so the error is a real failure (#1080) — the exit code a monitor needs.
+	// so the error is a real failure (#1080), the exit code a monitor needs.
 	assert!(stats_stream_broke_mid_sample(
 		&sampled,
 		&name_set(&["proj-web-1"])

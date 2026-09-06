@@ -77,7 +77,7 @@ Architecture: any
 #   /etc/apt/apt.conf.d/51glyndor-unattended-upgrades  the Allowed-Origins entry
 #
 # Without it the daemon runs, the logs look healthy, and podup is never upgraded
-# — which is the exact outcome the unattended-upgrades dependency was added to
+# which is the exact outcome the unattended-upgrades dependency was added to
 # prevent. Two install paths reached that state: `dpkg -i` of the .deb from a
 # GitHub release, and adding the repository by hand rather than through the
 # bootstrap installer. #1602.
@@ -88,15 +88,15 @@ Architecture: any
 # `dpkg -i` with no repository at all fails on the unmet dependency, which is
 # the intended answer rather than a gap.
 #
-# A fork publishing its own archive — which install-template.sh supports through
-# KEYRING_URL and GLYNDOR_APT_FPR — must declare `Provides: glyndor-archive-keyring`
+# A fork publishing its own archive (which install-template.sh supports through
+# KEYRING_URL and GLYNDOR_APT_FPR) must declare `Provides: glyndor-archive-keyring`
 # on its own keyring package, or this relationship cannot be satisfied by it.
 Depends: ${shlibs:Depends}, ${misc:Depends}, podman (>= 5.0), unattended-upgrades, glyndor-archive-keyring
 Description: docker-compose translator and runner for rootless Podman
  podup parses docker-compose.yml files and drives rootless Podman to
  create the equivalent containers, networks and volumes. It provides
- the full Compose workflow — lifecycle, build/push, exec/run, inspection
- and Quadlet generation — as a single static binary with no daemon and
+ the full Compose workflow (lifecycle, build/push, exec/run, inspection
+ and Quadlet generation) as a single static binary with no daemon and
  no Python runtime. Run `podup --help` for the complete command list.
  .
  It supports compose-spec parsing including YAML anchors, extends,

@@ -2,8 +2,8 @@
 //!
 //! #1078 landed the merge rules and was closed while three of its cases stayed
 //! unverified: same-target `volumes` dedup, `!override` and `!reset`. All three
-//! turn out to be implemented — measured here against docker compose v5.1.3 on
-//! the same inputs — but nothing pinned them, so a regression would have been
+//! turn out to be implemented, measured here against docker compose v5.1.3 on
+//! the same inputs, but nothing pinned them, so a regression would have been
 //! silent. That is what these are for.
 //!
 //! They drive the CLI because multi-`-f` merging and project-directory anchoring
@@ -75,7 +75,7 @@ fn same_target_volume_is_replaced_not_duplicated() {
 #[test]
 fn volumes_on_different_targets_are_both_kept() {
 	// The other half of the same rule, and the one that tells a real merge from a
-	// wholesale replacement of the list — which would pass the test above too.
+	// wholesale replacement of the list, which would pass the test above too.
 	let dir = tempdir().unwrap();
 	write(
 		dir.path(),
@@ -153,8 +153,8 @@ async fn relative_paths_anchor_to_the_first_file_not_each_file() {
 	if super::podman().await.is_none() {
 		return;
 	}
-	// The compose spec anchors a relative path to the *project* directory — the
-	// first `-f`'s directory — not to the file the key was written in. Both
+	// The compose spec anchors a relative path to the *project* directory, the
+	// first `-f`'s directory, not to the file the key was written in. Both
 	// directories hold a `shared.env`, so reading the wrong one is visible rather
 	// than merely absent, and docker compose v5.1.3 resolves this pair to the
 	// root's file.

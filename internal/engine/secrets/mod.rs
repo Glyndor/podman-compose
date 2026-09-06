@@ -14,7 +14,7 @@
 //!
 //! `file:` sources used to be read-only bind mounts of the host path instead.
 //! That worked until the host enforced SELinux, where the container is denied
-//! the read outright and `up` still reports the container as started — measured
+//! the read outright and `up` still reports the container as started, measured
 //! on Fedora with both supported Podman majors, and reproduced by plain `podman
 //! run`, so the denial was the missing relabel and not podup. Relabelling was
 //! the other way out, but `z` rewrites the label of a file the user owns and may
@@ -26,7 +26,7 @@
 //!
 //! The trade is that the payload is a copy taken at `up`, so an in-place edit of
 //! the host file no longer reaches a running container. An atomic replace never
-//! did — a file bind pins the inode, so the write-new-and-rename that every
+//! did: a file bind pins the inode, so the write-new-and-rename that every
 //! careful rotation tool performs was already invisible.
 //!
 //! The pure compose→plan mapping lives in [`plan`].
@@ -49,10 +49,10 @@ use super::Engine;
 
 impl Engine {
 	/// Build the Podman-native secret references for a service. Every source podup
-	/// creates — `content:`, `environment:` and `file:` — must already have been
+	/// creates (`content:`, `environment:` and `file:`) must already have been
 	/// created by [`Engine::create_project_secrets`] (run once up front), so this
-	/// only preflights `external: true` sources for existence — failing closed
-	/// rather than starting a container that lacks the secret — and assembles the
+	/// only preflights `external: true` sources for existence, failing closed
+	/// rather than starting a container that lacks the secret, and assembles the
 	/// per-service references attached to the container spec.
 	///
 	/// Creation is deliberately *not* done here: services in the same
@@ -125,7 +125,7 @@ pub(super) mod tests_support {
 	use crate::engine::fake_podman;
 
 	/// A compose file with `n` `content:` secrets named `s1..sn`, all on one
-	/// service — the shape the union deduplicates and then fans out over.
+	/// service, the shape the union deduplicates and then fans out over.
 	#[cfg(unix)]
 	pub(in crate::engine::secrets) fn file_with_content_secrets(n: usize) -> ComposeFile {
 		let refs: String = (1..=n).map(|i| format!("      - s{i}\n")).collect();

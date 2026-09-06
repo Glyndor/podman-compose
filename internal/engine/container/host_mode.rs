@@ -39,8 +39,8 @@ pub struct ModeWarning {
 /// the compose key used to label each warning; it is rendered into the
 /// message so the call site can emit it verbatim.
 ///
-/// The five compose-native keys — `network_mode`, `privileged`, `pid`, `ipc`,
-/// `uts`, `cgroup`, `userns_mode` — are mirrored to one `Namespace` field
+/// The five compose-native keys (`network_mode`, `privileged`, `pid`, `ipc`,
+/// `uts`, `cgroup`, `userns_mode`) are mirrored to one `Namespace` field
 /// each on the libpod spec, so the same detector covers the live engine and
 /// the Quadlet export. The `container:<id>` prefix on `pid`/`ipc`/`uts`/`cgroup`
 /// is treated as host-binding too: sharing another container's namespace

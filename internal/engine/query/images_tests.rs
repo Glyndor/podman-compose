@@ -26,7 +26,7 @@ fn the_size_cell_uses_the_decimal_ladder() {
 	assert!(!cell.contains("iB"), "{cell:?} used a binary unit");
 }
 
-/// An image that is not present locally reports zero, and zero is not a size —
+/// An image that is not present locally reports zero, and zero is not a size:
 /// it is the absence of an answer. An empty cell says that; `0B` would claim
 /// podup asked and the image really is empty.
 #[test]

@@ -301,7 +301,7 @@ pub(crate) enum Commands {
 		publish: Vec<String>,
 		/// Keep the container's STDIN open (sets `stdin_open`). Whether a live
 		/// terminal is attached is decided by stdin and stdout both being
-		/// terminals, and by `-T` — not by this flag.
+		/// terminals, and by `-T`, not by this flag.
 		#[arg(short, long)]
 		interactive: bool,
 		/// Disable pseudo-TTY allocation. `run` allocates one when stdin and
@@ -420,7 +420,7 @@ pub(crate) enum Commands {
 		///
 		/// Takes an optional value so both spellings parse. Other Compose tools
 		/// declare it as a bare flag, and demanding a value turned a script
-		/// copied from one of them into a usage error — inside the very set of
+		/// copied from one of them into a usage error, inside the very set of
 		/// flags whose purpose is that such a script runs unchanged.
 		#[arg(
 			long,

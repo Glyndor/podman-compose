@@ -32,7 +32,7 @@ impl Engine {
 	pub fn lock_project(&self) -> Result<ProjectLock> {
 		if !super::staging::is_safe_project_name(&self.project) {
 			return Err(ComposeError::Unsupported(format!(
-				"unsafe project name '{}' — refusing to create a lock file",
+				"unsafe project name '{}'; refusing to create a lock file",
 				self.project
 			)));
 		}

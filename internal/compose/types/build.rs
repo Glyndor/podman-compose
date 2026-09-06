@@ -1,6 +1,6 @@
 //! Build, include, and extends configuration types.
 //!
-//! [`BuildConfig`] represents the `build:` key — either a bare context string
+//! [`BuildConfig`] represents the `build:` key: either a bare context string
 //! or a full long-form config. [`IncludeConfig`] and [`ExtendsConfig`] handle
 //! the `include:` and `extends:` top-level / per-service directives respectively.
 
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use super::{EnvVars, Labels, StringOrList, UlimitConfig};
 
-/// Compose `include:` directive — either a bare file path or a long-form block.
+/// Compose `include:` directive: either a bare file path or a long-form block.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum IncludeConfig {
@@ -39,7 +39,7 @@ impl IncludeConfig {
 	}
 }
 
-/// Compose `extends:` directive — either a bare service name or a long-form `{service, file}` block.
+/// Compose `extends:` directive: either a bare service name or a long-form `{service, file}` block.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum ExtendsConfig {
@@ -73,7 +73,7 @@ impl ExtendsConfig {
 	}
 }
 
-/// Compose `build:` directive — either a bare context path or a full build-config block.
+/// Compose `build:` directive: either a bare context path or a full build-config block.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant)]
@@ -266,7 +266,7 @@ impl BuildConfig {
 		}
 	}
 
-	/// `build.cache_to` — cache export targets (image references).
+	/// `build.cache_to`: cache export targets (image references).
 	pub fn cache_to(&self) -> &[String] {
 		match self {
 			BuildConfig::Context(_) => &[],
@@ -274,7 +274,7 @@ impl BuildConfig {
 		}
 	}
 
-	/// `build.ssh` — SSH agent sockets/keys for the build.
+	/// `build.ssh`: SSH agent sockets/keys for the build.
 	pub fn ssh(&self) -> &[String] {
 		match self {
 			BuildConfig::Context(_) => &[],
@@ -282,7 +282,7 @@ impl BuildConfig {
 		}
 	}
 
-	/// `build.secrets` — names of top-level secrets exposed to the build.
+	/// `build.secrets`: names of top-level secrets exposed to the build.
 	pub fn secrets(&self) -> &[String] {
 		match self {
 			BuildConfig::Context(_) => &[],
@@ -290,7 +290,7 @@ impl BuildConfig {
 		}
 	}
 
-	/// `build.additional_contexts` — named extra build contexts (`name -> source`).
+	/// `build.additional_contexts`: named extra build contexts (`name -> source`).
 	pub fn additional_contexts(&self) -> Vec<(String, String)> {
 		match self {
 			BuildConfig::Context(_) => Vec::new(),

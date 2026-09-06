@@ -1,11 +1,11 @@
-//! Targeted regression for #1450 — the standalone `pull` path used to panic
+//! Targeted regression for #1450: the standalone `pull` path used to panic
 //! on a typo'd `pull_policy:` because the dedup pass unwrapped
 //! `resolved_pull_policy` with an `.expect` whose invariant only held for
 //! `up`. Split out so adding this test does not push `build/pull.rs` over the
 //! source-line limit; the production fix lives there.
 
 /// Standalone `pull` must surface a typo'd `pull_policy:` as a structured
-/// `PodmanError::Field` carrying the offending service and value — the same
+/// `PodmanError::Field` carrying the offending service and value, the same
 /// shape `up` uses after #1443. Before the fix the dedup pass unwrapped
 /// `resolved_pull_policy` with `.expect`, so the binary panicked on every
 /// typo and the worker-thread death produced a second `internal error` from

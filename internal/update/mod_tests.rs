@@ -93,7 +93,7 @@ fn newer_release_with_real_install_path() {
 	};
 
 	// The manifest is internally consistent but signed with a throwaway key,
-	// not the embedded release key — verification must fail closed, proving
+	// not the embedded release key, so verification must fail closed, proving
 	// the gate rejects anything not signed by the real key.
 	let err = run_with(&src, "0.6.0", UpdateOptions::default()).unwrap_err();
 	assert!(matches!(err, ComposeError::Update(_)));

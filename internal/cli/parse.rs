@@ -49,7 +49,7 @@ pub(crate) fn parse_pull_policy(value: &str) -> Result<String, String> {
 }
 
 /// The progress styles the Compose Spec defines. podup renders build
-/// output one way, so the flag is inert — but an unknown value must still be
+/// output one way, so the flag is inert, but an unknown value must still be
 /// rejected rather than accepted and ignored, or a typo silently changes nothing
 /// and reports success.
 const PROGRESS_STYLES: [&str; 3] = ["auto", "plain", "tty"];

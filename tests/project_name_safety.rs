@@ -2,7 +2,7 @@
 //! any code path that builds a filesystem path from it.
 //!
 //! `--project` / `COMPOSE_PROJECT_NAME` and the compose `name:` field are taken
-//! verbatim, so a traversal value like `../evil` must be rejected up front —
+//! verbatim, so a traversal value like `../evil` must be rejected up front,
 //! including on the `generate quadlet` path, which neither locks nor stages and
 //! would otherwise never consult `is_safe_project_name`.
 

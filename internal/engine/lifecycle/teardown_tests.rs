@@ -37,7 +37,7 @@ fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
 /// Two containers to tear down: one whose removal genuinely fails (a busy
 /// mount, an active exec session), one that removes cleanly. `down` must
 /// still attempt (and complete) the second before exiting non-zero for the
-/// first (#598) — a CI teardown must not be told it succeeded.
+/// first (#598): a CI teardown must not be told it succeeded.
 #[tokio::test]
 #[cfg(unix)]
 async fn down_propagates_a_real_removal_failure_after_completing_the_rest() {
@@ -84,7 +84,7 @@ async fn down_propagates_a_real_removal_failure_after_completing_the_rest() {
 }
 
 /// #598 regression: `container_rm_path` always forces removal (`?force=true`),
-/// which SIGKILLs the container regardless of how `stop` went — so a stop
+/// which SIGKILLs the container regardless of how `stop` went, so a stop
 /// that fails or stalls (HTTP 500) is superseded, not fatal, once the
 /// force-remove that follows it succeeds. This pins the exact gap that let the
 /// bug through: folding the `stop` failure into `first_err` made `down` return
@@ -130,7 +130,7 @@ async fn down_tolerates_a_stalled_stop_when_the_force_remove_succeeds() {
 }
 
 /// A second `down` on an already torn-down project (no live containers,
-/// nothing left to sweep) must still exit 0 — idempotency is preserved.
+/// nothing left to sweep) must still exit 0; idempotency is preserved.
 #[tokio::test]
 #[cfg(unix)]
 async fn down_on_an_already_torn_down_project_is_still_ok() {
@@ -209,8 +209,8 @@ async fn down_tears_down_dependent_levels_before_their_dependencies() {
 /// `parallel::tests::join_bounded_preserves_input_order`, instead of one
 /// await-per-container in strict sequence. Asserting real wall-clock overlap
 /// against a synchronous test responder would require a multi-thread runtime
-/// and a blocking rendezvous inside the fake — a source of exactly the
-/// flakiness the testing standard forbids — so this test instead pins the
+/// and a blocking rendezvous inside the fake, a source of exactly the
+/// flakiness the testing standard forbids, so this test instead pins the
 /// dispatch contract (both containers are targeted, the level completes) and
 /// leaves the concurrency guarantee itself to `join_bounded`'s own test plus
 /// the code structure (no `.await` between the two containers' futures).
@@ -257,8 +257,8 @@ async fn down_targets_every_independent_service_within_one_level() {
 
 /// Determinism regression: with `web depends_on db`, both containers' removal
 /// fail with distinct statuses. Levels are visited in a fixed order (web's
-/// level first, post-reversal), so `down` must return web's failure — never
-/// db's — regardless of how `join_bounded`'s internal `buffer_unordered`
+/// level first, post-reversal), so `down` must return web's failure, never
+/// db's, regardless of how `join_bounded`'s internal `buffer_unordered`
 /// happens to interleave completions within each level. db's level must still
 /// be attempted (best-effort teardown continues past the first failing
 /// level).
@@ -333,7 +333,7 @@ fn rm_path_url_encodes_container_name() {
 }
 
 /// `down --rmi` used to warn and return Ok on a real removal failure, so it
-/// reported success having left images behind — the one arm of this teardown
+/// reported success having left images behind, the one arm of this teardown
 /// that did not aggregate, while its network, volume and container siblings all
 /// did.
 #[cfg(unix)]

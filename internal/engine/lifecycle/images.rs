@@ -13,7 +13,7 @@ impl Engine {
 	/// project-scoped `{project}-{service}:latest`).
 	///
 	/// This is the name `up` checks for presence and the name `down --rmi local`
-	/// removes, so both must agree on it — they used to compute it separately.
+	/// removes, so both must agree on it; they used to compute it separately.
 	pub(super) fn service_image_tag(&self, name: &str, service: &Service) -> String {
 		match &service.image {
 			Some(image) => image.clone(),
@@ -38,7 +38,7 @@ impl Engine {
 		// suppresses building even for services with a `build:` section (they fall
 		// back to pulling/using an existing image). Validated through
 		// [`crate::engine::build::pull_policy_checked`] so a typo'd
-		// `pull_policy:` cannot be silently treated as `missing` here — the
+		// `pull_policy:` cannot be silently treated as `missing` here: the
 		// skip-only-when-missing arm below would otherwise hide the bad value
 		// from `up` entirely (#1443).
 		let raw_policy = self
@@ -52,7 +52,7 @@ impl Engine {
 		//
 		// Building unconditionally was worse than redundant. The rebuild runs
 		// *with* the cache, so it can resolve to an older layer chain and retag
-		// the image backwards — silently undoing a `podup build --no-cache` that
+		// the image backwards, silently undoing a `podup build --no-cache` that
 		// just ran. `build --no-cache && up -d`, the ordinary deploy shape, would
 		// start the previous image. It also made `--build` look like a no-op,
 		// since the default already always built.
@@ -75,7 +75,7 @@ impl Engine {
 					.await?
 			}
 			// A service with a `build:` whose image is already present needs no
-			// pull either — the local tag is the declared state.
+			// pull either; the local tag is the declared state.
 			(false, _) if service.build.is_some() => {}
 			(false, "never") => {}
 			// Under `missing`, an image the prefetch stage already saw on this
@@ -93,7 +93,7 @@ impl Engine {
 	///
 	/// False for anything but a normalized `missing` policy: `always` and
 	/// `newer` mean go to the registry, and widening this to them would bring
-	/// back #1076, where a pull that failed was reported as success — libpod
+	/// back #1076, where a pull that failed was reported as success: libpod
 	/// sends that failure as an in-band line on a 200, so no pull means no line
 	/// to miss.
 	///
@@ -128,7 +128,7 @@ impl Engine {
 /// Tests for the pull decision above.
 ///
 /// They drive a whole `up`, so they would sit as naturally in the lifecycle
-/// suite — but that file was already at 487 of its 500 code lines, and adding
+/// suite, but that file was already at 487 of its 500 code lines, and adding
 /// them there put it over. They belong next to the decision they pin anyway,
 /// the same way `prefetch.rs` keeps its own.
 #[cfg(test)]

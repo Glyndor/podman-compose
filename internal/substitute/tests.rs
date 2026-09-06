@@ -309,7 +309,7 @@ fn load_dotenv_bare_key_is_not_set_to_empty() {
 	// A bare key (no `=`) no longer becomes an empty string. In `.env` it
 	// resolves from the host, but `load_dotenv` already drops host-present
 	// keys (process env wins), so either way a bare key never lands in the map
-	// as `""` — it's host-provided for interpolation or absent.
+	// as `""`; it's host-provided for interpolation or absent.
 	std::env::set_var("PODUP_DOTENV_ENV_PRESENT", "h");
 	std::env::remove_var("PODUP_DOTENV_ENV_ABSENT");
 	let dir = tempfile::tempdir().unwrap();
@@ -446,7 +446,7 @@ fn first_disallowed_control_char_allows_tab_newline_cr() {
 fn strict_build_vars_errors_on_control_char_value_naming_file_and_key() {
 	let dir = tempfile::tempdir().unwrap();
 	// A NUL in an env-file value is rejected at load time, before any compose
-	// parse, with an error that names the originating env file and key — not a
+	// parse, with an error that names the originating env file and key, not a
 	// misattributed parse offset into the post-substitution document (#885).
 	std::fs::write(dir.path().join("bad.env"), "SECRET=ab\0cd\n").unwrap();
 	let err = build_vars_with_env_files_strict(dir.path(), &["bad.env".to_string()]).unwrap_err();

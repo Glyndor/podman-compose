@@ -22,14 +22,14 @@ use tempfile::tempdir;
 ///
 /// Its only two user-facing lines were `tracing::info!`, and the CLI floors
 /// tracing at `warn`, so a push that genuinely uploaded the image wrote zero
-/// bytes to stdout and stderr and exited 0 — measured against a real local
+/// bytes to stdout and stderr and exited 0, measured against a real local
 /// registry, which afterwards listed the repository. This asserts the line is
 /// back and that it goes to stderr, leaving stdout a clean pipe.
 ///
 /// Deliberately pointed at a registry that cannot exist (port 1) with an image
 /// that is not present locally: the progress line is emitted before the API
 /// call, so the assertion needs no registry and no build, and the command still
-/// fails afterwards — which is also what pins the line as *progress* rather
+/// fails afterwards, which is also what pins the line as *progress* rather
 /// than a success message.
 #[tokio::test]
 async fn push_reports_the_image_it_is_pushing() {
@@ -147,8 +147,8 @@ async fn up_reports_the_networks_and_volumes_it_creates() {
 /// It reported three that had not: measured on a project name that had never
 /// been created, `down -v` printed `Network …_extra Removed`, `Network
 /// …_default Removed` and `Volume …_data Removed`. The cause was `delete_ok`
-/// discarding the boolean `delete_existed` returns — the very distinction that
-/// method exists to preserve, and which the container path had always used — so
+/// discarding the boolean `delete_existed` returns, the very distinction that
+/// method exists to preserve, and which the container path had always used, so
 /// a 404 reached the caller as `Ok(())` and was announced as a deletion.
 ///
 /// A volume is where this is worst: it names data the operator is being told is
@@ -248,7 +248,7 @@ async fn lifecycle_commands_stay_quiet_when_they_did_act() {
 /// It printed a bare `0` per service. With more than one container nothing said
 /// which code was whose, and a service scaled to three collapsed to one line.
 /// Measured on docker compose v5.1.3 with three replicas: it reports per
-/// container, so the granularity here follows the reference — the rendering
+/// container, so the granularity here follows the reference; the rendering
 /// deliberately does not, since the reference prints a 64-character hex id, the
 /// same sentence on every line, and nothing a parser can read.
 #[tokio::test]
@@ -306,7 +306,7 @@ async fn wait_names_each_container_and_its_code() {
 ///
 /// This is the contract that protects CI logs. The live region only exists when
 /// stderr is a terminal and colour is on; anywhere else the same event model
-/// comes out as append-only lines. **Animation in a CI log is a defect** — and
+/// comes out as append-only lines. **Animation in a CI log is a defect**, and
 /// so is a CI log that says less than the terminal did, which is why the
 /// intermediate transitions are asserted here too. Before the board they did
 /// not exist at all: `up` reported only the finished state of each resource.
@@ -407,7 +407,7 @@ async fn the_board_never_touches_stdout() {
 }
 
 /// `down` gets a board too, seeded from what Podman actually has rather than
-/// from what the compose file describes — a service the file lists but that was
+/// from what the compose file describes: a service the file lists but that was
 /// never created would sit on the board as a row that never moves.
 #[tokio::test]
 async fn a_piped_down_gets_transitions_for_what_exists() {
@@ -436,7 +436,7 @@ async fn a_piped_down_gets_transitions_for_what_exists() {
 
 /// `pull` reports through the progress layer, with a matching `Pulled`.
 ///
-/// It used a bare `eprintln!` — the one user-facing line in the binary that
+/// It used a bare `eprintln!`, the one user-facing line in the binary that
 /// bypassed `ui` entirely, so it ignored `PROGRESS_ENABLED` and an embedder
 /// asking podup to stay silent got it anyway. There was never a `Pulled` at all,
 /// so a pull that finished looked exactly like one that hung.
@@ -468,7 +468,7 @@ async fn pull_reports_both_ends() {
 /// One image, one `Pulling`, even on the `up` path.
 ///
 /// `up` warms the image cache before the per-level walk and then pulls again
-/// inside it, and both reported — so `Pulling` appeared twice per image on `up`
+/// inside it, and both reported, so `Pulling` appeared twice per image on `up`
 /// while a standalone `pull` printed it once. The prefetch is best-effort
 /// warming and the walk's own pull is the authoritative one, so only the second
 /// speaks.

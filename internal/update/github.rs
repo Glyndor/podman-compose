@@ -2,7 +2,7 @@
 //!
 //! Talks to GitHub over HTTPS only (rustls + webpki roots via `ureq`). TLS
 //! guards transport, but the downloaded bytes are trusted only after the
-//! Ed25519 signature check in [`super::verify`] — a compromised endpoint cannot
+//! Ed25519 signature check in [`super::verify`]: a compromised endpoint cannot
 //! produce a binary that passes that check.
 
 use std::io::Read;
@@ -30,7 +30,7 @@ const CONNECT_TIMEOUT_SECS: u64 = 30;
 const TOTAL_TIMEOUT_SECS: u64 = 300;
 
 /// Transport failures are retried this many times in total, with exponential
-/// backoff (1s, 2s) between attempts. HTTP 4xx responses are not retried —
+/// backoff (1s, 2s) between attempts. HTTP 4xx responses are not retried;
 /// they are deterministic, not transient.
 const ATTEMPTS: u32 = 3;
 
@@ -67,7 +67,7 @@ impl GitHubSource {
 		}
 	}
 
-	/// Construct with overridden host bases — test seam for the transport-error
+	/// Construct with overridden host bases: test seam for the transport-error
 	/// path (point at a closed local port to force a connection failure).
 	#[cfg(test)]
 	fn with_bases(repo: impl Into<String>, api_base: &str, dl_base: &str) -> Self {
@@ -156,7 +156,7 @@ impl ReleaseSource for GitHubSource {
 
 	fn fetch(&self, asset: &str) -> crate::Result<Vec<u8>> {
 		// Pinned to the latest release; `ureq` follows GitHub's redirect to the
-		// asset host. Always HTTPS — the URL is a compile-time constant scheme.
+		// asset host. Always HTTPS; the URL is a compile-time constant scheme.
 		let url = format!(
 			"{}/{}/releases/latest/download/{asset}",
 			self.dl_base, self.repo

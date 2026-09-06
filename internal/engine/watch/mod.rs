@@ -3,11 +3,11 @@
 //! [`Engine::watch`] sets up an `inotify`/`kqueue` watcher via `notify`, then
 //! dispatches each change event to the matching [`WatchRule`]. Debouncing
 //! collapses rapid bursts into a single action. Actions:
-//! - `sync` — tar the changed file and upload it into the container
-//! - `rebuild` — stop container, rebuild image, restart
-//! - `restart` — stop and start the container without rebuilding
-//! - `sync+restart` — sync first, then restart
-//! - `sync+exec` — sync, then run the rule's `exec` command inside the container
+//! - `sync`: tar the changed file and upload it into the container
+//! - `rebuild`: stop container, rebuild image, restart
+//! - `restart`: stop and start the container without rebuilding
+//! - `sync+restart`: sync first, then restart
+//! - `sync+exec`: sync, then run the rule's `exec` command inside the container
 
 mod placement;
 mod sync;
@@ -64,7 +64,7 @@ impl Engine {
 	/// at all. That is deliberate and matches `docker compose watch`: a
 	/// long-running developer loop should survive one failed rebuild rather than
 	/// exit. Unlike every other command here, it means a caller cannot gate on
-	/// the status — see the exit-status section of `docs/commands.md`.
+	/// the status; see the exit-status section of `docs/commands.md`.
 	pub async fn watch(&self, file: &ComposeFile) -> Result<()> {
 		let mut rule_entries: Vec<RuleEntry> = Vec::new();
 
@@ -117,7 +117,7 @@ impl Engine {
 
 		// Bounded channel: under heavy filesystem churn an unbounded queue (and the
 		// per-batch path accumulation below) can grow without limit. Drop events
-		// when the buffer is full — a later event re-triggers the sync, so no state
+		// when the buffer is full: a later event re-triggers the sync, so no state
 		// is permanently lost, but memory stays bounded.
 		let (tx, mut rx) = mpsc::channel::<notify::Result<notify::Event>>(WATCH_CHANNEL_CAP);
 		let mut watcher = RecommendedWatcher::new(
@@ -143,7 +143,7 @@ impl Engine {
 			}
 		}
 
-		info!("watching {} rule(s) — Ctrl+C to stop", rule_entries.len());
+		info!("watching {} rule(s); Ctrl+C to stop", rule_entries.len());
 
 		let debounce = Duration::from_millis(100);
 
@@ -449,7 +449,7 @@ impl Engine {
 	/// network it is attached to.
 	///
 	/// The seam that lets a test check **podup's** contribution to service-name
-	/// resolution — registering the compose service name as an alias — without
+	/// resolution (registering the compose service name as an alias) without
 	/// depending on the runtime's DNS server being up to answer for it. Those
 	/// are two layers, and a test that only measures the second blames podup for
 	/// the first's failures (#1330).

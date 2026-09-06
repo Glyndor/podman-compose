@@ -3,8 +3,8 @@
 use std::io::Write;
 
 /// Cap on the buffered partial line. A container that emits a very long run
-/// with no newline — a `\r`-updated progress bar, binary output, a pathological
-/// single line — must not grow `pending` without bound. At this size the
+/// with no newline (a `\r`-updated progress bar, binary output, a pathological
+/// single line) must not grow `pending` without bound. At this size the
 /// partial is flushed as its own prefixed line (as docker does) rather than
 /// held in memory forever.
 const MAX_PENDING: usize = 64 * 1024;
@@ -16,13 +16,13 @@ const MAX_PENDING: usize = 64 * 1024;
 /// (`web-1`, from `display_label`), and only `identity_slot` strips that (and
 /// a project prefix) before resolving through the per-project colour registry
 /// `set_services` fills. Resolving `service_slot` against the raw label
-/// bypassed the registry entirely — that key was never in it — so every log
+/// bypassed the registry entirely (that key was never in it) so every log
 /// prefix silently fell back to the per-label hash instead of the sequential
 /// colour `ps` uses. Measured on an 8-service project: `ps` gave 8 distinct
 /// colours, `logs` only 6, before this indirection existed.
 ///
 /// [`prefix_style`] renders this into a [`crate::ui::Style`] and nothing else
-/// — so the routing choice this function makes is the one thing a regression
+/// so the routing choice this function makes is the one thing a regression
 /// test needs to pin down, and it can compare the slot directly rather than a
 /// rendered `Style`. That distinction matters: the narrow (6-colour) fallback
 /// wraps a slot index mod 6, so two different wide-palette slots can render
@@ -71,7 +71,7 @@ impl LinePrefixer {
 		// (a raw write anstream does not strip for us) and on `--no-color`.
 		// One space before the bar, not two. Attached `up` already prints
 		// `{prefix} | ` with one, so the same container was tagged two different
-		// ways by two commands in the same binary — and anything parsing the
+		// ways by two commands in the same binary, and anything parsing the
 		// prefix had to accept both. docker compose uses one space too.
 		let plain = format!("{label} | ");
 		let label = crate::ui::paint(
@@ -88,8 +88,8 @@ impl LinePrefixer {
 	/// Buffer `chunk` and write every complete line it now completes.
 	///
 	/// Returns `Err` when the sink is gone. Every write used to be discarded with
-	/// `let _ =`, so a reader that closed the pipe — `logs -f | head`,
-	/// `| grep -q`, `| less` and quit — was never noticed and the follow loop
+	/// `let _ =`, so a reader that closed the pipe (`logs -f | head`,
+	/// `| grep -q`, `| less` and quit) was never noticed and the follow loop
 	/// streamed into a dead pipe until the process was killed. The error is
 	/// returned rather than handled here so the caller decides: a broken pipe is
 	/// a clean end of output, any other io error is a real failure.

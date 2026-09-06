@@ -1,13 +1,13 @@
 # Integration tests that fail on the Podman 6 nested-virt lane for environmental
 # reasons, not because podup is broken. The lane fails when a failing test is NOT
-# on this list — a new identity is a real regression, whatever the pass count says.
+# on this list: a new identity is a real regression, whatever the pass count says.
 #
 # The list is deliberately EMPTY. That is a claim, and here is the evidence for it.
 #
 # Podman 6 ran without an identity list for months because its failing set carried
 # a variable tail that a list built from observation would have turned into false
 # reds. It gated on the pass-count floor alone, and that floor reported the leg
-# GREEN through 31 failures in run 30222778630 — 141 passed against a floor of
+# GREEN through 31 failures in run 30222778630: 141 passed against a floor of
 # 115. The floor also loses resolution as the suite grows: those 31 were the same
 # environment defect as the historical 8–12, with more container-dependent tests
 # added for it to knock over.
@@ -15,7 +15,7 @@
 # The tail turned out to be one cause. Serialising the leg (#1039, run
 # 30225458799) took it from 31 failures to zero, with the
 # `rootless netns: mount resolv.conf … stub-resolv.conf: no such file or
-# directory` signature — four occurrences in the previous run — absent from the
+# directory` signature, four occurrences in the previous run, absent from the
 # log entirely. Podman 5 stayed at two threads as the control and produced its
 # usual timing, so the change was not in the harness. Concurrent container
 # creation against the shared rootless netns was the cause; nested virtualisation,
@@ -28,13 +28,13 @@
 # genuinely gone or whether one run was luck.
 #
 # When that happens: classify it with a run, the way every Podman 5 entry was, and
-# add it here with the evidence. Do NOT delete this file to make the red go away —
+# add it here with the evidence. Do NOT delete this file to make the red go away:
 # an empty list is what makes a regression loud, and going back to a count gate is
 # how #1072 shipped a bug with the pass count sitting comfortably above the floor.
 #
 # ONE THING TO KNOW BEFORE CLASSIFYING ANYTHING HERE: this leg's environment is not
 # fixed. It boots whatever Fedora Rawhide compose is newest when the job runs, so
-# most days it is a different operating system — different kernel, different
+# most days it is a different operating system: different kernel, different
 # systemd, everything below Podman. Two runs of this leg are not two observations
 # of one environment, which is very likely part of why the tail this file's header
 # describes resisted classification for as long as it did. The gate now prints the

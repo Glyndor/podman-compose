@@ -12,7 +12,7 @@ fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
 }
 
 /// Two services on the same image pull it once, and a `never`-policy
-/// service plus a `build:` service are excluded entirely — the image
+/// service plus a `build:` service are excluded entirely: the image
 /// reference never appears in a request at all.
 #[tokio::test]
 #[cfg(unix)]
@@ -133,7 +133,7 @@ async fn prefetch_rejects_an_unknown_pull_policy() {
 }
 
 /// An invalid `--pull` override (no service context) must also propagate
-/// out of the prefetch stage — same bug as the per-service typo, just
+/// out of the prefetch stage, the same bug as the per-service typo, just
 /// applied to every service at once. Before the fix the dedup phase
 /// would treat every service's effective policy as `missing` and warm
 /// every cache it could reach with the wrong intent (#1443).

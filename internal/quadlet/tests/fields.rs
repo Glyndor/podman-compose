@@ -402,7 +402,7 @@ services:
 
 #[test]
 fn long_form_tmpfs_mount_renders_as_tmpfs_not_volume() {
-	// A long-form `type: tmpfs` mount must become `Tmpfs=`, not `Volume=` —
+	// A long-form `type: tmpfs` mount must become `Tmpfs=`, not `Volume=`;
 	// the latter would persist it as a volume instead of an in-memory fs.
 	let yaml = r#"
 services:
@@ -431,7 +431,7 @@ services:
 /// #1091: `EnvironmentFile=` is resolved by podman-systemd.unit(5) against the
 /// unit file's own directory, not the compose file's. Units land in
 /// `~/.config/containers/systemd`, so a relative entry emitted verbatim points
-/// at a file that is not there — and `--env-file` on a missing path is fatal, so
+/// at a file that is not there, and `--env-file` on a missing path is fatal, so
 /// the container never starts. Every relative entry must come out absolute
 /// against the compose base directory; an already-absolute one is untouched.
 #[test]
@@ -453,7 +453,7 @@ services:
 	let out = generate_at(&file, "p", base);
 	let c = &unit_named(&out, "p-app.container").contents;
 	// `abs_against` joins with the OS separator, so build the expectations the
-	// same way rather than as POSIX literals — these render tests are not
+	// same way rather than as POSIX literals; these render tests are not
 	// Unix-gated and would otherwise fail on Windows.
 	for rel in [".env", "config/extra.env", "../shared/team.env"] {
 		let needle = format!("EnvironmentFile={}", base.join(rel).display());

@@ -53,7 +53,7 @@ fn second_holder_blocks_until_first_releases() {
 
 	// The lock is exclusive, so the waiter cannot acquire until `held` is
 	// dropped; the store is sequenced before the drop, so the waiter is
-	// guaranteed to observe `released == true`. This is deterministic — it
+	// guaranteed to observe `released == true`. This is deterministic: it
 	// never depends on how long the waiter takes to reach `flock`.
 	barrier.wait();
 	released.store(true, Ordering::SeqCst);

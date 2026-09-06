@@ -2,7 +2,7 @@
 //!
 //! Linux and macOS reach Podman over a Unix socket; Windows reaches
 //! `podman machine` over a named pipe. Both are byte streams, and everything
-//! above this file — the hyper client, the hand-written hijack — only needs
+//! above this file (the hyper client, the hand-written hijack) only needs
 //! `AsyncRead + AsyncWrite`. This enum is the one place that knows which kind
 //! of stream a platform uses, so the request path and the hijack path connect
 //! through the same code instead of each carrying its own `cfg` blocks.
@@ -68,7 +68,7 @@ impl SocketStream {
 }
 
 // Plain delegation: each poll forwards to the one variant this build has. No
-// buffering, no translation — the enum exists only to give the two transports
+// buffering, no translation: the enum exists only to give the two transports
 // one type.
 
 impl AsyncRead for SocketStream {

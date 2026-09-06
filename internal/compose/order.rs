@@ -43,7 +43,7 @@ pub fn resolve_order(file: &ComposeFile) -> Result<Vec<String>> {
 	// deterministic: the in-degree map is a `HashMap`, so seeding/extending the
 	// frontier from its iteration order would otherwise be per-run random. This
 	// mirrors the per-level `sort_unstable` in `resolve_levels`, so independent
-	// (in-degree-0) services resolve in a stable order — which `wait` relies on
+	// (in-degree-0) services resolve in a stable order, which `wait` relies on
 	// for a reproducible exit code and output ordering.
 	let mut queue: BinaryHeap<Reverse<&str>> = in_degree
 		.iter()
@@ -73,7 +73,7 @@ pub fn resolve_order(file: &ComposeFile) -> Result<Vec<String>> {
 }
 
 /// Build the user-facing circular-dependency message naming the services still
-/// holding a nonzero in-degree after Kahn's algorithm — exactly the nodes that
+/// holding a nonzero in-degree after Kahn's algorithm: exactly the nodes that
 /// form (or feed into) the cycle. Sorted for a deterministic message.
 fn cycle_message(in_degree: &HashMap<&str, usize>) -> String {
 	let mut involved: Vec<&str> = in_degree

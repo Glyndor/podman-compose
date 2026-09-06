@@ -32,7 +32,7 @@ pub struct ServiceUnitOpts {
 	/// Longest `stop_grace_period` across the project's services, in seconds.
 	///
 	/// systemd bounds the whole `ExecStop` independently of what podup does
-	/// inside it, and its default is 90s — so a stack whose slowest container
+	/// inside it, and its default is 90s, so a stack whose slowest container
 	/// needs longer gets killed mid-stop at reboot, while a manual `podup stop`
 	/// honours it. `None` leaves `TimeoutStopSec=` off, which is right when no
 	/// service asks for anything unusual.
@@ -104,7 +104,7 @@ fn is_bare_safe(token: &str) -> bool {
 /// during specifier expansion, a pass that happens before the line is split
 /// into arguments and runs whether or not the token ends up quoted. `%` is not
 /// in `is_bare_safe`'s allowed set, so a token containing it already takes the
-/// quoted path — but doubling it up front (rather than only inside the quoted
+/// quoted path, but doubling it up front (rather than only inside the quoted
 /// branch) means the escape holds even if that allowed set ever changes, and a
 /// bare-looking token like `50%off` still comes out as `50%%off`.
 pub(super) fn quote_arg_for_exec(token: &str) -> String {
@@ -292,7 +292,7 @@ pub fn render_service_unit(opts: &ServiceUnitOpts) -> String {
 	// deploy time, where someone is watching.
 	let start = exec_line(opts, &["up", "-d"]);
 	// `stop`, not `down`: `down` REMOVES the containers, so a clean shutdown
-	// would delete the stack and every boot would recreate it from scratch —
+	// would delete the stack and every boot would recreate it from scratch,
 	// losing container identity and logs, and dragging the whole compose
 	// front-end (.env, interpolation, the parse) onto the boot path. `stop`
 	// leaves them on disk, which is exactly what ExecStart expects to find, and
@@ -322,9 +322,9 @@ pub fn render_service_unit(opts: &ServiceUnitOpts) -> String {
 	// with `Result=success` and nothing in the journal, which is the behaviour
 	// those versions already had.
 	//
-	// `WorkingDirectory=` takes the rest of its line literally — unlike an
+	// `WorkingDirectory=` takes the rest of its line literally: unlike an
 	// exec-line token, it understands none of the C-style backslash escapes
-	// `quote_arg` uses — but `%%` is not one of those escapes: it is systemd's
+	// `quote_arg` uses. But `%%` is not one of those escapes: it is systemd's
 	// specifier-level escape, resolved during the same specifier-expansion pass
 	// that runs over every unit-file value before the value is otherwise
 	// interpreted. That pass does not care whether the value is a directive
@@ -336,7 +336,7 @@ pub fn render_service_unit(opts: &ServiceUnitOpts) -> String {
 	// above: systemd's specifier expansion runs over every unit-file value, not
 	// only the ones this module treats specially. `opts.project` is gated
 	// upstream by `is_safe_project_name` (which forbids `%`), but this module
-	// must not lean on that external guarantee for its own %-invariant — every
+	// must not lean on that external guarantee for its own %-invariant: every
 	// other interpolated value here is escaped regardless of what validates it
 	// elsewhere, so the project name is too.
 	let project = opts.project.replace('%', "%%");

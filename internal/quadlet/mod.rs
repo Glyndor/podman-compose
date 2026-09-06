@@ -7,7 +7,7 @@
 //! instead of a long-running `podup` process.
 //!
 //! This is an additive export path, not a replacement for the runner. It
-//! maps the common compose fields and warns — loudly, never silently — for
+//! maps the common compose fields and warns, loudly and never silently, for
 //! every field that is set but has no Quadlet equivalent yet, so generated
 //! units never quietly drop configuration.
 

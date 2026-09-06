@@ -3,8 +3,8 @@
 //!
 //! #1082's closing observation is that nothing protected them: not one test
 //! asserted `NAME`, `STATUS`, or an `images` JSON key, so every drift in that
-//! issue — `ConfigFiles` always empty, `top` emitting `null`, `volumes`
-//! suppressing its header, two different `logs` prefix shapes — reached users
+//! issue (`ConfigFiles` always empty, `top` emitting `null`, `volumes`
+//! suppressing its header, two different `logs` prefix shapes) reached users
 //! before anyone noticed. Fixing them one by one only resets the clock; this is
 //! the net underneath.
 //!
@@ -22,7 +22,7 @@ use tempfile::tempdir;
 
 /// Every list command prints its header, including on an empty result. `volumes`
 /// used to be the exception, so a script locating its columns from the header
-/// broke on an empty project — and empty is a legitimate answer, not a missing
+/// broke on an empty project, and empty is a legitimate answer, not a missing
 /// one.
 #[tokio::test]
 async fn list_commands_print_their_table_headers() {
@@ -106,8 +106,8 @@ async fn json_output_keys_are_stable() {
 }
 
 /// `logs` and attached `up` tag the same container the same way: the service and
-/// index, project stripped, one space before the bar. They used to disagree —
-/// `myproj-web-1  | ` against `web-1 | ` — so anything parsing the prefix had to
+/// index, project stripped, one space before the bar. They used to disagree,
+/// `myproj-web-1  | ` against `web-1 | `, so anything parsing the prefix had to
 /// accept both shapes from one binary.
 #[tokio::test]
 async fn logs_prefix_is_service_and_index_with_one_space() {
@@ -135,7 +135,7 @@ async fn logs_prefix_is_service_and_index_with_one_space() {
 ///
 /// They did not: clap's derived `--version` rendered `podup 3.3.0` while the
 /// subcommand rendered `podup version v3.3.0`, so a script probing the binary
-/// got a different string depending on which spelling it happened to use — and
+/// got a different string depending on which spelling it happened to use, and
 /// the `v` prefix, which is what the tags and the release assets carry, appeared
 /// in only one of them. Measured on docker-compose v5.1.3, both spellings return
 /// `Docker Compose version v5.1.3` byte for byte.
@@ -277,7 +277,7 @@ fn autostart_status_renders_one_negative_one_way() {
 /// This is deliberately an end-to-end assertion rather than a unit test of the
 /// column choice. Both exist, because they fail for different reasons: the unit
 /// test catches a wrong choice, and only this one catches the choice being
-/// computed correctly and then not passed to the table — which is exactly the
+/// computed correctly and then not passed to the table, which is exactly the
 /// shape of the `logs` defect that survived every per-task review in #1247.
 #[tokio::test]
 async fn top_styles_its_process_rows() {
@@ -310,7 +310,7 @@ async fn top_styles_its_process_rows() {
 /// repainted.
 ///
 /// The live view is gated on **stdout** rather than stderr, because `stats` is
-/// its own output — `stats > file` on a terminal must still produce a file of
+/// its own output: `stats > file` on a terminal must still produce a file of
 /// frames rather than a file of cursor moves. `--format json` never repaints at
 /// all, whatever the terminal says, and keeps the split it already had: NDJSON
 /// while streaming, one pretty array for `--no-stream`.

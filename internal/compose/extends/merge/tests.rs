@@ -190,7 +190,7 @@ services:
 	);
 }
 
-/// #1078: `env_file` is appended too — the base's files are still read, in
+/// #1078: `env_file` is appended too: the base's files are still read, in
 /// order, followed by the override's.
 #[test]
 fn env_file_override_appends_to_base() {
@@ -267,7 +267,7 @@ networks:
 }
 
 /// A bare name in the override must not erase per-network config the base
-/// set — the union keeps the config unless the override supplies its own.
+/// set: the union keeps the config unless the override supplies its own.
 #[test]
 fn network_union_keeps_base_config_for_a_bare_override_entry() {
 	let yaml = r#"
@@ -389,7 +389,7 @@ services:
 
 /// #1078: `!override` takes the overriding value whole instead of appending.
 /// Both tags were accepted and silently ignored, so a file asking for
-/// replacement got a merge — the opposite of what it said.
+/// replacement got a merge, the opposite of what it said.
 #[test]
 fn override_tag_replaces_instead_of_appending() {
 	let base =
@@ -433,7 +433,7 @@ fn reset_tag_clears_the_base_value() {
 	);
 }
 
-/// Without a tag the ordinary merge rule still applies — the tags must not
+/// Without a tag the ordinary merge rule still applies; the tags must not
 /// change the default behaviour of anything they are not on.
 #[test]
 fn an_untagged_key_still_merges_normally() {

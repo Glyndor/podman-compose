@@ -1,4 +1,4 @@
-//! Profile filtering — determines which services run given the active profile set.
+//! Profile filtering: determines which services run given the active profile set.
 
 use std::collections::HashSet;
 
@@ -8,7 +8,7 @@ use crate::compose::types::{ComposeFile, Service};
 ///
 /// `active` is the CLI `--profile` list, falling back to `COMPOSE_PROFILES`.
 /// A profiled service that is a transitive `depends_on` target of a retained
-/// service is implicitly enabled, matching docker compose — so the output never
+/// service is implicitly enabled, matching docker compose, so the output never
 /// carries a dangling dependency reference.
 pub fn retain_active_profiles(file: &mut ComposeFile, active: &[String]) {
 	retain_active_profiles_with_targets(file, active, &[]);
@@ -33,15 +33,15 @@ pub fn retain_active_profiles_with_targets(
 /// A service is enabled when it is unprofiled, matches an active profile (or the
 /// `*` wildcard), or is explicitly named in `targets` (naming a service on the
 /// command line activates its profile). Implicit activation then pulls in the
-/// transitive `depends_on` targets of every enabled service — even profiled
-/// ones whose profile is inactive — so a started service never depends on a
+/// transitive `depends_on` targets of every enabled service, even profiled
+/// ones whose profile is inactive, so a started service never depends on a
 /// service that was filtered out. Mirrors docker compose, which activates a
 /// profiled service that is depended on by a started one.
 ///
 /// This is the single source of truth for "which services does an `up`/`config`
 /// with these profiles touch": [`retain_active_profiles_with_targets`] uses it
 /// to prune the config, and the `up`/`create` lifecycle path uses it to decide
-/// which services to actually start — so the two never disagree.
+/// which services to actually start, so the two never disagree.
 pub(crate) fn enabled_profile_services(
 	file: &ComposeFile,
 	active: &HashSet<String>,

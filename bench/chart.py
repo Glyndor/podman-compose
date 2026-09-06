@@ -2,7 +2,7 @@
 """Render the README's benchmark chart from the measured summary.
 
 The chart used to be hand-drawn SVG. It said "7 MiB vs 69 MiB, 7-15x faster"
-long after the measurements said 7.3 against 50.5 — nothing regenerated it and
+long after the measurements said 7.3 against 50.5; nothing regenerated it and
 nothing checked it, so it aged in silence while the numbers under it moved.
 Generating it from `summary.json` means the picture cannot disagree with the
 table beside it.
@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SUMMARY = os.path.join(HERE, "results", "summary.json")
 OUT = os.path.join(os.path.dirname(HERE), "docs", "assets", "bench.svg")
 
-# (label, scenario, op, key) — the four the README quotes.
+# (label, scenario, op, key): the four the README quotes.
 ROWS = [
     ("memory per command", "single", "up", "rss_mib"),
     ("up · 42 services", "wide-level", "up", "seconds"),
@@ -70,7 +70,7 @@ def main() -> int:
         "  </style>",
         f'  <rect class="card" x="0.5" y="0.5" width="{width - 1}" height="{height - 1}" rx="10"/>',
         f'  <text class="t" x="24" y="30">podup vs docker-compose vs podman-compose '
-        f'— same rootless Podman</text>',
+        f'on the same rootless Podman</text>',
         f'  <text class="l" x="24" y="47">median of 10 measured runs · lower is better</text>',
     ]
 

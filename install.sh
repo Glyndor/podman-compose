@@ -391,7 +391,7 @@ or python3 with the 'cryptography' package, or set PODUP_RELEASE_PUBKEY_B64, the
 	# /usr/local/bin during the window before the rename. The target's mode
 	# is then applied explicitly, masked with ~0o777 so a setuid/setgid/
 	# sticky bit on the target (planted or inherited) cannot ride onto the
-	# freshly installed binary — the same discipline the Rust updater
+	# freshly installed binary, the same discipline the Rust updater
 	# follows at internal/update/install.rs:237-298. Mirrors what the
 	# Rust `install_at` does, with `install` swapped for the equivalent
 	# `cp + chmod` because `-m` only sets the mode of the *new* file and
@@ -423,7 +423,7 @@ or python3 with the 'cryptography' package, or set PODUP_RELEASE_PUBKEY_B64, the
 	# are never world-readable in a shared directory (e.g. /usr/local/bin)
 	# during the window before the chmod applies the target's mode. The
 	# chmod then widens the file to the target's ordinary permission bits,
-	# with the special bits stripped — same discipline the Rust updater
+	# with the special bits stripped, the same discipline the Rust updater
 	# follows at internal/update/install.rs:237-298.
 	local copy_cmd=(install -m 0600 "${TMP_DIR}/${ARTIFACT}" "$staged")
 	local perms_cmd=(chmod "$target_mode" "$staged")

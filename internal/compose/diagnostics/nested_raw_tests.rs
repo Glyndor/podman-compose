@@ -7,7 +7,7 @@ use crate::compose::types::{
 };
 
 /// Interpolate + merge-resolve `yaml` exactly as the parser does, then diff
-/// the nested blocks — mirrors the production caller, which feeds the pure
+/// the nested blocks, mirroring the production caller, which feeds the pure
 /// entry the interpolated document text.
 fn warnings_for(yaml: &str) -> Vec<String> {
 	let value = crate::compose::merge::interpolated_value(yaml, None).unwrap();
@@ -170,7 +170,7 @@ fn warns_on_unknown_tmpfs_key() {
 #[test]
 fn warns_on_unknown_driver_config_key_via_recursion() {
 	// The unknown key lives one level below `volume`, which the parent
-	// allowlist cannot reach — only the recursion into `driver_config` finds it.
+	// allowlist cannot reach; only the recursion into `driver_config` finds it.
 	let msgs = warnings_for(
 		"services:\n  web:\n    image: nginx\n    volumes:\n      - type: volume\n        source: data\n        target: /data\n        volume:\n          driver_config:\n            name: local\n            optoins: {}\n",
 	);
@@ -255,8 +255,8 @@ fn modeled_key_with_null_value_does_not_warn() {
 
 #[test]
 fn modeled_keys_with_empty_collections_do_not_warn() {
-	// Empty modeled collections — `link_local_ips: []`, `driver_opts: {}` on a
-	// service network and `devices: []` on a reservation — would all be dropped
+	// Empty modeled collections (`link_local_ips: []`, `driver_opts: {}` on a
+	// service network and `devices: []` on a reservation) would all be dropped
 	// by a round-trip; none may warn.
 	let msgs = warnings_for(
 		"services:\n  web:\n    image: nginx\n    networks:\n      frontend:\n        aliases: []\n        link_local_ips: []\n        driver_opts: {}\n    deploy:\n      resources:\n        reservations:\n          devices: []\nnetworks:\n  frontend:\n",
@@ -285,7 +285,7 @@ fn clean_file_produces_no_warning() {
 
 #[test]
 fn null_network_attachment_is_not_a_block() {
-	// `networks: { frontend: }` is a null attachment, not an options map — there
+	// `networks: { frontend: }` is a null attachment, not an options map: there
 	// is nothing to diff and it must not warn.
 	let msgs = warnings_for(
 		"services:\n  web:\n    image: nginx\n    networks:\n      frontend:\nnetworks:\n  frontend:\n",

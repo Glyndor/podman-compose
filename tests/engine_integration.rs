@@ -2,7 +2,7 @@
 //!
 //! All tests skip gracefully when Podman is not reachable, so they are safe to
 //! run on a machine without it. Set `PODUP_REQUIRE_PODMAN=1` where Podman is
-//! guaranteed — the nested-virt lane does — and an unreachable Podman becomes a
+//! guaranteed (the nested-virt lane does) and an unreachable Podman becomes a
 //! hard failure rather than a suite that reports `ok` having run nothing.
 //!
 //! The test bodies are split across the `engine_integration/` submodules to
@@ -22,7 +22,7 @@ use podup::{parse_files_with_env_files, parse_str, Client, Engine};
 /// `tracing` is a facade: a `warn!` with no subscriber installed in the process
 /// is discarded silently. `main` installs one, but every integration test runs
 /// in a process that never calls `main`, so the instrumentation compiled, passed
-/// review, merged — and emitted nothing on the lane, which is the one place it
+/// review, merged, and emitted nothing on the lane, which is the one place it
 /// was written to answer a question.
 ///
 /// libtest captures output and prints it only for tests that fail, which is
@@ -51,13 +51,13 @@ async fn podman() -> Option<Client> {
 		};
 	// Skipping is the right default: these tests must not fail on a developer
 	// machine without Podman. But a silent skip reports `ok` for a test that
-	// executed nothing, and libtest counts it as passed — so an environment
+	// executed nothing, and libtest counts it as passed, so an environment
 	// where Podman never came up looks identical to a clean run. Somewhere that
 	// Podman is guaranteed (the nested-virt lane), set PODUP_REQUIRE_PODMAN and
 	// the skip becomes a hard failure instead of a green lie.
 	assert!(
 		!(connected.is_none() && std::env::var_os("PODUP_REQUIRE_PODMAN").is_some()),
-		"PODUP_REQUIRE_PODMAN is set but Podman is unreachable — refusing to report this suite as passing without running it"
+		"PODUP_REQUIRE_PODMAN is set but Podman is unreachable; refusing to report this suite as passing without running it"
 	);
 	connected
 }
@@ -74,7 +74,7 @@ fn bin() -> &'static str {
 
 /// Run the built `podup` and hand back whatever it did, checking nothing.
 ///
-/// For calls whose outcome the test does not depend on — teardown, mostly. When
+/// For calls whose outcome the test does not depend on, teardown mostly. When
 /// a later assertion depends on this command having worked, use [`run_ok`].
 #[allow(dead_code)]
 fn run(args: &[&str]) -> std::process::Output {
@@ -88,7 +88,7 @@ fn run(args: &[&str]) -> std::process::Output {
 ///
 /// Setting a test up with [`run`] and then asserting on the effect throws away
 /// the evidence of what went wrong. `create_makes_containers_without_starting_them`
-/// discarded an `up -d` and reported `left: 0, right: 1` — true, and unable to
+/// discarded an `up -d` and reported `left: 0, right: 1`: true, and unable to
 /// say whether `up` failed or whether it worked and the container died (#1340).
 ///
 /// The failure is invisible while the environment is healthy and surfaces

@@ -8,7 +8,7 @@ use super::*;
 use std::collections::HashMap;
 
 /// Bring up `web` with three replicas, then drive `exec` from a *fresh* engine
-/// whose compose file still declares the default single replica — exactly the
+/// whose compose file still declares the default single replica: exactly the
 /// real CLI case where a later `podup exec` knows nothing of the prior
 /// `up --scale`. Before the fix, `exec` resolved the replica count from that
 /// static default (1): a bare `exec` targeted the unsuffixed `web` (which does
@@ -51,7 +51,7 @@ async fn engine_exec_reaches_live_scaled_replicas() {
 		.await;
 
 	// A bare `exec` (no index) must reach the lowest-numbered running replica,
-	// web-1 — not the never-created unsuffixed `web`.
+	// web-1, not the never-created unsuffixed `web`.
 	let bare = engine
 		.exec_with_options(
 			&file,

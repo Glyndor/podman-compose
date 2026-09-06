@@ -1,4 +1,4 @@
-//! Unit tests for the `ui` styling surface — split out to keep the module
+//! Unit tests for the `ui` styling surface, split out to keep the module
 //! within the source line limit, the same `tests.rs` split `autostart`, the
 //! libpod client and `stats` already use.
 
@@ -6,7 +6,7 @@ use super::*;
 use std::collections::HashMap;
 
 /// The bug this exists to stop: `ls` reports `running(1), exited(1)`, and
-/// styling it as one string let the first matching substring win — `exit`
+/// styling it as one string let the first matching substring win: `exit`
 /// came first, so a project with a service up rendered entirely red,
 /// indistinguishable from one that is completely dead.
 #[test]
@@ -20,8 +20,8 @@ fn a_mixed_project_is_not_painted_as_one_state() {
 	);
 }
 
-/// A container that ran to completion is not a failure. One-shot services —
-/// migrations, seeds, a `command` that simply ends — live in this state.
+/// A container that ran to completion is not a failure. One-shot services
+/// (migrations, seeds, a `command` that simply ends) live in this state.
 #[test]
 fn a_clean_exit_is_not_red() {
 	let red = Style::new().fg_color(Some(AnsiColor::Red.into()));
@@ -73,7 +73,7 @@ fn paint_gates_on_enabled() {
 
 #[test]
 fn colour_choice_resolution() {
-	// Pure resolution — never touches the process-global choice, so it can't
+	// Pure resolution: never touches the process-global choice, so it can't
 	// race the production code (LinePrefixer/status_cell) that reads it.
 	temp_env::with_var_unset("NO_COLOR", || {
 		assert!(!colored_with(ColorChoice::Never, true));
@@ -100,7 +100,7 @@ fn status_style_is_semantic() {
 }
 
 /// The verb bands are what colour a progress line as it closes. A row that
-/// closes with `Failed` previously fell through to the default green — the same
+/// closes with `Failed` previously fell through to the default green, the same
 /// default that paints `Created`, so a failed row read as a successful one
 /// except for the word. The fix is one prefix on the existing red arm (#1347).
 #[test]
@@ -118,7 +118,7 @@ fn a_failed_progress_verb_is_red() {
 		red.render().to_string(),
 		"failed (lower) must share the red band"
 	);
-	// The verbs that were already red stay red — the change is additive.
+	// The verbs that were already red stay red; the change is additive.
 	assert_eq!(
 		action_style("Removed").render().to_string(),
 		red.render().to_string()
@@ -146,7 +146,7 @@ fn status_cell_pads_and_keeps_status() {
 }
 
 /// The whole point of the shared key: `ps` prints `proj-web-1`, `logs`
-/// prefixes `web-1`, and the progress lines print `proj-web-1` — all three
+/// prefixes `web-1`, and the progress lines print `proj-web-1`; all three
 /// must resolve to one colour, or the palette is not stable at all.
 #[test]
 fn every_spelling_of_one_container_gets_one_colour() {
@@ -175,7 +175,7 @@ fn an_unprefixed_label_is_keyed_on_itself() {
 /// `SERVICES` is one static for the whole process, so two tests calling
 /// `set_services` on different threads race and each can read the other's
 /// registration. That would make both flaky, and a flaky test is a defect
-/// rather than noise — so every test that writes the registry takes this
+/// rather than noise, so every test that writes the registry takes this
 /// first. Tests that only build a local `HashMap` do not need it.
 ///
 /// The lock is poison-tolerant on purpose: a panic in one of these tests must
@@ -217,8 +217,8 @@ fn set_services_makes_registered_names_distinct() {
 /// 1`, since `assign` itself wraps at the wide palette's size), and must wrap
 /// that again to index the six-entry `SERVICE_PALETTE` safely.
 ///
-/// Calls `slot_to_style` itself — the real narrow-branch code, not a
-/// reimplementation of its modulo — for every slot the assignment can
+/// Calls `slot_to_style` itself (the real narrow-branch code, not a
+/// reimplementation of its modulo) for every slot the assignment can
 /// produce, on both the wide and narrow branches. Confirmed this fails: with
 /// the `% SERVICE_PALETTE.len()` removed from `slot_to_style`'s narrow arm,
 /// this test panics with an index-out-of-bounds on slot 6 (`index out of
@@ -235,7 +235,7 @@ fn every_wide_palette_slot_indexes_the_narrow_palette_safely() {
 /// Two projects in one process coexist: the first project's colours survive
 /// the second project's registration.
 ///
-/// Inversion of the defect pinned in #1518 — `SERVICES` was a single
+/// Inversion of the defect pinned in #1518: `SERVICES` was a single
 /// process-wide static and `set_services` replaced it rather than merging,
 /// so with two `Engine` values alive in one process (helmly-agent's shape,
 /// a fleet of projects) the second registration dropped the first project's
@@ -247,7 +247,7 @@ fn every_wide_palette_slot_indexes_the_narrow_palette_safely() {
 ///
 /// The two name sets are chosen so the registered slot and the hash fallback
 /// disagree; the second assertion guards that the fixture can actually
-/// discriminate — without it the first assertion would hold whether or not
+/// discriminate: without it the first assertion would hold whether or not
 /// the fix were in place, the vacuous shape this file already carries a
 /// warning about elsewhere.
 #[test]

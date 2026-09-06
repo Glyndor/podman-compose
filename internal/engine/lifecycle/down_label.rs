@@ -33,27 +33,27 @@ impl Engine {
 	/// Best-effort across every container/network/volume so one failure never
 	/// leaves the rest of the teardown undone, but the first real REMOVAL
 	/// failure is remembered and returned at the end instead of being swallowed
-	/// into a warning — mirroring the fix applied to [`Engine::down_with_options`]
+	/// into a warning, mirroring the fix applied to [`Engine::down_with_options`]
 	/// (#598). A stalled or failed `stop` does NOT count towards this: the
 	/// force-remove that follows SIGKILLs the container regardless (the
 	/// container-removal path forces removal), so only a genuine removal failure
 	/// aggregates. A 404 (already gone) stays an idempotent no-op throughout.
 	///
-	/// With no compose file there is no dependency graph to level, so — unlike
-	/// [`Engine::down_with_options`]'s level walk — every labelled container is
+	/// With no compose file there is no dependency graph to level, so, unlike
+	/// [`Engine::down_with_options`]'s level walk, every labelled container is
 	/// independent from podup's point of view and all of them tear down in one
 	/// bounded concurrent batch instead of strictly sequentially.
 	pub async fn down_by_label(&self, remove_volumes: bool) -> Result<()> {
 		let grace = self.stop_timeout.unwrap_or(DEFAULT_STOP_GRACE_SECS);
 		let mut first_err: Option<crate::error::ComposeError> = None;
 
-		// With no compose file, the service names are not known statically — but
+		// With no compose file, the service names are not known statically, but
 		// the labelled containers we are about to tear down carry `podup.service`,
 		// so list them grouped by service instead of the flat name list, and
 		// register the result before any teardown progress line is printed.
 		// Without this every container here fell back to the per-label hash
 		// instead of the sequential identity colour `ps` and the compose-file
-		// `down` path use — the same class of defect fixed for `logs` (#1082).
+		// `down` path use, the same class of defect fixed for `logs` (#1082).
 		//
 		// `set_services` registers under the project's name in the process-wide
 		// identity-colour registry. Two `Engine` values alive in one process
@@ -101,13 +101,13 @@ impl Engine {
 		Ok(())
 	}
 
-	/// Remove every network carrying this project's `podup.project` label — the
+	/// Remove every network carrying this project's `podup.project` label: the
 	/// implicit `<project>_default`, a network whose compose key changed, or any
 	/// project network when no file is present. Only podup-labelled networks
 	/// match, so a user's external network is never touched. Best-effort across
 	/// every network: a list failure leaves networks in place rather than
 	/// aborting teardown, and one network's removal failure never blocks the
-	/// rest — but the first genuine removal failure is returned to the caller
+	/// rest, but the first genuine removal failure is returned to the caller
 	/// (a 404 stays an idempotent no-op) so it can decide whether to aggregate
 	/// it, matching [`Engine::down_by_label`]'s exit-code contract for the same
 	/// class of failure (#598).
@@ -150,9 +150,9 @@ impl Engine {
 	/// Remove every named volume carrying this project's `podup.project` label.
 	/// libpod's `/volumes/json` is fetched in full and filtered client-side by
 	/// the label (mirroring the secret sweep) so only podup-created volumes are
-	/// deleted — a user's hand-made or external volume is never touched.
+	/// deleted: a user's hand-made or external volume is never touched.
 	/// Best-effort across every volume: a list failure leaves volumes in place,
-	/// and one volume's removal failure never blocks the rest — but the first
+	/// and one volume's removal failure never blocks the rest, but the first
 	/// genuine removal failure is returned to the caller (a 404 stays an
 	/// idempotent no-op), matching [`Engine::remove_project_networks_by_label`].
 	pub(super) async fn remove_project_volumes_by_label(

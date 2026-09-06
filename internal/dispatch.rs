@@ -14,7 +14,7 @@ use crate::cli::*;
 /// Clone the compose file keeping only services in an active profile, plus any
 /// named on the command line (which activates their profile). Used by the
 /// per-service subcommands so they target exactly the set `up`/`create` would
-/// bring up — never a service hidden behind an inactive profile.
+/// bring up, never a service hidden behind an inactive profile.
 fn profile_filtered(
 	file: &podup::compose::types::ComposeFile,
 	profile: &[String],
@@ -107,7 +107,7 @@ pub(crate) async fn dispatch(
 			// means "return once the services are up", so attaching afterwards
 			// would block forever on a command whose whole point is to finish.
 			// Measured against v5.1.3 on the same socket: `docker compose up
-			// --wait` exits 0, and `podup up --wait` hung until killed — which is
+			// --wait` exits 0, and `podup up --wait` hung until killed, which is
 			// the canonical health-gated CI idiom, so it hung the job.
 			if watch {
 				engine.watch(file).await?;
@@ -149,7 +149,7 @@ pub(crate) async fn dispatch(
 				// Same ordering rule as the abort above: reported after the
 				// teardown, never instead of it. docker compose exits 1 when an
 				// attached stream dies with the container still running, and we
-				// exited 0 — measured on 5.4.2 by restarting the libpod socket
+				// exited 0, measured on 5.4.2 by restarting the libpod socket
 				// underneath an attached `up`.
 				match outcome {
 					podup::AttachOutcome::Aborted => {}
@@ -276,7 +276,7 @@ pub(crate) async fn dispatch(
 			// `-s/--stop` gracefully stops the targets first so they can be
 			// removed without `--force`.
 			// A paused container cannot be stopped (Podman rejects it with a raw
-			// state error), so resume it first — matching `docker compose rm
+			// state error), so resume it first, matching `docker compose rm
 			// -s`. `unpause` is idempotent, so this is a no-op when not paused.
 			if stop {
 				engine.unpause_paused(file, &services).await?;

@@ -81,8 +81,8 @@ async fn inline_secret_materialized() {
 
 	engine.up(&file).await.unwrap();
 	// Inline content is created as a Podman-native secret and mounted at the
-	// usual /run/secrets/<name> path. `cat` alone only proves the path exists —
-	// it exits 0 on an empty file too — so compare the bytes.
+	// usual /run/secrets/<name> path. `cat` alone only proves the path exists
+	// (it exits 0 on an empty file too) so compare the bytes.
 	let read = engine
 		.exec_with_options(
 			&file,
@@ -234,7 +234,7 @@ async fn inline_config_materialized() {
 
 	engine.up(&file).await.unwrap();
 	// A config defaults to an absolute container-root path, unlike a secret's
-	// /run/secrets/<name> — so this also pins the default target, not just the
+	// /run/secrets/<name>, so this also pins the default target, not just the
 	// content.
 	let read = engine
 		.exec_with_options(
@@ -319,7 +319,7 @@ async fn depends_on_service_healthy() {
 	// time it takes to create web's container, or the mutation that empties the
 	// readiness map still leaves this green (see depends_on_service_completed).
 	// And `retries` has to outlast that same delay, or db is declared unhealthy
-	// before it writes and `up` fails before any assertion runs — which is what
+	// before it writes and `up` fails before any assertion runs, which is what
 	// 12s against 10 retries at a 1s interval did.
 	let yaml = format!(
 		"services:\n  db:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"sleep 12; echo db-ready > /out/ready; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    healthcheck:\n      test: [\"CMD\", \"test\", \"-f\", \"/out/ready\"]\n      interval: 1s\n      timeout: 2s\n      retries: 30\n      start_period: 0s\n  web:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"cat /out/ready > /out/web-saw 2>/dev/null; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    depends_on:\n      db:\n        condition: service_healthy\n",
@@ -370,7 +370,7 @@ async fn depends_on_service_healthy_with_default_timeout() {
 
 	assert!(
 		elapsed < std::time::Duration::from_secs(45),
-		"up took {elapsed:?} — a healthcheck with no explicit timeout must get the spec default, not 0s"
+		"up took {elapsed:?}; a healthcheck with no explicit timeout must get the spec default, not 0s"
 	);
 	assert_eq!(
 		names,
@@ -393,12 +393,12 @@ async fn depends_on_service_completed() {
 	//
 	// The delay has to beat the cost of creating app's container, not just be
 	// non-zero. `up` starts services in dependency levels, so init is launched
-	// before app whether or not the readiness wait happens — the wait only adds
+	// before app whether or not the readiness wait happens; the wait only adds
 	// "and has finished". With a 2s delay the mutation that empties the readiness
 	// map left this test green, because creating app took longer than that on its
 	// own.
 	// If app were started before init completed, the read finds nothing and the
-	// marker below stays empty — which is exactly what a dropped dependency wait
+	// marker below stays empty, which is exactly what a dropped dependency wait
 	// looks like from outside.
 	let yaml = format!(
 		"services:\n  init:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"sleep 12; echo init-done > /out/order; exit 0\"]\n    volumes:\n      - {out}:/out:z\n  app:\n    image: alpine:latest\n    command: [\"sh\", \"-c\", \"cat /out/order > /out/app-saw 2>/dev/null; sleep infinity\"]\n    volumes:\n      - {out}:/out:z\n    depends_on:\n      init:\n        condition: service_completed_successfully\n",
@@ -445,7 +445,7 @@ async fn depends_on_scaled_service_completed() {
 	// than `init-1` 404s and aborts `up`.
 	//
 	// Measured: aiming the wait at the base name reddens this test at
-	// `up().unwrap()`, not here — so the bare unwrap already covered that
+	// `up().unwrap()`, not here, so the bare unwrap already covered that
 	// regression. What the assertion adds is that both replicas exist and app
 	// came up with them, which the unwrap could not distinguish from a run where
 	// app was silently skipped. Precision, not new falsifiability.
@@ -472,7 +472,7 @@ async fn profile_filtered_service_skipped() {
 	};
 	let proj = proj("prf");
 	let engine = Engine::new(client, proj.clone());
-	// "debug" service has profile "debug" — not in active profiles → skipped
+	// "debug" service has profile "debug", not in active profiles → skipped
 	// "web" has no profiles → always runs
 	let file = parse_str(
 		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n  debug:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    profiles: [\"debug\"]\n",
@@ -567,7 +567,7 @@ async fn depends_on_healthy_no_healthcheck_skips_wait() {
 
 	assert!(
 		elapsed < std::time::Duration::from_secs(30),
-		"up took {elapsed:?} — a service_healthy dependency with no healthcheck must be skipped, not waited on"
+		"up took {elapsed:?}; a service_healthy dependency with no healthcheck must be skipped, not waited on"
 	);
 	assert_eq!(
 		names,
@@ -609,7 +609,7 @@ async fn ps_with_port_bindings() {
 /// `attach_logs` streams to stdout, so what it carries cannot be read from the
 /// library. Unlike `attach_logs_empty_attach_returns`, which asserts a bound
 /// because "returns immediately" is checkable without the stream, there is
-/// nothing here to bound — this one names the content. No CLI test covers
+/// nothing here to bound; this one names the content. No CLI test covers
 /// attached output either, so the claim in the name is unverified.
 #[tokio::test]
 async fn attach_logs_streams_container_output() {
@@ -633,7 +633,7 @@ async fn attach_logs_streams_container_output() {
 
 /// Same: `logs` prints, and whether a container's stderr is interleaved into it
 /// is a property of the output. `cli_logs_subcommand` asserts stdout content and
-/// the service prefix, but drives a service that writes only to stdout — so the
+/// the service prefix, but drives a service that writes only to stdout, so the
 /// stderr path this test is named for is asserted nowhere.
 #[tokio::test]
 async fn logs_with_stderr_output() {

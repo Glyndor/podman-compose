@@ -44,7 +44,7 @@ impl Engine {
 			}
 			// Deduplicate repeated positionals (`top web web`) preserving order, so
 			// a service's process block is not rendered twice and we avoid redundant
-			// `/top` API calls — matching docker compose top.
+			// `/top` API calls, matching docker compose top.
 			dedup_preserving_order(target_services)
 		};
 
@@ -53,7 +53,7 @@ impl Engine {
 			// Only running containers are asked for their process list, so a
 			// stopped replica is skipped before the call rather than after it
 			// fails: `/top` answers a non-running container with an HTTP 500, and
-			// the rule below — that a non-404 must surface — is deliberate and
+			// the rule below (that a non-404 must surface) is deliberate and
 			// stays. Measured against `docker compose top` v5.1.3 on the same
 			// Podman socket: it omits a stopped service, prints the rest and exits
 			// 0 (#1250).
@@ -82,8 +82,8 @@ impl Engine {
 						Self::print_process_table(&titles, &processes);
 					}
 					// A container removed between the listing above and this call
-					// (404) is tolerated; any other failure — an unreachable socket,
-					// a container that died in that same window — is a real error
+					// (404) is tolerated; any other failure (an unreachable socket,
+					// a container that died in that same window) is a real error
 					// that must surface with a non-zero exit instead of being
 					// swallowed into a warning.
 					Err(e) if e.is_status(404) => {
@@ -104,7 +104,7 @@ impl Engine {
 	/// On `ui::Table` rather than the hand-rolled aligner it replaces: cells are
 	/// escaped and columns sized in one place, so `top` stops being a third
 	/// layout dialect that has to be fixed separately every time. The escaping
-	/// is not incidental — these cells hold a process `argv` read out of a
+	/// is not incidental: these cells hold a process `argv` read out of a
 	/// container, which is attacker-controlled.
 	///
 	/// The bookkeeping columns are dimmed so the command line is what the eye
@@ -150,7 +150,7 @@ impl Engine {
 		// compose replica count: a service scaled purely via CLI `--scale` has no
 		// `scale:` in the file, so the static count is 1 and would target the
 		// never-created un-indexed base name. Falls back to the static names
-		// when nothing is running yet — the bulk map (`#1445`) only sees what
+		// when nothing is running yet; the bulk map (`#1445`) only sees what
 		// Podman has, not the compose file.
 		let live_by_service = self.live_project_replicas_sorted().await?;
 		let live = match live_by_service.get(service_name) {

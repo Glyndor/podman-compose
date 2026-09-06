@@ -4,7 +4,7 @@
 //! The board needs the resource set up front, and nothing in the tree produced
 //! it: every progress event fires once its own work is over, so a board grown
 //! from those events would only ever show the past. This is the missing half,
-//! and it is derivable — `resolve_levels` already runs before the walk begins,
+//! and it is derivable: `resolve_levels` already runs before the walk begins,
 //! and the networks and volumes come straight off the compose file.
 //!
 //! Deliberately a *prediction*, not a promise. It is computed from the compose
@@ -85,7 +85,7 @@ impl Engine {
 	/// Every resource an `up`/`create` pass will touch, in the order it will
 	/// touch them: networks, then volumes, then containers by dependency level.
 	///
-	/// The order matters as much as the contents — the board's completed rows
+	/// The order matters as much as the contents: the board's completed rows
 	/// scroll away in this order, and that scrollback is the record the command
 	/// leaves behind.
 	pub(super) fn up_resources(
@@ -98,7 +98,7 @@ impl Engine {
 		out.extend(self.volume_resources(file));
 
 		// Containers in dependency order, which is the order they will start.
-		// Falls back to the file's own order if the graph cannot be resolved —
+		// Falls back to the file's own order if the graph cannot be resolved;
 		// a cycle is a real error, but it is `run_up`'s to report, and seeding
 		// must not be the thing that surfaces it.
 		let levels = crate::compose::resolve_levels(file)

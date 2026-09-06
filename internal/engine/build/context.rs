@@ -27,8 +27,8 @@ fn append_context<W: std::io::Write>(
 	force_include: &[&str],
 ) -> Result<()> {
 	// Do not dereference symlinks: a symlink in the context would otherwise pack
-	// the bytes of its (possibly out-of-context) target — e.g. `/etc/hostname` or
-	// an SSH key — into the image. Store the link itself instead, matching the
+	// the bytes of its (possibly out-of-context) target, e.g. `/etc/hostname` or
+	// an SSH key, into the image. Store the link itself instead, matching the
 	// watch-sync and cp paths.
 	tar.follow_symlinks(false);
 	for abs in walk::walk_dir(context).map_err(ComposeError::Io)? {
@@ -41,7 +41,7 @@ fn append_context<W: std::io::Write>(
 		}
 		// The active Dockerfile is always sent to the builder even when
 		// `.dockerignore` would match it: Docker keeps the Dockerfile (and
-		// `.dockerignore`) available for the build itself — they just can't be
+		// `.dockerignore`) available for the build itself; they just can't be
 		// COPY'd into the image. Without this, a `.dockerignore` listing
 		// `Dockerfile` (or a blanket `*`) drops it from the context tar and the
 		// build fails with "stat .../Dockerfile: no such file or directory".
@@ -266,7 +266,7 @@ pub(super) fn map_additional_context(base_dir: &Path, value: &str) -> String {
 /// the context directory, podman build reads its contents. […] if both are in
 /// the context directory, podman build only uses `.containerignore`."
 ///
-/// So exactly one file applies — never the union. Applying both client-side
+/// So exactly one file applies, never the union. Applying both client-side
 /// produced an image missing content that `podman build` puts in, because we
 /// filtered by `.dockerignore` (a file podman would have ignored entirely) and
 /// the server then filtered by `.containerignore`.
@@ -348,7 +348,7 @@ fn glob_rec(pat: &[u8], s: &[u8]) -> bool {
 	if pat.is_empty() {
 		return s.is_empty();
 	}
-	// `**` — matches across `/` boundaries.
+	// `**` matches across `/` boundaries.
 	if pat.starts_with(b"**") {
 		let mut rest = &pat[2..];
 		// `**/` may also match zero directories, so `**/foo` matches top-level `foo`.

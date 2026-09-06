@@ -1,7 +1,7 @@
 //! `docs/commands.md` must document every flag the CLI actually accepts.
 //!
 //! The command reference was written per command by hand and drifted every time
-//! a flag landed — #1084 counted fourteen commands with missing flags and one
+//! a flag landed: #1084 counted fourteen commands with missing flags and one
 //! precedence rule that was simply false. Fixing the text once only resets the
 //! clock; this test is what stops it recurring, by diffing `--help` against the
 //! document rather than trusting either.
@@ -12,14 +12,14 @@
 //! message ambiguous.
 //!
 //! The match is scoped to the command's own `###` section. Searching the whole
-//! document — which this did until #1132 — means a flag documented anywhere
+//! document (which this did until #1132) means a flag documented anywhere
 //! satisfies every command, so eight flags sat undocumented in their own tables
 //! while the test stayed green. Scoping it is also the honest reading of what
 //! the test claims to check: that a reader looking up `create` finds `--pull`
 //! under `create`, not somewhere else entirely.
 //!
 //! It still checks names, never descriptions. A row can say the opposite of
-//! what the code does and this will not notice — `exec`'s pseudo-TTY shipped
+//! what the code does and this will not notice: `exec`'s pseudo-TTY shipped
 //! next to "podup never allocates one" (#1079), and `commit --pause` documented
 //! a default of off while the code defaults it on (#1132).
 
@@ -72,7 +72,7 @@ const COMMANDS: [&str; 29] = [
 /// The lines of `docs/commands.md` documenting one command: from its `###`
 /// heading to the next heading of any level.
 ///
-/// Headings carry their positional arguments — ``### `cp <SRC> <DST>` `` — so a
+/// Headings carry their positional arguments (``### `cp <SRC> <DST>` ``) so a
 /// command matches when the first backticked word of the heading is its name.
 /// `pause` and `unpause` share one heading, which the `/`-separated form covers.
 fn section_for(docs: &str, cmd: &str) -> Option<String> {
@@ -102,7 +102,7 @@ fn every_cli_flag_is_documented() {
 		.expect("read docs/commands.md");
 
 	// clap marks the compose-wide options `global`, so every command's `--help`
-	// reprints them — but they are documented once, in the global table, not in
+	// reprints them, but they are documented once, in the global table, not in
 	// each command's own. Subtract them or the per-command check demands that
 	// `--socket` be listed under all twenty-nine.
 	let global = Command::new(bin())
@@ -164,7 +164,7 @@ fn every_global_flag_is_documented() {
 /// The CLI names the open standard, not another vendor's product.
 ///
 /// `podup` implements the **Compose Spec**, which is a published standard with
-/// its own name — so saying "Compose" is both brand-free and more accurate than
+/// its own name, so saying "Compose" is both brand-free and more accurate than
 /// naming a particular implementation of it.
 ///
 /// The one allowed exception is a literal filename. `docker-compose.yaml` is

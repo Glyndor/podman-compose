@@ -12,14 +12,14 @@ on:
         description: Directory containing the Cargo workspace
         type: string
         default: "."
-      # Pinned, not the runner's floating preinstalled Rust — see rust-ci.yml's
+      # Pinned, not the runner's floating preinstalled Rust; see rust-ci.yml's
       # toolchain input for why an unpinned toolchain is a problem.
       #
       # Keep this equal to rust-ci.yml's `toolchain`. It was 1.97 while rust-ci
       # was already on 1.98, because the bump raised one and not the other and
       # nothing compared them. A repository whose SBOM is produced by a compiler
       # its test suite never ran is the defect podup#1487 recorded, and podup
-      # now has a test asserting its own two pins agree — nothing asserts it
+      # now has a test asserting its own two pins agree, but nothing asserts it
       # across these two reusables, so it is written here instead.
       toolchain:
         description: Rust toolchain to pin the SBOM and license job to
@@ -84,7 +84,7 @@ jobs:
 
       - name: Install generators
         # `cargo install --version X.Y.Z` already installs that exact release;
-        # the leading "=" below is redundant, kept only for readability —
+        # the leading "=" below is redundant, kept only for readability:
         # caret ("^") matching is a Cargo.toml dependency rule, not this one.
         run: |
           command -v cargo-cyclonedx >/dev/null || cargo install --locked cargo-cyclonedx --version "=$CYCLONEDX_VERSION"
@@ -109,7 +109,7 @@ jobs:
           suffix="$WORKING_DIRECTORY"
           suffix="${suffix#./}"
           # "." and "./" both strip down to the same "root" case; so does an
-          # empty input ("") — none of them denote a real subdirectory name,
+          # empty input (""): none of them denote a real subdirectory name,
           # and left alone they'd produce a trailing-hyphen artifact name
           # ("sbom-and-notices-") instead of one qualified by directory.
           if [ "$suffix" = "." ] || [ -z "$suffix" ]; then

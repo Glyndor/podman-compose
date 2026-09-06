@@ -194,7 +194,7 @@ fn ulimit_value(value: i64, name: &str, which: &str) -> u64 {
 	}
 }
 
-/// Upper bound on an explicit GPU `count:` — clamps an untrusted compose value
+/// Upper bound on an explicit GPU `count:`, clamping an untrusted compose value
 /// so a huge count cannot allocate billions of device-id strings (OOM). Far
 /// above any real host's GPU count.
 const MAX_GPU_DEVICES: i64 = 64;
@@ -202,7 +202,7 @@ const MAX_GPU_DEVICES: i64 = 64;
 /// Map `deploy.resources.reservations.devices` GPU reservations to Podman CDI
 /// device names (e.g. `nvidia.com/gpu=all`).
 ///
-/// Only NVIDIA GPU reservations are translated — the common case Podman exposes
+/// Only NVIDIA GPU reservations are translated: the common case Podman exposes
 /// through CDI. Reservations for other drivers or capabilities are warned about
 /// and skipped, since there is no portable mapping for them.
 pub(crate) fn cdi_devices(service: &Service) -> Vec<String> {

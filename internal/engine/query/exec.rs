@@ -14,7 +14,7 @@ use crate::libpod::{urlencoded, LogOutput, API_PREFIX};
 use super::Engine;
 
 /// Ceiling on how long to wait for the libpod exec-start *response head*. A
-/// healthy engine returns it almost instantly — either the hijacked stream or a
+/// healthy engine returns it almost instantly: either the hijacked stream or a
 /// prompt error (e.g. HTTP 500 "unable to find user … no matching entries in
 /// passwd file"). When the target user/workdir does not resolve, some engine
 /// builds instead stall before answering, which the default client read timeout
@@ -177,12 +177,12 @@ fn map_not_running(e: crate::libpod::PodmanError, service_name: &str) -> Compose
 
 /// Translate a failure *starting* the exec session into a clear error. A
 /// client-side timeout means the libpod exec-start never returned its response
-/// head within [`EXEC_START_TIMEOUT`] — almost always a wedged launch (e.g. a
+/// head within [`EXEC_START_TIMEOUT`], almost always a wedged launch (e.g. a
 /// nonexistent `--user`/`--workdir` the server stalls resolving) rather than an
 /// unhealthy socket, so surface that with the likely cause instead of the
-/// generic "timed out waiting for the Podman socket" message. Every other error
-/// — including the prompt HTTP error an engine *does* return for a bad user
-/// ("unable to find user … no matching entries in passwd file") — passes through
+/// generic "timed out waiting for the Podman socket" message. Every other error,
+/// including the prompt HTTP error an engine *does* return for a bad user
+/// ("unable to find user … no matching entries in passwd file"), passes through
 /// unchanged so legitimate diagnostics are never masked. Pure so it is
 /// unit-tested.
 fn map_exec_start_err(e: crate::libpod::PodmanError, opts: &ExecOptions) -> ComposeError {
@@ -239,7 +239,7 @@ impl Engine {
 		// `up` path would have emitted, so `exec` against a privileged or
 		// host-networked container does not appear safer than the same
 		// container's `up`. The container itself was created with these modes,
-		// but `exec` is the operator's chance to notice them — and the command
+		// but `exec` is the operator's chance to notice them, and the command
 		// they are about to run executes inside that container. `--no-warn`
 		// still opts out.
 		if !self.no_warn {
@@ -249,7 +249,7 @@ impl Engine {
 		}
 		// Resolve the target replica against the *running* containers (matching
 		// `cp`), so `--index N` and a bare `exec` reach a live replica of a service
-		// scaled by an earlier `up --scale`/`scale` — not just the compose static
+		// scaled by an earlier `up --scale`/`scale`, not just the compose static
 		// count. `--index 0`/out-of-range indexes stay rejected consistently.
 		let container_name = self
 			.live_replica_name_at(service_name, service, opts.index)
@@ -281,7 +281,7 @@ impl Engine {
 		let resp: ExecCreateResponse = match self.client.post_json(&create_path, &exec_cfg).await {
 			Ok(resp) => resp,
 			// The exec create is where the drops measured in #1339 land most
-			// often — twice of six, more than any other endpoint. Unlike the
+			// often: twice of six, more than any other endpoint. Unlike the
 			// lifecycle calls, a lost response here cannot be resolved by looking
 			// at the container: what is lost is the exec id, and a container
 			// running several execs at once cannot say which of its `ExecIDs` was
@@ -290,7 +290,7 @@ impl Engine {
 			// Retrying is safe instead, because creating an exec changes nothing.
 			// Measured on Podman 5.7.0: five execs created and never started leave
 			// the container `running` on the same pid with no extra process
-			// inside — they are inert handles that die with it. So the worst case
+			// inside; they are inert handles that die with it. So the worst case
 			// of a retry is one leaked handle, against an `exec` that fails for a
 			// reason that was never about the command.
 			//
@@ -380,7 +380,7 @@ impl Engine {
 	/// Read the session's exit code and turn a non-zero one into
 	/// `RunExited`, so `podup exec` propagates the command's status the way
 	/// `docker compose exec` does. Shared by the streaming and interactive
-	/// paths — an interactive shell that exits 1 must still exit 1.
+	/// paths: an interactive shell that exits 1 must still exit 1.
 	async fn exec_exit_status(&self, exec_id: &str) -> Result<()> {
 		let inspect_path = format!("{API_PREFIX}/exec/{}/json", urlencoded(exec_id));
 		let inspect: ExecInspect = self
@@ -401,15 +401,15 @@ impl Engine {
 ///
 /// Three things must all hold: the caller did not pass `-T`, the caller did not
 /// detach, and stdin is actually a terminal. The last is what keeps a scripted
-/// `podup exec` on the unchanged streaming path — allocating a pty for a
+/// `podup exec` on the unchanged streaming path, because allocating a pty for a
 /// pipeline would change output framing for every existing script.
 ///
 /// Pure except for the `isatty` probe, which is behind `stdin_is_terminal` so
 /// the decision itself is unit-testable.
 fn interactive_exec(opts: &ExecOptions) -> bool {
 	// Both ends, not just stdin. A pty merges stdout and stderr and writes
-	// CRLF, so `podup exec db psql > out.txt` typed at a shell — stdin still a
-	// terminal, stdout a file — wrote pty bytes with stderr folded in where it
+	// CRLF, so `podup exec db psql > out.txt` typed at a shell (stdin still a
+	// terminal, stdout a file) wrote pty bytes with stderr folded in where it
 	// used to write clean demultiplexed output. Measured against
 	// `docker compose`, which keeps that redirect clean.
 	wants_interactive(opts, stdin_is_terminal() && stdout_is_terminal())
@@ -436,7 +436,7 @@ pub(crate) fn stdout_is_terminal() -> bool {
 	std::io::stdout().is_terminal()
 }
 
-/// Whether stdin is a terminal — the gate that keeps a scripted `exec` on the
+/// Whether stdin is a terminal: the gate that keeps a scripted `exec` on the
 /// unchanged streaming path.
 pub(crate) fn stdin_is_terminal() -> bool {
 	use std::io::IsTerminal;
@@ -452,7 +452,7 @@ mod interactive_decision_tests;
 mod tests;
 
 /// The exec create is the endpoint the #1339 drops land on most, and a lost
-/// response there cannot be resolved by looking at the container — what is lost
+/// response there cannot be resolved by looking at the container; what is lost
 /// is the exec id. Retrying is safe because creating an exec changes nothing:
 /// measured on Podman 5.7.0, five unstarted execs leave the container running on
 /// the same pid with no extra process inside.

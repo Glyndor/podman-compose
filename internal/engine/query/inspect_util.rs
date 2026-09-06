@@ -82,7 +82,7 @@ pub(super) fn select_replica(
 }
 
 /// Resolve the `(port, proto)` for `port` from a `PORT` or `PORT/proto` argument,
-/// the `/proto` suffix overriding the `--protocol` flag — matching
+/// the `/proto` suffix overriding the `--protocol` flag, matching
 /// `docker compose port`. Pure so the parsing is unit-tested.
 ///
 /// The private port is parsed strictly like docker's port spec: only a canonical
@@ -90,7 +90,7 @@ pub(super) fn select_replica(
 /// (`080`), surrounding whitespace, or any trailing junk (`80/tcp/extra`) are
 /// rejected rather than silently coerced. The protocol is validated to
 /// `tcp`/`udp` (case-insensitive) and normalised to lowercase so it matches the
-/// lowercase keys Podman reports — an unknown or empty protocol errors clearly
+/// lowercase keys Podman reports; an unknown or empty protocol errors clearly
 /// instead of yielding an empty, exit-0 "no mapping" result.
 pub(super) fn parse_port_proto(
 	private_port: &str,
@@ -204,7 +204,7 @@ pub(super) fn top_dim_columns(titles: &[String]) -> Vec<usize> {
 ///
 /// On `ui::Table` rather than a hand-rolled aligner: cells are escaped and
 /// columns sized in one place, so `top` stops being a third layout dialect that
-/// has to be fixed separately every time. The escaping is not incidental — these
+/// has to be fixed separately every time. The escaping is not incidental: these
 /// cells hold a process `argv` read out of a container, which is
 /// attacker-controlled, and a process can name itself.
 ///

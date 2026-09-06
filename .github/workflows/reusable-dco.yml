@@ -33,7 +33,7 @@ jobs:
           # event payload, not refs/pull/N/merge (the synthetic merge commit
           # actions/checkout builds when it checks out a PR ref). That
           # synthetic commit is never in this BASE_SHA..HEAD_SHA range to
-          # begin with — it isn't an ancestor of HEAD_SHA — so `--no-merges`
+          # begin with (it isn't an ancestor of HEAD_SHA), so `--no-merges`
           # below has nothing to do with excluding it; it skips real merge
           # commits that may exist on the PR branch itself. Those are covered
           # separately by "Detect evil merges" below, which checks
@@ -75,7 +75,7 @@ jobs:
         #     be recomputed, fails closed rather than being waved through:
         #     `git merge-tree --write-tree` exiting non-zero means we cannot
         #     recompute what the merge should have produced, and a
-        #     hand-resolved conflict is unverifiable by construction — there
+        #     hand-resolved conflict is unverifiable by construction: there
         #     is no way to distinguish a faithful resolution from one that
         #     also smuggled in an unrelated change. This org's flow is
         #     squash-only, so merge commits inside a PR range are rare and
@@ -91,13 +91,13 @@ jobs:
           bad=0
           stderr_file="$(mktemp)"
           merges="$(git rev-list --merges "${BASE_SHA}..${HEAD_SHA}")" || {
-            echo "::error::could not enumerate merge commits between ${BASE_SHA} and ${HEAD_SHA} — history may be corrupted or incomplete; this check fails closed"
+            echo "::error::could not enumerate merge commits between ${BASE_SHA} and ${HEAD_SHA}; history may be corrupted or incomplete, and this check fails closed"
             exit 1
           }
           for m in $merges; do
             read -r -a parents <<< "$(git show -s --format='%P' "$m")"
             if [ "${#parents[@]}" -ne 2 ]; then
-              echo "::error::merge commit $m has ${#parents[@]} parents — evil-merge detection only supports ordinary two-parent merges; an octopus merge is rejected rather than assumed safe"
+              echo "::error::merge commit $m has ${#parents[@]} parents. Evil-merge detection only supports ordinary two-parent merges; an octopus merge is rejected rather than assumed safe"
               bad=1
               continue
             fi
@@ -110,7 +110,7 @@ jobs:
               continue
             fi
             if [ "$clean_tree" != "$actual_tree" ]; then
-              echo "::error::merge commit $m's tree does not match the clean merge of its parents ${parents[0]} and ${parents[1]} — it introduces changes present in neither parent"
+              echo "::error::merge commit $m's tree does not match the clean merge of its parents ${parents[0]} and ${parents[1]}: it introduces changes present in neither parent"
               bad=1
             fi
           done

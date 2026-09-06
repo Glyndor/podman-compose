@@ -33,7 +33,7 @@ async fn drain_surfaces_mid_stream_error_line() {
 #[tokio::test]
 async fn drain_times_out_on_an_unresponsive_stream() {
 	// A stream that yields one line then never another stands in for a registry
-	// that accepts the request then stalls — the per-line deadline must fire.
+	// that accepts the request then stalls; the per-line deadline must fire.
 	let first = futures_util::stream::iter(vec![Ok(progress("pushing", ""))]);
 	let stream = first.chain(futures_util::stream::pending::<
 		std::result::Result<ImagePullProgress, PodmanError>,

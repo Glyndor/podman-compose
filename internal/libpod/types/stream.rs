@@ -18,7 +18,7 @@ pub enum LogOutput {
 	/// Payload demuxed from the stdout stream (frame stream type 1).
 	StdOut {
 		/// The payload bytes, with the frame header already stripped. Not
-		/// guaranteed to end on a line boundary — one frame may split a line.
+		/// guaranteed to end on a line boundary; one frame may split a line.
 		message: Bytes,
 	},
 	/// Payload demuxed from the stderr stream (frame stream type 2).

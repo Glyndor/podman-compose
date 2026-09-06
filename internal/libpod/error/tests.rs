@@ -397,7 +397,7 @@ fn field_error_for_build_query_skips_service_prefix() {
 #[test]
 fn field_error_has_no_source() {
 	// Like the other owned variants, `Field` has no underlying error to
-	// chain — the explanation is in the variant's own fields.
+	// chain; the explanation is in the variant's own fields.
 	use std::error::Error;
 	let e = PodmanError::Field {
 		service: "web".into(),

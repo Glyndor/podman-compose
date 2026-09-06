@@ -68,7 +68,7 @@ fn defaults_to_compose_file_parent() {
 #[test]
 fn bare_filename_resolves_to_current_dir() {
 	// A bare filename has no directory component, so the base directory must
-	// fall back to the working directory — never an empty path, which would
+	// fall back to the working directory, never an empty path, which would
 	// leave a relative `file:` source to be resolved against the Podman
 	// service's working directory ($HOME) instead of the project directory.
 	let base = resolve_base_dir(None, Path::new("docker-compose.yml"));
@@ -141,7 +141,7 @@ fn auto_discovery_picks_up_the_override_file() {
 	assert_eq!(found, Some(dir.path().join("compose.override.yaml")));
 }
 
-/// Only the first override in precedence order is used — docker compose does
+/// Only the first override in precedence order is used; docker compose does
 /// not merge two of them.
 #[test]
 fn only_the_highest_precedence_override_is_used() {

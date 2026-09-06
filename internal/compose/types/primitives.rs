@@ -1,10 +1,10 @@
 //! Primitive compose field types shared across multiple service keys.
 //!
-//! [`Command`] — shell string or exec list for `command:`/`entrypoint:`.
-//! [`StringOrList`] — single string or list of strings (used in `dns:`, `cap_add:`, etc.).
-//! [`Labels`] — list or map form for `labels:`.
-//! [`LoggingConfig`] — `logging:` driver and options.
-//! [`Sysctls`] — list or map form for `sysctls:`.
+//! [`Command`] is a shell string or exec list for `command:`/`entrypoint:`.
+//! [`StringOrList`] is a single string or list of strings (used in `dns:`, `cap_add:`, etc.).
+//! [`Labels`] is the list or map form for `labels:`.
+//! [`LoggingConfig`] is the `logging:` driver and options.
+//! [`Sysctls`] is the list or map form for `sysctls:`.
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -54,7 +54,7 @@ where
 	}))
 }
 
-/// Container entrypoint / command — either a shell string or exec list.
+/// Container entrypoint / command: either a shell string or exec list.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Command {
@@ -115,7 +115,7 @@ impl StringOrList {
 	}
 }
 
-/// Labels — list or map form.
+/// Labels: list or map form.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(untagged)]
 pub enum Labels {
@@ -157,7 +157,7 @@ impl Labels {
 	}
 }
 
-/// `logging:` configuration — driver name and driver-specific options.
+/// `logging:` configuration: driver name and driver-specific options.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct LoggingConfig {
 	/// Logging driver name; the runtime default is used if absent.
@@ -168,7 +168,7 @@ pub struct LoggingConfig {
 	pub options: HashMap<String, String>,
 }
 
-/// Kernel parameters — list (`["net.ipv4.ip_forward=1"]`) or map form.
+/// Kernel parameters: list (`["net.ipv4.ip_forward=1"]`) or map form.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(untagged)]
 pub enum Sysctls {

@@ -7,7 +7,7 @@
 //! The order here is the whole point. `attach` opens before `start`, because a
 //! container that has already run has already printed, and for a one-shot `run`
 //! that missed output is often all the output there was. `exec` does not have
-//! this problem — the container is already up — which is why it can attach and
+//! this problem (the container is already up) which is why it can attach and
 //! start in a single call and this cannot.
 
 use std::time::Duration;
@@ -31,8 +31,8 @@ impl super::super::Engine {
 	/// terminal over until the command exits. Returns its exit code.
 	pub(super) async fn run_attached(&self, container_name: &str) -> Result<i64> {
 		// stdin=1 so keystrokes reach the command; stream=1 keeps the connection
-		// open both ways. With a TTY the stream is raw — no 8-byte frame headers,
-		// because the pty merges stdout and stderr — which is also why an
+		// open both ways. With a TTY the stream is raw, with no 8-byte frame headers,
+		// because the pty merges stdout and stderr, which is also why an
 		// interactive run cannot separate them, exactly as `podman run -it`.
 		let attach_path = format!(
 			"{API_PREFIX}/containers/{}/attach?stream=1&stdin=1&stdout=1&stderr=1",
@@ -50,9 +50,9 @@ impl super::super::Engine {
 		);
 		if let Err(e) = self.client.post_empty_ok(&start_path).await {
 			// The `attach` already opened the stream. The container may have
-			// written bytes — startup banners, an error it flushed before the
+			// written bytes (startup banners, an error it flushed before the
 			// daemon returned 4xx to our `start`, anything the runtime prints
-			// before the libpod handler rejects the request — and the kernel
+			// before the libpod handler rejects the request) and the kernel
 			// keeps that buffer alive until we close or drain the socket.
 			// Drop the connection here without reading and the peer blocks on
 			// the next `write` until the socket is GC'd; with a long-lived
@@ -90,7 +90,7 @@ impl super::super::Engine {
 /// path drains the same buffer through `pump_terminal` while it pumps bytes
 /// to the caller's terminal, and the failure path must not enter raw mode or
 /// read from stdin (that is the whole reason `pump_terminal` is gated on a
-/// successful start) — so this is the bounded-read variant that drops the
+/// successful start) so this is the bounded-read variant that drops the
 /// bytes on the floor.
 async fn drain_hijacked(hijacked: crate::libpod::client::Hijacked) {
 	let mut stream = hijacked.stream;

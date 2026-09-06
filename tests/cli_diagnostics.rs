@@ -1,6 +1,6 @@
 //! CLI-level checks for diagnostic surfacing: forward-compat warnings must be
 //! visible with no `RUST_LOG` set, must go to stderr, and must carry the
-//! `podup:` program prefix — while stdout stays a clean YAML pipe for `config`.
+//! `podup:` program prefix, while stdout stays a clean YAML pipe for `config`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ fn bin() -> &'static str {
 ///
 /// The directory must be unique **per call**, not per process: cargo runs the
 /// tests in one binary as threads, so a path keyed on the pid is shared by every
-/// test in this file. Two tests writing the same compose file then race —
+/// test in this file. Two tests writing the same compose file then race:
 /// `fs::write` truncates before it writes, so a concurrent reader can see an
 /// empty file and fail validation. Returning the [`TempDir`] hands the caller
 /// the directory's lifetime: hold it for the length of the test, and it is
@@ -64,7 +64,7 @@ fn config_warns_on_stderr_with_clean_stdout_and_no_rust_log() {
 		"warning names the unknown key; got stderr:\n{stderr}"
 	);
 
-	// stdout is the resolved YAML only — no diagnostics interleaved.
+	// stdout is the resolved YAML only, with no diagnostics interleaved.
 	assert!(stdout.contains("services:"), "stdout carries the YAML");
 	assert!(
 		!stdout.contains("warning"),
@@ -214,8 +214,8 @@ fn create_rejects_no_recreate_with_force_recreate() {
 		"conflicting recreate flags must be rejected"
 	);
 	// Which rejection, not just that one happened. A non-zero exit here is
-	// satisfied by any failure — a missing compose file, an unreachable Podman,
-	// a panic — none of which exercise the flag conflict this test is named for.
+	// satisfied by any failure (a missing compose file, an unreachable Podman,
+	// a panic) none of which exercise the flag conflict this test is named for.
 	let err = String::from_utf8_lossy(&output.stderr);
 	assert!(
 		err.contains("--no-recreate") && err.contains("--force-recreate"),
@@ -287,7 +287,7 @@ fn config_no_interpolate_skips_required_var_error() {
 /// `update` only rewrites the podup binary, so the compose-only global value
 /// flags (--socket/--profile/--env-file/--project-directory) cannot affect it.
 /// Passing one on the command line is rejected as a usage error rather than
-/// silently accepted as a no-op — and the rejection happens before any network
+/// silently accepted as a no-op, and the rejection happens before any network
 /// access, so the test never reaches GitHub.
 ///
 /// Gated on the `update` feature: package-manager builds (Debian/apt) compile
@@ -322,7 +322,7 @@ fn update_rejects_compose_only_global_flags() {
 /// The `-f -` form enforces the same 16 MiB read cap the file path does.
 ///
 /// The cap exists so a pathological compose document cannot exhaust memory, and
-/// the generic reader that implements it is unit-tested — but with an explicit
+/// the generic reader that implements it is unit-tested, but with an explicit
 /// limit passed in. **Nothing checked that the stdin call site passes
 /// `MAX_FILE_BYTES` rather than something larger**, which a mutation replacing it
 /// with `u64::MAX` proved by surviving the whole suite.
@@ -405,8 +405,8 @@ fn stdin_just_under_the_cap_is_accepted() {
 /// A compose file past the 16 MiB cap is refused, the same as stdin.
 ///
 /// The cap is a bound on what a single trusted-but-unbounded input can make
-/// podup allocate. `read_capped_from` implements it and is unit-tested — with an
-/// explicit limit passed in — so **what was untested is that the real call sites
+/// podup allocate. `read_capped_from` implements it and is unit-tested, with an
+/// explicit limit passed in, so **what was untested is that the real call sites
 /// pass `MAX_FILE_BYTES`**. A mutation raising the constant to a terabyte left
 /// the whole lib and bins suite green, which is what a control nothing exercises
 /// looks like from outside.

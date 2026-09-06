@@ -99,7 +99,7 @@ jobs:
       # are reachable from code outside this organisation. Keeping the
       # install out of any job that holds a secret bounds that reach to
       # nothing. `pip install --require-hashes` is the exception because a
-      # hash-pinned install resolves nothing — the artifacts are fixed by
+      # hash-pinned install resolves nothing, since the artifacts are fixed by
       # the lockfile, so no surprise tree appears.
       - name: A job holding a secret must not install third-party tooling
         if: ${{ inputs.tooling-isolation }}
@@ -113,7 +113,7 @@ jobs:
 
           # `secrets.<id>` is how every GitHub Actions expression reaches a
           # secret. `secrets: inherit` and `secrets:` declarations on
-          # reusable calls don't match — those are declaration blocks, not
+          # reusable calls don't match, because those are declaration blocks, not
           # references, and `secrets:` does not contain a `.`.
           SECRET_RE = re.compile(r"(?<!\w)secrets\.[A-Za-z_]\w*")
 
@@ -201,7 +201,7 @@ jobs:
                   for path, job_id, line in violations:
                       msg = (
                           f"job `{job_id}` installs third-party tooling while holding a secret: "
-                          f"`{line.strip()}` — see Glyndor/apt#121. Fix by moving the install "
+                          f"`{line.strip()}`. See Glyndor/apt#121. Fix by moving the install "
                           f"into a job that holds no secrets, or pin it by hash "
                           f"(e.g. `pip install --require-hashes`)."
                       )

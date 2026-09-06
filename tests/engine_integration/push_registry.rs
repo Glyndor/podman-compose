@@ -168,7 +168,7 @@ async fn cli_push_reaches_a_real_registry() {
 ///
 /// The assertion reads the registry back out: every tag declared in
 /// `build.tags` must appear under `/v2/{repo}/tags/list`. A green exit code
-/// alone is not evidence — the bug it guards against was exactly that.
+/// alone is not evidence; the bug it guards against was exactly that.
 #[tokio::test]
 async fn cli_push_uploads_every_build_tags_alias() {
 	if super::podman().await.is_none() {
@@ -211,7 +211,7 @@ async fn cli_push_uploads_every_build_tags_alias() {
 	let compose = dir.path().join("docker-compose.yml");
 	// List every tag we want the registry to end up with. The primary tag is
 	// included deliberately: `apply_extra_tags` skips it on the build side, and
-	// `push` must skip it for the same reason — re-listing it here exercises
+	// `push` must skip it for the same reason, and re-listing it here exercises
 	// the dedup branch.
 	let tags_yaml = std::iter::once(format!("        - {image}\n"))
 		.chain(

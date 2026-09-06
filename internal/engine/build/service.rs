@@ -56,7 +56,7 @@ impl Engine {
 		);
 
 		// A Git/URL context is cloned server-side by Podman via the `remote`
-		// query parameter — there is no local directory to tar. Tar-only features
+		// query parameter; there is no local directory to tar. Tar-only features
 		// (inline Dockerfile, in-tar build secrets) do not apply.
 		let (body_plan, dockerfile_name, secret_specs) = if remote_context {
 			info!("building {tag} from remote context {context_str}");
@@ -151,7 +151,7 @@ impl Engine {
 		}
 
 		// A secret passed as a build arg is recorded in the image history and, if
-		// promoted via `ENV`, the image config — so it can leak. Warn and point at
+		// promoted via `ENV`, the image config, so it can leak. Warn and point at
 		// `build.secrets` (BuildKit `--mount=type=secret`), which does not persist.
 		let mut secretish: Vec<&str> = build_args
 			.keys()
@@ -315,7 +315,7 @@ impl Engine {
 				secrets,
 			} => {
 				// The tar writer runs on a blocking thread feeding the request
-				// body; drain the body first, then join the writer — joining
+				// body; drain the body first, then join the writer, since joining
 				// before the body is drained would deadlock on the bounded
 				// channel. If the request itself failed, that transport error is
 				// the real cause; otherwise surface any context-assembly error.

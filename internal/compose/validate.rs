@@ -31,7 +31,7 @@ use crate::ports::parse_ports;
 /// required dependency. Returns the first violation found.
 pub fn validate_config(file: &ComposeFile) -> Result<()> {
 	// An empty file, a missing `services:` key, or `services: {}` is not a valid
-	// project — `docker compose config` errors with "no service selected".
+	// project; `docker compose config` errors with "no service selected".
 	if file.services.is_empty() {
 		return Err(ComposeError::Unsupported(
 			"no services defined in compose file".to_string(),

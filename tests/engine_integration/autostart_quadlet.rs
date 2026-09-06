@@ -1,12 +1,12 @@
 //! Quadlet-mode autostart against real Podman **and real systemd `--user`**.
 //!
-//! The install/uninstall/rebuild flow shipped covered by unit tests only — a
-//! fake `SystemCtl` plus the pure renderer tests — so nothing exercised the part
+//! The install/uninstall/rebuild flow shipped covered by unit tests only (a
+//! fake `SystemCtl` plus the pure renderer tests) so nothing exercised the part
 //! that actually breaks: units written to the systemd directory, generated,
 //! started, and the containers coming up. #1091 is what that gap costs. Its bug
 //! (a relative `EnvironmentFile=` resolving against the unit directory once
 //! installed) is invisible to every renderer test, because the rendered text was
-//! exactly what the test expected — it only fails when systemd reads it.
+//! exactly what the test expected; it only fails when systemd reads it.
 //!
 //! **These tests touch the caller's real systemd.** `systemd --user` reads
 //! `XDG_CONFIG_HOME` from the manager process, set at login, so a test process
@@ -17,7 +17,7 @@
 //! * every test uses a per-process project name, so a run cannot collide with
 //!   another run, with the developer's own stacks, or with a sibling test;
 //! * cleanup runs from `Drop`, so a panic mid-test cannot leave an enabled unit
-//!   behind. That is not tidiness — a leaked quadlet unit starts its container
+//!   behind. That is not tidiness: a leaked quadlet unit starts its container
 //!   on the user's next boot.
 //!
 //! They skip when Podman or `systemd --user` is unreachable, which is every
@@ -100,7 +100,7 @@ fn fixture(tag: &str) -> (tempfile::TempDir, PathBuf) {
 }
 
 /// Install writes the units, systemd generates and starts them, and uninstall
-/// leaves nothing behind — the whole round trip, through the real generator.
+/// leaves nothing behind: the whole round trip, through the real generator.
 #[tokio::test]
 async fn quadlet_autostart_installs_starts_and_uninstalls() {
 	if super::podman().await.is_none() || !systemd_user_available() {
@@ -128,7 +128,7 @@ async fn quadlet_autostart_installs_starts_and_uninstalls() {
 	assert!(unit.is_file(), "unit not written to {}", unit.display());
 
 	// The generator runs on `daemon-reload`, so the service exists only if the
-	// unit it produced was valid — a unit Quadlet rejects silently yields no
+	// unit it produced was valid: a unit Quadlet rejects silently yields no
 	// service at all, which is the failure mode a renderer test cannot see.
 	let service = format!("{project}-web.service");
 	let mut active = false;
@@ -152,8 +152,8 @@ async fn quadlet_autostart_installs_starts_and_uninstalls() {
 ///
 /// This is the one the renderer could not catch. The generated
 /// `EnvironmentFile=` was exactly the string the unit tests asserted; it was
-/// systemd resolving it against the unit's own directory — not the compose
-/// file's — that made `--env-file` fatal on a path that does not exist there, so
+/// systemd resolving it against the unit's own directory, not the compose
+/// file's, that made `--env-file` fatal on a path that does not exist there, so
 /// the container never started.
 #[tokio::test]
 async fn quadlet_autostart_resolves_a_relative_env_file() {
@@ -197,7 +197,7 @@ async fn quadlet_autostart_resolves_a_relative_env_file() {
 	}
 	assert!(
 		active,
-		"{service} never became active — a relative env_file that resolves against \
+		"{service} never became active: a relative env_file that resolves against \
 		 the unit directory makes --env-file fatal, so the container cannot start"
 	);
 

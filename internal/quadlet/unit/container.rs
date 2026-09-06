@@ -29,7 +29,7 @@ pub(crate) struct UnitContext<'a> {
 	pub declared_networks: &'a [&'a str],
 	/// Top-level `secrets:` definitions, for resolving a service's secret refs.
 	pub secrets: &'a IndexMap<String, SecretConfig>,
-	/// Directory compose resolves relative paths against — the compose file's
+	/// Directory compose resolves relative paths against: the compose file's
 	/// own directory, not the unit's. See [`abs_against`].
 	pub base_dir: &'a std::path::Path,
 	/// Every service in the file, so a `depends_on` condition can be judged
@@ -150,7 +150,7 @@ pub(crate) fn container_unit(
 
 	// Ports are validated (range, format) before generation, so parsing succeeds
 	// here. A malformed/out-of-range mapping is rejected at the command boundary
-	// rather than re-emitted verbatim as an invalid `PublishPort=` — emitting the
+	// rather than re-emitted verbatim as an invalid `PublishPort=`; emitting the
 	// raw string would produce a unit Quadlet/Podman would reject anyway.
 	//
 	// In pod mode the pod owns every published port (the container's own
@@ -238,7 +238,7 @@ pub(crate) fn container_unit(
 	// `EnvironmentFile=` is resolved by podman-systemd.unit(5) against the unit
 	// file's own directory, not the compose file's. Units are installed to
 	// `~/.config/containers/systemd`, so `env_file: .env` would render to a unit
-	// looking for `~/.config/containers/systemd/.env` — and `--env-file` on a
+	// looking for `~/.config/containers/systemd/.env`, and `--env-file` on a
 	// missing path is fatal, so the container never starts. Resolve against the
 	// compose base directory, the same way the build context is.
 	for entry in service.env_file.to_entries() {
@@ -336,7 +336,7 @@ pub(crate) fn container_unit(
 	// `service:X` reuses a *sibling service's* netns, which Quadlet expresses as
 	// `Network={X}.container` (the `.container` unit dependency). `container:X`
 	// reuses an *existing* container's netns by id/name and maps to podman's
-	// `Network=container:X` join form — not a `.container` unit, which would name
+	// `Network=container:X` join form, not a `.container` unit, which would name
 	// a non-existent dependency and fail to start. Other modes (bridge:, custom,
 	// …) have no key and are reported by collect_warnings.
 	match service.network_mode.as_deref() {
@@ -526,7 +526,7 @@ pub(crate) fn container_unit(
 /// Render a resolved [`LogConfig`] onto a Quadlet `[Container]` section.
 ///
 /// Quadlet units run through the podman CLI, which reads rotation from
-/// `--log-opt max-size=` — not from the typed `size` field the libpod API
+/// `--log-opt max-size=`, not from the typed `size` field the libpod API
 /// takes. #1417 moved `max-size` out of `options` into that typed field for
 /// the live path, and rendering `options` alone here dropped rotation from
 /// every generated unit: measured before this helper, a default project

@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// `develop:` service key — holds file-watch rules for the `watch` command.
+/// `develop:` service key: holds file-watch rules for the `watch` command.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct DevelopConfig {
 	/// The rules in declaration order. `watch` evaluates them in order and the
@@ -48,16 +48,16 @@ pub struct WatchRule {
 /// Action triggered by a `develop.watch` rule: `sync`, `rebuild`, `restart`, `sync+restart`, or `sync+exec`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum WatchAction {
-	/// `sync` — copy changed files from `path` into the container at `target`.
+	/// `sync`: copy changed files from `path` into the container at `target`.
 	#[default]
 	Sync,
-	/// `rebuild` — rebuild the service image and recreate the container.
+	/// `rebuild`: rebuild the service image and recreate the container.
 	Rebuild,
-	/// `restart` — restart the running container without rebuilding.
+	/// `restart`: restart the running container without rebuilding.
 	Restart,
-	/// `sync+restart` — sync changed files, then restart the container.
+	/// `sync+restart`: sync changed files, then restart the container.
 	SyncAndRestart,
-	/// `sync+exec` — sync changed files, then run the rule's `exec` command in the container.
+	/// `sync+exec`: sync changed files, then run the rule's `exec` command in the container.
 	SyncAndExec,
 }
 

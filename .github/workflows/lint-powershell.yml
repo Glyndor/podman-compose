@@ -49,7 +49,7 @@ jobs:
     with:
       paths: "install.ps1"
       # install.ps1 is piped to `iex`, so human-facing status must go through
-      # Write-Host — Write-Output would leak into the stream the pipe feeds.
+      # Write-Host, because Write-Output would leak into the stream the pipe feeds.
       # Same exclusion the previous inline job carried.
       exclude-rules: "PSAvoidUsingWriteHost"
 

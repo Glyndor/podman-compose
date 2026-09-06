@@ -81,7 +81,7 @@ impl Engine {
 				// An existing network is not an error on re-`up`; accept any
 				// already-exists conflict (network-create returns 409, but share
 				// the same predicate as volume-create for consistency). The row
-				// still needs to close — without an explicit closing verb the
+				// still needs to close: without an explicit closing verb the
 				// live board leaves it spinning on `Creating` (#1347).
 				Err(ref e) if e.is_already_exists() => {
 					crate::ui::progress_line("Network", &network_name, "Exists");
@@ -165,7 +165,7 @@ const ISOLATE_OPT: &str = "isolate";
 /// Docker isolates its bridge networks from each other and podman does not, so
 /// without this a service reaches ports on a neighbouring network that were
 /// never published. Measured on 2026-08-20 with the same experiment on both
-/// engines — a listener on an unpublished port in network B, and a container in
+/// engines: a listener on an unpublished port in network B, and a container in
 /// network A dialling its address:
 ///
 /// | engine | result |
@@ -185,8 +185,8 @@ const ISOLATE_OPT: &str = "isolate";
 /// isolated connects. So this does not harden a network against the world; it
 /// makes networks that share the default stop seeing each other. Since podup
 /// now sets it on every bridge network it creates, the effect is that two
-/// podup projects no longer reach each other's unpublished ports — verified
-/// end to end with two projects — while a network created outside podup
+/// podup projects no longer reach each other's unpublished ports, verified
+/// end to end with two projects, while a network created outside podup
 /// without the option still can. Being a default rather than opt-in is the
 /// whole point: one project opting in would protect nobody.
 ///
@@ -228,7 +228,7 @@ pub(super) fn resolve_network_mode(
 				// docker-compose attaches to Docker's shared default `bridge`;
 				// Podman reads `--network bridge` as a fresh isolated bridge netns,
 				// so project siblings are unreachable. Warn here (at container
-				// create) so every path — CLI, library, embedded — surfaces it, not
+				// create) so every path (CLI, library, embedded) surfaces it, not
 				// only the parse-time diagnostics.
 				tracing::warn!(
 					"service '{service_name}': network_mode 'bridge' attaches to a fresh \

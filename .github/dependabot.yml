@@ -89,7 +89,7 @@ updates:
   # Both group every update type, majors included, unlike the crate above. The
   # reason the main entry leaves majors out is that a major can change what
   # podup does for a user; nothing here is shipped, so a major in either is the
-  # same question as a patch — does the harness still build and run.
+  # same question as a patch: does the harness still build and run.
   - package-ecosystem: "cargo"
     directory: "/fuzz"
     schedule:

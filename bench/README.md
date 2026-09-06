@@ -1,13 +1,13 @@
 # Compose-tool benchmark
 
 A reproducible, **fair** wall-clock comparison of compose tools. The point is not
-to win — it is to publish honest, equitable numbers across identical scenarios.
+to win; it is to publish honest, equitable numbers across identical scenarios.
 A podup loss is published exactly like a podup win.
 
 ## What is compared
 
 - **podup** and **podman-compose** both drive **Podman**, so comparing them is a
-  pure *tool* comparison — same engine, only the orchestrator differs. This is the
+  pure *tool* comparison: same engine, only the orchestrator differs. This is the
   apples-to-apples result.
 - **docker-compose** is pointed at the **Podman socket** through `DOCKER_HOST`,
   which is what makes it comparable: same engine, so the only difference left is
@@ -25,7 +25,7 @@ A podup loss is published exactly like a podup win.
 - **Controlled environment.** The real run happens on a dedicated/self-hosted
   runner or the maintainer's machine, with the CPU governor pinned and the tool
   process taskset-pinned to reduce variance. **Shared CI runners are too noisy for
-  published numbers** — CI only checks the harness (`bash -n`, a Python
+  published numbers**: CI only checks the harness (`bash -n`, a Python
   compile, `aggregate.py --self-test` on fixture rows, and a build of `timeit`
   with an assertion that it resolves `/bin/true` below 10 ms), never running the
   scenarios or the numbers in the README.
@@ -35,14 +35,14 @@ A podup loss is published exactly like a podup win.
 
 | scenario | what it exercises |
 |---|---|
-| `single` | one container — minimal lifecycle cost |
+| `single` | one container, minimal lifecycle cost |
 | `multi-healthcheck` | `depends_on: service_healthy` gate on `up` |
 | `deep-chain` | a dependency chain behind a fast service: where a level-barrier scheduler loses to a per-service DAG (#1071) |
-| `wide-level` | 41 services in one level plus one dependent — the batching cost the two-service `deep-chain` cannot show |
+| `wide-level` | 41 services in one level plus one dependent, the batching cost the two-service `deep-chain` cannot show |
 | `scale` | `--scale app=5` replica fan-out |
 | `network-ipam` | custom bridge network with explicit IPAM |
 | `volume-heavy` | several named volumes created/removed |
-| `secrets` | six `file:` secrets — materialised as Podman-native secrets since 3.1.0, which is an API call per secret each way |
+| `secrets` | six `file:` secrets, materialised as Podman-native secrets since 3.1.0, which is an API call per secret each way |
 | `warm-restart` | a second `up` on an already-running project |
 | `many-services` | a 12-service compose file, the realistic upper end |
 | `running-ops` | `ps`, `logs`, `exec`, `restart` on a running stack |
@@ -60,7 +60,7 @@ container ignoring `SIGTERM` as PID 1.
 
 Every timed run goes through `bench/timeit`, so each row records **wall-clock,
 peak resident memory (max RSS) and CPU time** of the tool process. The memory and
-CPU figures are the **client-side** cost — the tool process and the processes it
+CPU figures are the **client-side** cost: the tool process and the processes it
 directly spawns and waits on. podup is a thin client to the long-running Podman
 service, so engine-side work is not charged to it; podman-compose shells out to
 `podman` per call and is charged for the work it waits on. The columns therefore
@@ -73,14 +73,14 @@ on first use; it lives outside the workspace, like `fuzz/`, so it is not part of
 a podup build.
 
 It replaced `/usr/bin/time -v`, whose `Elapsed` line resolves to 0.01 s. That put
-a floor under the suite's two fastest rows — `running-ops ps` and `config-heavy
-config`, both under 10 ms — which published as `0.000` while `raw.csv` stored
+a floor under the suite's two fastest rows (`running-ops ps` and `config-heavy
+config`, both under 10 ms), which published as `0.000` while `raw.csv` stored
 them as `%.6f` seconds.
 
 **Why the timer is compiled rather than a script.** `ru_maxrss` survives
 `execve`: a child inherits its parent's high-water mark, so a wrapper's own
 footprint becomes a floor under every memory figure it reports. Measured on
-`/bin/true`, whose real cost is about 1.3 MB — `/usr/bin/time -v` 1336 KB, this
+`/bin/true`, whose real cost is about 1.3 MB: `/usr/bin/time -v` 1336 KB, this
 binary 1312 KB, a `python3` wrapper 6304 KB with `fork` + `execvp` and 9792 KB
 with `posix_spawnp`. A ~6 MB floor under a column that reports podup at about
 8.9 MB would leave that column measuring the wrapper. The same run had the
@@ -100,7 +100,7 @@ python3 bench/aggregate.py
 # -> bench/results/report.md and bench/results/summary.json
 ```
 
-`--smoke` runs a single scenario once, for a quick local check against a real engine (CI no longer uses it — it static-checks the harness instead; see above).
+`--smoke` runs a single scenario once, for a quick local check against a real engine (CI no longer uses it; it static-checks the harness instead, see above).
 
 ## Output
 

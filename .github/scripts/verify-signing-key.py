@@ -92,7 +92,7 @@ def main() -> None:
 		"The signing secret and the keys baked into install.sh / install.ps1 / "
 		"internal/update/verify.rs disagree, so this release would be unverifiable "
 		"and uninstallable. Refusing to publish. Fix whichever side is wrong before "
-		"retagging — the tag is immutable once the release exists."
+		"retagging; the tag is immutable once the release exists."
 	)
 
 

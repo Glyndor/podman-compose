@@ -12,7 +12,7 @@ use super::*;
 /// level the only thing to assert is that listing a running project does not
 /// error. What it prints is checked where it is reachable, in
 /// `cli_lifecycle::cli_ps_subcommand`, which reads the container name and the
-/// STATUS column — the column #590 left empty for every container.
+/// STATUS column, the column #590 left empty for every container.
 #[tokio::test]
 async fn ps_shows_running_container() {
 	let client = match podman().await {
@@ -32,8 +32,8 @@ async fn ps_shows_running_container() {
 }
 
 /// Same shape as `ps`: `Engine::logs` streams to stdout and returns
-/// `Result<()>`. The output contract — the container's own line, carrying the
-/// `service |` prefix that #594 dropped — is asserted in
+/// `Result<()>`. The output contract (the container's own line, carrying the
+/// `service |` prefix that #594 dropped) is asserted in
 /// `cli_lifecycle::cli_logs_subcommand`.
 #[tokio::test]
 async fn logs_from_named_service() {
@@ -224,7 +224,7 @@ async fn exec_nonexistent_user_fails_fast() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
-	// A nonexistent named user must surface a prompt, clear error — never hang for
+	// A nonexistent named user must surface a prompt, clear error, never hanging for
 	// the full client read timeout (~120s) and then report a misleading
 	// socket-timeout (issue #720).
 	let started = std::time::Instant::now();
@@ -246,7 +246,7 @@ async fn exec_nonexistent_user_fails_fast() {
 	);
 	let msg = err.to_string().to_ascii_lowercase();
 	// Either the engine's prompt diagnostic (it names the user / passwd file) or
-	// podup's exec-specific timeout message — but never the bare socket-timeout.
+	// podup's exec-specific timeout message, but never the bare socket-timeout.
 	assert!(
 		msg.contains("user") || msg.contains("passwd") || msg.contains("exec"),
 		"unexpected error for a bad exec user: {msg}"
@@ -358,7 +358,7 @@ async fn attach_logs_empty_attach_returns() {
 	};
 	let proj = proj("atl");
 	let engine = Engine::new(client, proj.clone());
-	// attach: false — attach_logs finds no targets and returns immediately
+	// attach: false, so attach_logs finds no targets and returns immediately
 	let file = parse_str(
 		"services:\n  web:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n    attach: false\n",
 	)

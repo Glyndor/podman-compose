@@ -14,7 +14,7 @@ use super::{owner_marker, sorted_label_pairs, unit_stem, QuadletUnit, Section};
 ///
 /// The systemd generator runs a `.build` unit with no working directory of its
 /// own, resolving a relative `SetWorkingDirectory` against the unit file's own
-/// directory (`~/.config/containers/systemd`) — where there is no Dockerfile. So
+/// directory (`~/.config/containers/systemd`), where there is no Dockerfile. So
 /// the context, which compose interprets relative to the compose file, must be
 /// made absolute against that base directory here.
 ///
@@ -33,7 +33,7 @@ pub(crate) fn build_unit_filename(project: &str, name: &str) -> String {
 	format!("{}.build", unit_stem(project, name))
 }
 
-/// Whether `service` yields a `.build` unit — it declares `build:` and that
+/// Whether `service` yields a `.build` unit: it declares `build:` and that
 /// build is expressible as Quadlet (an inline Dockerfile is not). Used by the
 /// container unit to decide whether `Image=` should reference the `.build`.
 pub(crate) fn emits_build_unit(service: &Service) -> bool {
@@ -48,7 +48,7 @@ pub(crate) fn emits_build_unit(service: &Service) -> bool {
 
 /// Build the `.build` unit for `service`, or `None` when the service has no
 /// `build:` block or its build can't be expressed as a Quadlet `.build` unit
-/// (an inline Dockerfile, which Quadlet does not support — a warning is pushed).
+/// (an inline Dockerfile, which Quadlet does not support; a warning is pushed).
 ///
 /// `ImageTag=` is the service's `image:` when set, else `<project>-<service>`,
 /// so the generated container's `Image=<stem>.build` resolves to a concrete tag.
@@ -88,7 +88,7 @@ pub(crate) fn build_unit(
 				// without the source would build the wrong thing. Skip and warn.
 				warnings.push(format!(
 					"{name}: build.dockerfile_inline has no Quadlet `.build` equivalent; \
-					 no .build unit emitted — build the image first and set `image`"
+					 no .build unit emitted; build the image first and set `image`"
 				));
 				return None;
 			}

@@ -1,8 +1,8 @@
 //! RFC 3339 timestamps, as libpod puts them on the wire.
 //!
 //! podup has no date library and does not want one. The three fields that need
-//! this — a container's `Created`, a volume's `CreatedAt`, and an image's
-//! `Created` from the inspect endpoint — all arrive as RFC 3339 strings, and
+//! this (a container's `Created`, a volume's `CreatedAt`, and an image's
+//! `Created` from the inspect endpoint) all arrive as RFC 3339 strings, and
 //! everything else libpod reports (`StartedAt`, the event feed) is already Unix
 //! seconds.
 //!
@@ -150,7 +150,7 @@ const fn days_in_month(year: i64, month: i64) -> i64 {
 /// Days since the Unix epoch for a civil date.
 ///
 /// The exact inverse of [`civil_from_days`]. Both shift the epoch to 0000-03-01
-/// so February — the month whose length varies — lands last and the leap-day
+/// so February, the month whose length varies, lands last and the leap-day
 /// case needs no branch of its own. Round-tripping one through the other is the
 /// test that matters here: for both to agree and both be wrong, they would have
 /// to be wrong in the same direction.
@@ -201,7 +201,7 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 /// The offset is resolved per instant rather than once, so an event from July
 /// and one from January render correctly wherever daylight saving applies. When
 /// the platform cannot say what the offset is, the value is rendered in UTC and
-/// labelled `Z` — an unlabelled guess is the failure this replaced.
+/// labelled `Z`; an unlabelled guess is the failure this replaced.
 pub(crate) fn format_local(unix_secs: i64) -> String {
 	render_with_offset(unix_secs, local_offset_seconds(unix_secs))
 }
@@ -211,7 +211,7 @@ pub(crate) fn format_local(unix_secs: i64) -> String {
 ///
 /// Two things follow from the split, and both are why it exists. The `None`
 /// branch is unreachable through [`format_local`] on any machine whose libc
-/// resolves a zone — mutations deleting it survived every test that went in the
+/// resolves a zone: mutations deleting it survived every test that went in the
 /// front door, which is what an untestable control looks like from outside. And
 /// the rendered string stops depending on the machine's own zone, so it can be
 /// pinned exactly instead of only by shape.
@@ -265,8 +265,8 @@ fn local_offset_seconds(unix_secs: i64) -> Option<i64> {
 
 /// Build a Win32 `SYSTEMTIME` from Unix seconds.
 ///
-/// Lives here rather than in the Windows module so it is compiled — and
-/// therefore type-checked and unit-tested — on every platform. A conversion
+/// Lives here rather than in the Windows module so it is compiled, and
+/// therefore type-checked and unit-tested, on every platform. A conversion
 /// that only builds on the one machine nobody develops on is a conversion
 /// nobody has checked.
 #[cfg(windows)]

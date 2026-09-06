@@ -2,7 +2,7 @@
 //!
 //! libpod validates a handful of fields when a `SpecGenerator` arrives over
 //! the create endpoint and when a build query string arrives at the build
-//! endpoint. The validators are scattered across the libpod source — namespaces
+//! endpoint. The validators are scattered across the libpod source: namespaces
 //! via `ParseNamespace`, `device_cgroup_rule` access strings via
 //! `parseLinuxResourcesDeviceAccess`, and a handful of others (build-arg keys,
 //! label keys) rejected by the buildkit-fronted parser. When libpod rejects
@@ -39,8 +39,8 @@ const CGROUP_FIELD: &str = "cgroup";
 /// `ipc` alone, and `keep-id`/`auto`/`nomap` for `userns_mode` alone. The
 /// per-slot extras live in [`IPC_EXTRA_MODES`] and [`USERNS_EXTRA_MODES`].
 ///
-/// The measurement distinguishes a mode podman refuses to *parse* — it says
-/// "unrecognized namespace mode" — from one that parses and then fails to
+/// The measurement distinguishes a mode podman refuses to *parse* (it says
+/// "unrecognized namespace mode") from one that parses and then fails to
 /// apply. On a rootless host `--userns=auto` reports "not enough unused IDs in
 /// user namespace" and `--userns=private` wants a UID mapping; both are valid
 /// modes that this host cannot satisfy, and neither belongs in a syntax
@@ -49,7 +49,7 @@ const CGROUP_FIELD: &str = "cgroup";
 /// `container:<id>` joins another container's namespace (compose's
 /// `container:NAME` and `service:NAME` forms; podup rewrites service→container
 /// before this list sees it). The `ns:<path>` form joins a namespace by an
-/// absolute filesystem path — directly user-facing on the compose side, so it
+/// absolute filesystem path, directly user-facing on the compose side, so it
 /// has to be allowed.
 ///
 /// `network_mode` is intentionally **not** validated here: the engine
@@ -63,7 +63,7 @@ const CGROUP_FIELD: &str = "cgroup";
 const NS_MODES: &[&str] = &["host", "private", "pod"];
 
 /// `ipc` takes two modes the other slots reject. `shareable` is the one
-/// compose files actually reach for — it is what lets a second container join
+/// compose files actually reach for: it is what lets a second container join
 /// this one's IPC namespace later, and podup used to refuse it outright.
 const IPC_EXTRA_MODES: &[&str] = &["none", "shareable"];
 
@@ -74,7 +74,7 @@ const IPC_EXTRA_MODES: &[&str] = &["none", "shareable"];
 const USERNS_EXTRA_MODES: &[&str] = &["keep-id", "auto", "nomap"];
 
 /// `container:` is not a value in the allow-list; it must carry an id.
-/// `ns:` is not a value either — it must carry a path. The presence of the
+/// `ns:` is not a value either; it must carry a path. The presence of the
 /// prefix is the test; the suffix is whatever the user typed.
 const NS_PREFIX_MODES: &[&str] = &["container:", "ns:"];
 
@@ -235,7 +235,7 @@ where
 /// Truncate a value for inclusion in a `Field` error so a huge or binary value
 /// does not flood the rendered message. Multi-line values are collapsed onto
 /// one line so the message stays single-line. The threshold is generous
-/// (256 chars) — long enough for any realistic compose value, short enough
+/// (256 chars), long enough for any realistic compose value, short enough
 /// to keep the error readable.
 pub(crate) fn render_value(value: &str) -> String {
 	let mut s = String::with_capacity(value.len().min(256));

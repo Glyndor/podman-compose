@@ -97,10 +97,10 @@ async fn scale_subcommand_scales_up_then_down() {
 
 /// #815 regression: scaling down to one must PRESERVE the surviving replica
 /// (`worker-1`), not destroy and recreate it. Containers are always named
-/// `worker-1..N`, so the desired set at target 1 is `{worker-1}` — which matches
+/// `worker-1..N`, so the desired set at target 1 is `{worker-1}`, which matches
 /// the running `worker-1` and keeps it. Before the fix the desired set was the
 /// bare, never-created `worker`, so every numbered replica (incl. the survivor)
-/// was removed and a fresh container took its place — losing the container's
+/// was removed and a fresh container took its place, losing the container's
 /// identity, uptime and in-memory state.
 #[tokio::test]
 async fn scale_down_to_one_preserves_surviving_replica() {
@@ -137,7 +137,7 @@ async fn scale_down_to_one_preserves_surviving_replica() {
 		.success());
 	assert_eq!(running_count(c, &proj), 1, "scale down must remove surplus");
 
-	// The survivor must be the very same container — same id, never recreated.
+	// The survivor must be the very same container: same id, never recreated.
 	let id_after = container_id(&survivor);
 	assert_eq!(
 		id_before, id_after,

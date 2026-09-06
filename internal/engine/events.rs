@@ -1,4 +1,4 @@
-//! `events` — stream Podman events scoped to the project (`docker compose
+//! `events` streams Podman events scoped to the project (`docker compose
 //! events`). Filters the libpod event stream by the `podup.project` label.
 
 use futures_util::StreamExt;
@@ -71,7 +71,7 @@ impl Engine {
 	///
 	/// The feed is unbounded, so it normally ends only when the caller stops it.
 	/// Returning at all therefore means the stream was lost, and this returns
-	/// `Err` — see [`Engine::stream_events_with_options`] for the bounded case.
+	/// `Err`; see [`Engine::stream_events_with_options`] for the bounded case.
 	pub async fn stream_events(&self, json: bool) -> Result<()> {
 		self.stream_events_with_options(json, &EventsOptions::default())
 			.await
@@ -86,10 +86,10 @@ impl Engine {
 	/// asked for. Beyond that, whether a *clean* ending is an error depends on
 	/// what the caller asked for:
 	///
-	/// - **`since` and `until` both set, both already elapsed** — the window
+	/// - **`since` and `until` both set, both already elapsed**: the window
 	///   closes on its own, so a clean ending is what was asked for. Returns
 	///   `Ok(())`.
-	/// - **anything else** — the feed is unbounded and libpod never ends it, so
+	/// - **anything else**: the feed is unbounded and libpod never ends it, so
 	///   any ending means the stream was lost. Returns
 	///   [`ComposeError::StreamTruncated`](crate::ComposeError::StreamTruncated).
 	///
@@ -194,7 +194,7 @@ impl Engine {
 /// to that key's value array). Pure so the merge is unit-tested.
 ///
 /// A predicate with no `=` is an error rather than a skip. Dropping it scoped
-/// the stream to the whole project instead — `events --filter garbage` printed
+/// the stream to the whole project instead: `events --filter garbage` printed
 /// everything, which a caller reads as "these all matched". docker compose
 /// errors on a malformed filter too.
 fn build_event_filters(project: &str, user_filters: &[String]) -> Result<Value> {
@@ -267,7 +267,7 @@ fn format_event(value: &Value, json: bool) -> String {
 /// that applied at that instant.
 ///
 /// The calendar arithmetic used to live here as its own civil-from-days walk.
-/// It moved to `crate::timestamp`, which already held the inverse for parsing —
+/// It moved to `crate::timestamp`, which already held the inverse for parsing:
 /// the two halves are one thing, and a round-trip test between them only means
 /// something while neither can be edited without the other in view.
 pub(crate) fn format_event_time(unix_secs: i64) -> String {
@@ -279,7 +279,7 @@ pub(crate) fn format_event_time(unix_secs: i64) -> String {
 /// `YYYY-MM-DD HH:MM:SS -05:00` is twenty-six. It was nineteen while the column
 /// rendered UTC and said nothing about it; adding the offset without widening
 /// truncated every row to `...19:00:0…`, which the tests caught. The two belong
-/// in one edit — a width that describes a format it no longer holds is the same
+/// in one edit: a width that describes a format it no longer holds is the same
 /// class of bug as the `stats` header that had drifted off its own columns.
 const TIME_WIDTH: usize = 26;
 
@@ -295,7 +295,7 @@ const ACTION_WIDTH: usize = 14;
 ///
 /// Fixed widths, not content-sized like every other table here: rows arrive over
 /// time, so there is nothing to measure up front. `events` was the only stream
-/// with no header and no padding at all — three fields joined by single spaces,
+/// with no header and no padding at all: three fields joined by single spaces,
 /// so `NAME` sat in a different column on every line and nothing named what the
 /// fields were.
 fn events_header() -> String {
@@ -362,7 +362,7 @@ mod event_json_tests;
 /// Whether an events feed that ended did so because it was asked to.
 ///
 /// The four other streaming commands re-check the container they followed. An
-/// events feed follows none, so the discriminator is intent — which the client
+/// events feed follows none, so the discriminator is intent, which the client
 /// knows without an API call.
 #[cfg(test)]
 #[cfg(unix)]

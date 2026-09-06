@@ -28,7 +28,7 @@ fn wait_header() -> String {
 /// One `wait` result line: the container, then its exit code coloured by whether
 /// it is a failure.
 ///
-/// The name goes through `fit_cell`, so it is escaped as well as padded — a
+/// The name goes through `fit_cell`, so it is escaped as well as padded: a
 /// container name is not podup's own string.
 fn wait_row(container: &str, code: i64) -> String {
 	let cell = crate::ui::fit_cell(container, WAIT_NAME_WIDTH);
@@ -47,7 +47,7 @@ fn wait_row(container: &str, code: i64) -> String {
 
 /// Say so when a command finished having done nothing.
 ///
-/// `start` already did this — *"no containers to start (project not created)"* —
+/// `start` already did this (*"no containers to start (project not created)"*)
 /// and the other six lifecycle commands did not: `rm`, `stop`, `restart`, `kill`,
 /// `pause` and `unpause` all exited 0 in complete silence on a project that was
 /// never created, which reads exactly like success. Measured before the fix, all
@@ -116,7 +116,7 @@ impl Engine {
 			// The server closed before completing the response. That is not an
 			// answer: the operation may have run to completion and lost only its
 			// reply. Measured on Podman 6 under concurrency, where the drops land
-			// on exactly these state-changing POSTs and follow a slow one — a
+			// on exactly these state-changing POSTs and follow a slow one: a
 			// restart that burned its full stop grace, then a drop on the next
 			// (#1339). It is not a client deadline (READ_TIMEOUT is 120s) and not
 			// a pooled-connection race (there is no pool; every request gets a
@@ -173,7 +173,7 @@ impl Engine {
 	/// state was re-confirmed via the drop-recheck path) and `Ok(false)` when
 	/// libpod said it was already stopped/gone. The bool lets
 	/// [`Self::stop_one_service`] keep its `acted` flag accurate now that it no
-	/// longer filters by per-container state itself — the bulk container-list
+	/// longer filters by per-container state itself; the bulk container-list
 	/// helper returns names without states, so the transition bit has to come
 	/// from the response (#1363).
 	pub(super) async fn stop_container(&self, container: &str, grace: i32) -> Result<bool> {
@@ -257,8 +257,8 @@ impl Engine {
 		// label cascade-restarts distinctly in the logs.
 		let (restart_set, targets) = restart_service_set(file, target_services, no_deps);
 
-		// Walk dependency levels in order — a dependency restarts before its
-		// dependents — but restart every service *within* a level concurrently.
+		// Walk dependency levels in order (a dependency restarts before its
+		// dependents) but restart every service *within* a level concurrently.
 		let levels = retain_levels(crate::compose::resolve_levels(file)?, |n| {
 			restart_set.contains(n)
 		});
@@ -360,14 +360,14 @@ impl Engine {
 		};
 
 		// One line per container, which is the granularity the reference reports
-		// at — measured against docker compose v5.1.3 with a service scaled to 3
+		// at, measured against docker compose v5.1.3 with a service scaled to 3
 		// replicas, it printed three lines, one per container id. The comment this
 		// replaces asserted the opposite ("a single exit code for each service"),
 		// and a bare `0` per service was built on it: with more than one container
 		// nothing said which code belonged to which.
 		//
 		// What is deliberately *not* copied is the rendering. The reference prints
-		// `container "<64-char hex id>" exited with status code 0` — an id nobody
+		// `container "<64-char hex id>" exited with status code 0`: an id nobody
 		// can map back to a service, the same sentence repeated on every line, and
 		// no machine path at all. Same information, said better: the container
 		// name podup already has, aligned columns, and the code coloured by
@@ -438,7 +438,7 @@ impl Engine {
 		// running/paused client-side.
 		let live_by_service = self.live_project_replicas().await?;
 
-		// Report "stopped" solely for containers actually running/paused —
+		// Report "stopped" solely for containers actually running/paused:
 		// stopping a Created/Exited one is a harmless no-op and must not claim
 		// it stopped (#876), matching docker compose. `stop_container` returns
 		// `Ok(false)` for libpod's 304/404 idempotent no-ops, which is how this
@@ -482,7 +482,7 @@ impl Engine {
 
 		// Prefetch every project container once and group by service, instead of
 		// one container-list round-trip per service (S+1 → 1 for the level walk;
-		// #1363). Only act on containers Podman actually has — acting on the
+		// #1363). Only act on containers Podman actually has; acting on the
 		// static fallback names would POST `/start` to containers that were never
 		// created, 404 (swallowed as a no-op), and exit 0 silently, masking that
 		// the project was never created. Attempt every live container and
@@ -515,8 +515,8 @@ impl Engine {
 		.await;
 		crate::ui::progress::end();
 		outcome?;
-		// `start`'s flag answers a narrower question than the others' — whether any
-		// container existed at all, not whether anything changed — so it can name
+		// `start`'s flag answers a narrower question than the others': whether any
+		// container existed at all, not whether anything changed, so it can name
 		// the cause, and the extra clause rides in the verb.
 		note_if_idle(&any_live, "start (project not created)");
 		Ok(())
@@ -532,7 +532,7 @@ impl Engine {
 		signal: &str,
 	) -> Result<()> {
 		// Reject an empty/whitespace-only or otherwise invalid signal before
-		// issuing any request — libpod would silently treat `signal=` as SIGKILL.
+		// issuing any request; libpod would silently treat `signal=` as SIGKILL.
 		super::signal::validate_signal(signal)?;
 
 		let levels = crate::compose::resolve_levels(file)?;

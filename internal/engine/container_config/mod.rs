@@ -38,7 +38,7 @@ pub(super) fn build_restart_policy(service: &Service) -> (Option<String>, Option
 		.and_then(|d| d.restart_policy.as_ref())
 	{
 		// Compose `restart_policy.condition`: `any` (the default) means restart
-		// under any circumstance, which docker-compose maps to `always` — not
+		// under any circumstance, which docker-compose maps to `always`, not
 		// `unless-stopped` (the latter would skip restarts after an explicit
 		// stop, diverging from docker-compose).
 		let name = match drp.condition.as_deref().unwrap_or("any") {
@@ -99,7 +99,7 @@ pub(crate) fn default_log_config() -> LogConfig {
 /// has a rotation policy without the user having to set one. When the user
 /// supplies a block, `max-size` is parsed into the typed [`LogConfig::size`]
 /// field libpod actually reads rotation from (passing it inside `options` is
-/// silently ignored — #1417); `max-file` is dropped with a warning because
+/// silently ignored, #1417); `max-file` is dropped with a warning because
 /// libpod does not implement it. A malformed `max-size` is rejected with a
 /// `PodmanError::Field` so the user gets a compose-flavoured error instead of
 /// a 500 from libpod's JSON unmarshal.
@@ -116,7 +116,7 @@ pub(crate) fn build_log_config(
 /// Translate a user-supplied `logging:` block into libpod's [`LogConfig`].
 ///
 /// `max-size` is moved into the typed `size` field. `max-file` is dropped
-/// with a warning — libpod does not implement it and would silently ignore
+/// with a warning: libpod does not implement it and would silently ignore
 /// it if forwarded. The user-supplied value of `max-size` is parsed with the
 /// same memory parser used elsewhere in the engine (`10m`, `1g`, plain
 /// bytes); a malformed value is rejected with the service field name so the
@@ -175,7 +175,7 @@ pub(super) fn build_healthcheck(hc: &HealthCheck) -> HealthConfig {
 	// API does NOT default these: a missing `Timeout` is taken as 0s, which makes
 	// every probe fail with "exceeded timeout of 0s" so the container is stuck
 	// `starting`; a missing/zero `Interval` disables the periodic check. Match
-	// docker-compose — interval 30s, timeout 30s, retries 3 (start_period 0).
+	// docker-compose: interval 30s, timeout 30s, retries 3 (start_period 0).
 	const DEFAULT_NANOS: i64 = 30 * 1_000_000_000;
 	HealthConfig {
 		test,

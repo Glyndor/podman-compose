@@ -22,12 +22,12 @@ These appear before the subcommand and may also come from the environment.
 
 | `--project-directory <PATH>` | | Base directory for relative paths (env_file, build context, bind mounts, config/secret sources). Defaults to the compose file's directory. |
 | `--ansi <WHEN>` | | Colour output: `auto`, `always` or `never`. `always` forces colour even into a pipe or file. | 
-| `--env-file <PATH>` | | Env file(s) for interpolation. Repeatable; later files win. **Replaces** a project `.env` rather than adding to it — when this is given, `.env` is not read. The process environment still takes precedence over both. |
-| `--no-warn` | | Suppress the host-binding / privilege-escalation warnings the engine emits during `up`/`create`/`run`/`exec` (e.g. `network_mode: host`, `privileged: true`, `pid: host`, `container:<id>` namespace sharing). Operators who wrote the compose file deliberately use this to silence the per-run warning. `podup config` still surfaces the active modes at default log level — that command is the "show me what will happen" path, where the warning is the whole point. | off |
+| `--env-file <PATH>` | | Env file(s) for interpolation. Repeatable; later files win. **Replaces** a project `.env` rather than adding to it: when this is given, `.env` is not read. The process environment still takes precedence over both. |
+| `--no-warn` | | Suppress the host-binding / privilege-escalation warnings the engine emits during `up`/`create`/`run`/`exec` (e.g. `network_mode: host`, `privileged: true`, `pid: host`, `container:<id>` namespace sharing). Operators who wrote the compose file deliberately use this to silence the per-run warning. `podup config` still surfaces the active modes at default log level, since that command is the "show me what will happen" path, where the warning is the whole point. | off |
 
 **Profiles activate their dependencies.** A service left out by profile
 filtering is still started when a service that *is* running declares
-`depends_on` on it, transitively — so a retained service never points at a
+`depends_on` on it, transitively, so a retained service never points at a
 dropped one. docker compose rejects that file instead. Give the dependant the
 same profile if you want neither to start. See
 [docker-migration.md](docker-migration.md#a-depends_on-target-behind-an-inactive-profile).
@@ -48,7 +48,7 @@ everywhere but cannot fully clear that bar: of the sixteen standard ANSI
 colours, only cyan and bright magenta stay readable on both a light and a dark
 background, and four of the fallback's own six fall short (magenta and blue
 against black, bright cyan against white, bright blue against black). ANSI-16
-colours have no fixed RGB — a terminal theme picks its own — so these figures,
+colours have no fixed RGB (a terminal theme picks its own), so these figures,
 like the wide palette's, are relative to the reference palette this branch's
 tests pin (`internal/ui/palette_tests.rs`, the standard VGA 16-colour set),
 not a universal guarantee. The fallback stays anyway, on the view that
@@ -61,8 +61,8 @@ Colour elsewhere carries meaning rather than identity, and each family is used
 for one thing only: green for something that now exists or is healthy, red for
 something gone or failed, yellow for something stopped that survives, dim for a
 default or unremarkable answer. That is why `volumes` marks an external volume
-yellow rather than green — it is not healthy or unhealthy, it is the one podup
-will not delete — and why `autostart status` reports an uninstalled unit dim
+yellow rather than green (it is not healthy or unhealthy, it is the one podup
+will not delete), and why `autostart status` reports an uninstalled unit dim
 throughout instead of colouring systemd's `not-found` red.
 
 ## Defaults
@@ -108,7 +108,7 @@ regardless.
 | `--wait-timeout <SECS>` | Maximum seconds to wait with `--wait` before giving up. | no limit |
 
 **`--wait` implies `-d`.** The flag means "return once the services are up", so
-`up --wait` does not stay attached to the logs afterwards — matching
+`up --wait` does not stay attached to the logs afterwards, matching
 `docker compose up --wait`.
 
 **Under `missing`, an image already present is not pulled again.** The effective
@@ -182,7 +182,7 @@ Build or rebuild service images (optionally only the named services).
 | `--no-cache` | Do not use the build cache. | off |
 | `--pull` | Always attempt to pull a newer base image. | off |
 | `--build-arg <KEY=VAL>` | Set a build-time variable. Repeatable. | none |
-| `--progress <STYLE>` | `auto`, `plain` or `tty`. Validated but inert — see [accepted for compatibility](#accepted-for-compatibility). | `auto` |
+| `--progress <STYLE>` | `auto`, `plain` or `tty`. Validated but inert; see [accepted for compatibility](#accepted-for-compatibility). | `auto` |
 | `--push` | Push each built image to its registry after a successful build. | off |
 | `-q, --quiet` | Suppress the build output. | off |
 
@@ -269,7 +269,7 @@ there is no complete set to size against). `--format json` prints no header.
 **Bounding a feed needs both flags.** Measured against Podman 5.4.2 on 2026-07-29:
 `--since -2h --until -1h` ends the feed; `--until` alone, `--since` alone, and
 any `--until` in the future all leave it following indefinitely. podup warns
-when `--until` is given without `--since`. This also decides the exit code — see
+when `--until` is given without `--since`. This also decides the exit code; see
 [Exit status](#exit-status).
 
 ### `top [SERVICE...]`
@@ -288,8 +288,8 @@ containers. On a terminal the table repaints in place; anywhere else each frame
 is appended, so a redirected `stats` stays a file of readable frames rather than
 a file of cursor moves.
 
-CPU and memory percentages are coloured by band — dim below 5%, green to 50,
-yellow to 85, red above — so an idle container recedes and the one in trouble is
+CPU and memory percentages are coloured by band: dim below 5%, green to 50,
+yellow to 85, red above, so an idle container recedes and the one in trouble is
 the one that catches the eye. The absolute figures and the PID count are
 secondary detail and stay dim.
 
@@ -301,7 +301,7 @@ streaming, one pretty array with `--no-stream`.
 | `--no-stream` | Print one snapshot and exit. | stream |
 | `-a, --all` | Include non-running containers as zeroed rows. | running only |
 | `--no-trunc` | Do not truncate long container names. | truncate at 32 |
-| `--format <FMT>` | `table` or `json`. While streaming, `json` is NDJSON — one compact array per line. | `table` |
+| `--format <FMT>` | `table` or `json`. While streaming, `json` is NDJSON: one compact array per line. | `table` |
 
 ### `port <SERVICE> <PRIVATE_PORT>`
 Print the public binding for a port.
@@ -340,7 +340,7 @@ a restart, which is the point of having both: a container created three days ago
 and started four seconds ago reads `3 days ago` / `Up 4s`.
 
 `SIZE` appears only with `-s/--size`. It reads `143kB (virtual 225MB)`: the bytes
-the container has written on top of its image, then the image's own size — the
+the container has written on top of its image, then the image's own size, the
 same shape `podman ps -s` and `docker ps -s` print, and `virtual` is the image
 size rather than the total of the two.
 
@@ -366,7 +366,7 @@ its full size and **zero** reclaimable, which is the fact that matters when you
 are clearing disk space.
 
 A volume declared in the compose file but never created renders both cells empty
-rather than `0B` — an empty cell says it is not there, while `0B` would claim it
+rather than `0B`: an empty cell says it is not there, while `0B` would claim it
 exists and holds nothing.
 
 **It is opt-in because it is slow, not because it is verbose.** No libpod
@@ -401,7 +401,7 @@ neither creates nor deletes an external volume, so those are the ones a
 | Flag | Description | Default |
 |---|---|---|
 | `-q, --quiet` | Print volume names only. | off |
-| `-s, --size` | Add SIZE and RECLAIMABLE columns. Slow — see below. | off |
+| `-s, --size` | Add SIZE and RECLAIMABLE columns. Slow; see below. | off |
 | `--format <FMT>` | `table` or `json`. | `table` |
 
 An empty result prints `no volumes` on stderr and leaves stdout empty.
@@ -436,7 +436,7 @@ podup run --rm web sh -c 'echo hello'
 > **Differs from docker on purpose.** `run` removes the container by default
 > here; `docker compose run` keeps it unless you pass `--rm`. Migrating a script
 > means its existing `--rm` becomes a no-op and a container it expected to
-> inspect afterwards is gone — pass `--no-rm` to keep it.
+> inspect afterwards is gone; pass `--no-rm` to keep it.
 
 `run` allocates a pseudo-TTY and attaches your stdin when stdin is a
 terminal, so `podup run -it app sh` drops you into an interactive session that
@@ -503,7 +503,7 @@ container side, e.g. `podup cp web:/app/data ./local`.
 
 ### `attach <SERVICE>`
 Attach to a service container's output (stdout/stderr), streaming it until the
-container exits or you detach. Output only — stdin is never attached.
+container exits or you detach. Output only; stdin is never attached.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -535,7 +535,7 @@ for `unpause`.
 
 ### `wait [SERVICE...]`
 Block until the named service containers (default: all) stop, printing one line
-per container as it exits — the container's name and its exit code, in aligned
+per container as it exits: the container's name and its exit code, in aligned
 columns, with a non-zero code in red. A scaled service reports each replica
 separately. The command's own exit status is the last non-zero code it saw.
 
@@ -548,7 +548,7 @@ A project with nothing to wait on prints nothing and exits 0.
 ### `scale <SERVICE=N>...`
 Set the number of running containers for one or more services, creating missing
 replicas and removing surplus ones. A service that publishes a **fixed host
-port** cannot be scaled past one replica — the command fails fast and tells you
+port** cannot be scaled past one replica; the command fails fast and tells you
 to drop the host port (`- "80"`, so Podman assigns one per replica), front it
 with a reverse proxy, or stay at one replica.
 
@@ -598,7 +598,7 @@ as it starts and finishes, leaving stdout a clean pipe.
 ## Generate
 
 ### `generate quadlet`
-Translate the compose file into Podman Quadlet unit files — one `.container` per
+Translate the compose file into Podman Quadlet unit files: one `.container` per
 service plus `.network` and `.volume` units. `gen` is an alias for `generate`.
 
 | Flag | Description | Default |
@@ -635,7 +635,7 @@ Print the resolved compose file (after substitution, extends, include, and
 `env_file`). `convert` is an alias.
 
 `env_file` entries are read and folded into `environment:`, and the key is
-dropped — the same thing `docker compose config` does. Before 3.1.0 the key was
+dropped, the same thing `docker compose config` does. Before 3.1.0 the key was
 printed unresolved, so a service taking its whole environment from a file
 rendered with no `environment:` at all, and `config` pointed away from the answer
 it is meant to give. `environment:` still wins over `env_file:`, a later file
@@ -743,14 +743,14 @@ Verification fails closed: a missing key, bad Ed25519 signature, or SHA-256
 mismatch aborts before the installed binary is touched. After the binary is
 written, a self-test runs `<binary> --version` and refuses the install if the
 reported version does not match the resolved release tag (strict equality,
-optional single `v` prefix) — a CDN or proxy that replays an older,
+optional single `v` prefix). A CDN or proxy that replays an older,
 *legitimately* signed release passes the signature and digest checks but fails
 this one, and the previous binary is restored. The shell installers
 (`install.sh`, `install.ps1`) run the same gate. See
 [self-update.md](self-update.md) for the trust model.
 
 ### `autostart` (alias `boot`)
-Manage a boot-time autostart unit for this compose project — rootless,
+Manage a boot-time autostart unit for this compose project: rootless,
 user-scope `systemctl --user` (enable lingering with
 `loginctl enable-linger` so the unit starts without a login session). See
 [Rootless autostart](autostart.md) for the full setup, the two backends, and
@@ -800,7 +800,7 @@ A tail region rather than a full-screen takeover, deliberately: `up` is a
 command that finishes, and handing the screen back blank would destroy the
 record of what it did.
 
-**Anywhere else** — a pipe, a file, CI, `NO_COLOR`, `--ansi never` — the same
+**Anywhere else** (a pipe, a file, CI, `NO_COLOR`, `--ansi never`), the same
 events come out as plain append-only lines with no escape sequences at all:
 
 **Progress lines on stderr never contradict themselves.** A transitional
@@ -827,8 +827,8 @@ terminal showed.
 
 Only what actually happened is reported: re-running `up` over existing
 resources reports no creation, and `down` on a project whose networks or volumes
-were never created reports no removal. A command that acted on nothing says so —
-`no containers to stop`, `no containers to start (project not created)` — rather
+were never created reports no removal. A command that acted on nothing says so:
+`no containers to stop`, `no containers to start (project not created)`, rather
 than exiting silently, which is indistinguishable from success.
 
 A container that is replaced reads differently from one that is created:
@@ -881,7 +881,7 @@ keys; they are called out below.
 
 | Key | Where | What it does | Portable |
 |---|---|---|---|
-| `x-podman-on-failure` | under a service's `healthcheck:` | `none`, `kill`, `restart` or `stop` — what Podman does when the check flips to unhealthy. Default `none`. | yes |
+| `x-podman-on-failure` | under a service's `healthcheck:` | `none`, `kill`, `restart` or `stop`, naming what Podman does when the check flips to unhealthy. Default `none`. | yes |
 | `x-podman-pod` | top level | `true` puts every service of the project into one Podman pod named after the project; see [Pods](#pods). | yes |
 | `x-podman-autoupdate` | under a service | `registry` or `local`; see [Auto-update](#auto-update). | yes |
 | `noexec`, `nosuid`, `nodev` | under a long-form volume's `volume:` | mount-hardening flags; see [Per-mount hardening options](docker-migration.md#per-mount-hardening-options-noexec-nosuid-nodev). The short form carries them as raw mount options. | no |
@@ -975,7 +975,7 @@ audit, and one place ports are published; not for a faster `up`.
 ### Healthcheck timing on a `service_healthy` gate
 
 When `up` waits on `depends_on: {condition: service_healthy}`, podup drives the
-check itself — Podman schedules its own runs through systemd transient timers,
+check itself: Podman schedules its own runs through systemd transient timers,
 which never fire on a host without systemd, so a purely passive wait would block
 until the whole budget elapsed.
 
@@ -987,8 +987,8 @@ until the whole budget elapsed.
 
 Running a check executes a command *inside* the container, so it happens no
 faster than `interval` and the floor keeps `interval: 1ms` from becoming a
-thousand executions a second. Reading the status is a plain inspect — it runs no
-command — so it is cheap and frequent, and it is what notices promptly when
+thousand executions a second. Reading the status is a plain inspect that runs no
+command, so it is cheap and frequent, and it is what notices promptly when
 Podman's own timer flips the status between podup's runs.
 
 A container that fails during the wait is reported as soon as the next read sees
@@ -1001,13 +1001,13 @@ indefinitely.
 
 > **`kill` and a restart policy do not combine the way you would expect.**
 > `--health-on-failure=kill` with `restart: unless-stopped` leaves the container
-> **exited and never revived** — the kill is not the kind of exit the restart
+> **exited and never revived**: the kill is not the kind of exit the restart
 > policy acts on. Use `restart` if you want it to come back.
 >
 > podman-run(1) suggests `kill` or `stop` "when running inside of a systemd
 > unit… to make use of systemd's restart policy". That advice assumes the unit
 > restarts the container. `autostart --mode service` writes a
-> `Type=oneshot` + `RemainAfterExit=yes` unit, which does **not** — so under
+> `Type=oneshot` + `RemainAfterExit=yes` unit, which does **not**, so under
 > podup's own service-mode unit that recommendation turns a degraded container
 > into a stopped one.
 
@@ -1018,7 +1018,7 @@ drop the whole unit at daemon-reload.
 ## Accepted for compatibility
 
 These flags parse and are validated, so a script written against docker compose
-runs unchanged — but podup does not act on them. They are listed here because
+runs unchanged, but podup does not act on them. They are listed here because
 `--help` says "accepted for compatibility" without saying which flags that
 covers, and the only other way to find out was to read the dispatch code.
 
@@ -1056,7 +1056,7 @@ returns the last non-zero code it saw.
 **`up --abort-on-container-exit` and `up --exit-code-from`** make a foreground
 `up` a usable CI test harness: the project is brought up, the named service
 (or the first to exit) runs to completion, the rest are stopped, and the
-container's exit code is the process exit code — matching `docker compose v5.1.3`
+container's exit code is the process exit code, matching `docker compose v5.1.3`
 on the same Podman socket. The teardown is `stop`, not `down`: containers
 remain in `Exited` state, ready for the next `up`/`down`. A zero exit
 propagates as `0`, not `1`, so a clean run still reports success.
@@ -1068,7 +1068,7 @@ still torn down before the code is returned, so an interrupted `up` leaves
 nothing running.
 
 This matters most in CI: a job that runs `podup up` in the foreground and is
-cancelled — by a timeout, by an operator, by the runner shutting down — used to
+cancelled (by a timeout, by an operator, by the runner shutting down) used to
 report **success**. Anything gating on that exit status could not tell a
 completed run from an abandoned one.
 
@@ -1082,8 +1082,8 @@ adapting rather than working unchanged.
 commands: `logs`, `stats`, an attached `up`, `run`, and `events`.
 
 A stream ends when the container it follows stops, and libpod marks that end
-with a chunked terminator. A lost terminator — a dropped connection, or a
-version that omits it — is indistinguishable from a real mid-stream break at the
+with a chunked terminator. A lost terminator (a dropped connection, or a
+version that omits it) is indistinguishable from a real mid-stream break at the
 transport layer, so the transport is not asked. Four of the five re-check
 whether the container is still running: still running means live output was
 truncated, and the command exits `1`. `run` reports the transport error instead
@@ -1091,25 +1091,25 @@ of an exit code, since the command it was running never produced one.
 
 This matters for anything scraping them. `logs -f` used to return success after
 losing its socket, so a monitor could not tell "the container finished" from "my
-connection died" — and a script reading that `0` was already wrong, it just had
+connection died", and a script reading that `0` was already wrong, it just had
 no way to know. `docker compose logs -f` exits `1` on the same failure (measured
 against the same Podman socket), so the old `0` was a divergence rather than
 parity.
 
 A stream that ends because its containers stopped still exits `0`, as does
 `logs` without `-f` and a `logs -f` whose reader closes the pipe (`| head`).
-When the re-check itself cannot be made — usually because the same severed
-connection is needed for it — the command fails rather than assuming the end was
+When the re-check itself cannot be made, usually because the same severed
+connection is needed for it, the command fails rather than assuming the end was
 clean.
 
 **`events` decides it differently**, because a feed is project-scoped and
 follows no single container, so there is nothing to re-check. What the caller
 asked for answers it instead:
 
-- **A bounded window** — `--since` and `--until` together, both already elapsed
-  — closes on its own, so reaching the end exits `0`.
+- **A bounded window** (`--since` and `--until` together, both already elapsed)
+  closes on its own, so reaching the end exits `0`.
 - **Anything else** is an unbounded feed. libpod never ends one, so *any* end
-  means the stream was lost and the command exits `1` — including a clean end,
+  means the stream was lost and the command exits `1`, including a clean end,
   which no check on the error shape could have caught.
 - **A transport failure always fails**, bounded or not. A severed socket is not
   made expected by having asked for a window.
@@ -1124,8 +1124,8 @@ warns when `--until` is passed without `--since`.
 
 **`watch` is the exception.** A sync, rebuild, restart or exec that fails during
 a watch session is reported as a warning and the session keeps going; `watch`
-exits 0 unless it cannot start at all. This matches `docker compose watch` — a
-long-running developer loop should not die because one rebuild failed — but it
+exits 0 unless it cannot start at all. This matches `docker compose watch`: a
+long-running developer loop should not die because one rebuild failed. But it
 does mean the exit code of a `watch` session says nothing about whether every
 action in it succeeded. Read the warnings, not the status, and do not gate
 automation on it.

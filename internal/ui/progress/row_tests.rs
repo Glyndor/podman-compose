@@ -88,7 +88,7 @@ fn the_summary_line_never_exceeds_the_measured_width() {
 	}
 }
 
-/// A width of zero means "do not truncate" — the caller could not read the
+/// A width of zero means "do not truncate": the caller could not read the
 /// terminal size. The line is still produced rather than collapsing to nothing.
 #[test]
 fn width_zero_leaves_the_line_intact() {
@@ -116,8 +116,8 @@ fn each_state_gets_its_own_marker() {
 }
 
 /// A row that closed with the verb "Failed" is not a successful row. The marker
-/// is the first thing the eye lands on, so a failure without `✘` — a row that
-/// says "Failed" with a green `✔` — is the same contradiction the missing-close
+/// is the first thing the eye lands on, so a failure without `✘` (a row that
+/// says "Failed" with a green `✔`) is the same contradiction the missing-close
 /// fix (#1347) introduced: the verb now says "Failed", and the marker has to
 /// match.
 #[test]

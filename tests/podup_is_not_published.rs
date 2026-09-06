@@ -40,7 +40,7 @@ fn no_workflow_owned_here_runs_cargo_publish() {
 	// `reusable-rust-ci.yml` keeps a guarded `cargo publish --dry-run` behind
 	// `if: inputs.package-check`, which `ci.yml` now passes as false. It is
 	// excluded because it is a generic reusable rather than a decision about
-	// podup — the thing worth catching is a caller turning it back on, or a new
+	// podup; the thing worth catching is a caller turning it back on, or a new
 	// step publishing for real.
 	let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows");
 	let mut offenders = Vec::new();
@@ -75,7 +75,7 @@ fn no_workflow_owned_here_runs_cargo_publish() {
 /// have one home, so grepping the file you happen to be editing is not a check.
 ///
 /// Deliberately narrow: these three markers, not the words "crates.io", which the
-/// docs use correctly all over — the threat model lists it as untrusted network,
+/// docs use correctly all over: the threat model lists it as untrusted network,
 /// and the packaging notes explain why podup is not on it.
 #[test]
 fn no_document_still_says_the_library_is_published_or_consumed() {

@@ -1,8 +1,8 @@
 use super::*;
 
 /// The redaction is the whole point of [`SecretBytes`], so it is asserted
-/// rather than assumed. Without this, someone deriving `Debug` on the type —
-/// the obvious thing to reach for — would silently undo it.
+/// rather than assumed. Without this, someone deriving `Debug` on the type,
+/// the obvious thing to reach for, would silently undo it.
 #[test]
 fn secret_bytes_debug_redacts_the_contents_and_keeps_the_length() {
 	let payload = SecretBytes::new(b"a-secret-that-must-not-be-printed".to_vec());
@@ -30,7 +30,7 @@ fn the_bare_byte_form_this_replaces_leaks_in_decimal() {
 }
 
 /// [`SecretBytes::expose_secret`] is the only way the bytes get out, so
-/// grepping for it is the audit — and an audit surface nothing measures is one
+/// grepping for it is the audit, and an audit surface nothing measures is one
 /// that grows. Test code may call it freely; production may not.
 #[test]
 fn the_escape_hatch_has_exactly_one_production_caller() {

@@ -107,7 +107,7 @@ services:
 	assert!(build.contents.contains("[Build]"));
 	assert!(build.contents.contains("ImageTag=app:latest"));
 	// `abs_context` joins with the OS separator, so build the expected path the
-	// same way — `/srv/app/src` on Unix, `/srv/app\src` on Windows — rather than a
+	// same way (`/srv/app/src` on Unix, `/srv/app\src` on Windows) rather than a
 	// POSIX literal that fails the render tests (which are not Unix-gated) on Windows.
 	let expected_ctx = format!(
 		"SetWorkingDirectory={}",
@@ -193,8 +193,8 @@ services:
 }
 
 /// #1092: `env_file: [{path, required: false}]` says a missing file is fine.
-/// Quadlet cannot express that — `EnvironmentFile=` becomes `--env-file`, which
-/// is fatal on a missing path — so the entry is emitted anyway and the container
+/// Quadlet cannot express that: `EnvironmentFile=` becomes `--env-file`, which
+/// is fatal on a missing path, so the entry is emitted anyway and the container
 /// refuses to start. That is the only behaviour available; what must not happen
 /// is emitting it silently.
 #[test]
@@ -216,7 +216,7 @@ services:
 		joined.contains("env_file") && joined.contains("required: false"),
 		"expected a warning naming the unmappable `required: false`, got:\n{joined}"
 	);
-	// The entry is still emitted — dropping it would lose configuration the user
+	// The entry is still emitted; dropping it would lose configuration the user
 	// asked for whenever the file does exist. Built with `join` so the separator
 	// matches the host (this test is not Unix-gated).
 	let c = &unit_named(&out, "p-s.container").contents;

@@ -99,7 +99,7 @@ fn parse_error_message_uses_raw_body_when_json_has_no_message() {
 #[test]
 fn check_status_with_field_promotes_to_field_error() {
 	// A 4xx with a field context renders as `field: <libpod message>
-	// (value: <value>)` — the field-shaped form the operator wants,
+	// (value: <value>)`, the field-shaped form the operator wants,
 	// not the raw HTTP framing. The libpod message is preserved inside
 	// the Field so the cause is not lost (#1357).
 	let body = br#"{"message":"namespace \"evil\" not recognised"}"#;
@@ -236,7 +236,7 @@ fn client_new_stores_socket_path() {
 // ---------------------------------------------------------------------------
 
 /// A bounded wait aborts a future that outlives the limit and names the phase
-/// in the message — the guard that stops a stalled or silent socket (whether
+/// in the message, the guard that stops a stalled or silent socket (whether
 /// waiting on the response head or reading a buffered body) from hanging the
 /// CLI. A never-resolving future stands in for the silent-socket attack.
 #[tokio::test]
@@ -292,7 +292,7 @@ fn meets_minimum_handles_malformed_and_empty() {
 /// This is the crux of the leading hypothesis for `cp` into a container failing
 /// on Podman 6. hyper sets `Content-Length` when a body reports an exact size
 /// and falls back to `Transfer-Encoding: chunked` when it does not. If boxing
-/// erased the hint, every `PUT /containers/{id}/archive` would go out chunked —
+/// erased the hint, every `PUT /containers/{id}/archive` would go out chunked,
 /// and a server that expects a length would close the connection mid-body,
 /// which is exactly the `IncompleteMessage` the lane reports.
 ///
@@ -312,7 +312,7 @@ fn a_buffered_put_body_reports_an_exact_size() {
 }
 
 /// The operator's report (#1146): `podman socket connection error: No such
-/// file or directory (os error 2)` — no path, no way to tell "it is not there"
+/// file or directory (os error 2)`: no path, no way to tell "it is not there"
 /// from "I cannot open it", nothing to act on. Everything needed was already in
 /// hand one call earlier.
 #[cfg(unix)]

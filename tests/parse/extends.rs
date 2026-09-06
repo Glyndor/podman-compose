@@ -3,7 +3,7 @@ use std::io::Write;
 
 fn make_chain_yaml(depth: usize) -> String {
 	let mut yaml = "services:\n".to_string();
-	// Reverse order so the deepest service comes first — forces full recursion.
+	// Reverse order so the deepest service comes first, forcing full recursion.
 	for i in (1..=depth).rev() {
 		yaml.push_str(&format!("  s{i}:\n    extends: s{}\n", i - 1));
 	}
@@ -348,7 +348,7 @@ services:
 
 #[test]
 fn extends_chain_within_depth_limit() {
-	// 16 services = 15 hops — must succeed.
+	// 16 services = 15 hops, which must succeed.
 	let yaml = make_chain_yaml(15);
 	assert!(
 		parse_str(&yaml).is_ok(),
@@ -358,7 +358,7 @@ fn extends_chain_within_depth_limit() {
 
 #[test]
 fn extends_chain_exceeds_depth_limit() {
-	// 17 services = 16 hops — must be rejected.
+	// 17 services = 16 hops, which must be rejected.
 	let yaml = make_chain_yaml(16);
 	let err = parse_str(&yaml).unwrap_err();
 	let msg = err.to_string();

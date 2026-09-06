@@ -14,7 +14,7 @@ fn the_two_shapes_libpod_really_sends_both_parse() {
 	// A running container, from `containers/json`. Written at -05:00, so its
 	// UTC instant is five hours later than the wall clock in the string:
 	// 2026-08-03 00:58:45Z. Both constants here were checked against an
-	// independent parser rather than worked out by hand — the first version of
+	// independent parser rather than worked out by hand: the first version of
 	// this one was an hour off, and the code was right.
 	assert_eq!(
 		parse_rfc3339("2026-08-02T19:58:45.39802971-05:00"),
@@ -40,7 +40,7 @@ fn the_offset_moves_the_instant_the_right_way() {
 }
 
 /// Round-trip through the formatter that lives beside this parser. The two are
-/// inverses — days-from-civil here, civil-from-days there — so for both to agree
+/// inverses (days-from-civil here, civil-from-days there) so for both to agree
 /// and both be wrong they would have to be wrong in the same direction.
 ///
 /// **Zone-independent on purpose.** `format_local` renders the reader's wall

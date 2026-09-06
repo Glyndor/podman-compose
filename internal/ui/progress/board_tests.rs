@@ -40,8 +40,8 @@ fn a_finish_without_a_start_still_lands() {
 	assert_eq!(b.tally(), (1, 3));
 }
 
-/// A resource the seed did not predict — an implicit network, a `--scale`
-/// override — is appended rather than dropped. Losing the row is worse than a
+/// A resource the seed did not predict (an implicit network, a `--scale`
+/// override) is appended rather than dropped. Losing the row is worse than a
 /// board that grows by one.
 #[test]
 fn an_unseeded_resource_is_appended_not_dropped() {

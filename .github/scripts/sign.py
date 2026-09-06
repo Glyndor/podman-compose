@@ -12,7 +12,7 @@ standard base64. When output-sig-file is omitted, writes <input-file>.sig.
 Rotation is by dual-TRUST, not dual-sign: consumers (install.sh, install.ps1,
 verify-debs.sh, internal/update/verify.rs) bake BOTH accepted public keys and
 accept a release signed by either, so the active signer can be switched to the
-second key with no consumer change. Only one detached .sig is ever produced — the
+second key with no consumer change. Only one detached .sig is ever produced, the
 one signature every verifier reads. Fails closed (exit 1) when the key is unset,
 to never publish an unsigned artifact.
 """

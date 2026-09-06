@@ -1,6 +1,6 @@
 # Migrating from Docker Compose to podup
 
-Point podup at an existing `docker-compose.yml` and run it — no rewrite, no new
+Point podup at an existing `docker-compose.yml` and run it: no rewrite, no new
 file format. The short answer is: **most files work without any changes**.
 
 ```sh
@@ -25,14 +25,14 @@ Every core Compose spec key is supported:
 | Networking | `ports`, `expose`, `networks`, `network_mode`, `hostname`, `domainname`, `dns`, `dns_search`, `extra_hosts` |
 | Volumes | `volumes` (bind, named, tmpfs, npipe), `tmpfs`, `volumes_from` |
 | Secrets / configs | `secrets`, `configs` (file, inline content, environment source, and `external: true` Podman-native secrets) |
-| Dependencies | `depends_on` (with `condition:` — `service_started`, `service_healthy`, `service_completed_successfully`) |
+| Dependencies | `depends_on` (with `condition:` set to `service_started`, `service_healthy` or `service_completed_successfully`) |
 | Health checks | `healthcheck` (test, interval, timeout, retries, start_period, disable) |
 | Lifecycle hooks | `post_start`, `pre_stop` |
 | Restart policies | `restart`, `deploy.restart_policy` (`condition`, `max_attempts`) |
 | Replicas / scale | `deploy.replicas`, `scale:` |
 | Resource limits | `deploy.resources`, `mem_limit`, `cpus`, `cpu_shares`, `cpu_quota`, `pids_limit`, `ulimits`, `blkio_config` |
 | Devices | `devices`, `device_cgroup_rules` |
-| GPU | `deploy.resources.reservations.devices`, `gpus:` — see the note below |
+| GPU | `deploy.resources.reservations.devices`, `gpus:`; see the note below |
 | Security | `cap_add`, `cap_drop`, `security_opt`, `read_only`, `privileged`, `userns_mode` |
 | Namespaces | `pid`, `ipc`, `uts`, `cgroup`, `shm_size` |
 | Metadata | `labels`, `annotations`, `container_name`, `profiles` |
@@ -45,16 +45,16 @@ Every core Compose spec key is supported:
 but only for **NVIDIA** GPUs, and only when the host exposes them through CDI
 (the NVIDIA Container Toolkit must be installed and the CDI spec generated).
 Reservations for other drivers or capabilities are warned about and skipped.
-This is the common case Podman supports natively — but it depends on the host's
+This is the common case Podman supports natively, but it depends on the host's
 GPU driver and CDI setup, not on podup alone.
 
 ### External secrets and configs
 
 A secret or config declared `external: true` is mounted from an existing
-Podman secret rather than from a value in the project tree — the recommended
+Podman secret rather than from a value in the project tree, the recommended
 pattern for production credentials, since the secret material never appears in
-the compose file or its history. (Every other source — inline
-`content:`/`environment:` and `file:` alike — is injected as a Podman-native
+the compose file or its history. (Every other source, inline
+`content:`/`environment:` and `file:` alike, is injected as a Podman-native
 secret too, never a host bind mount, but its value still lives in the compose
 file or next to it.) Create the secret before running, exactly as you would with
 `docker secret`:
@@ -81,7 +81,7 @@ the Podman secret is named differently from the compose reference.
 
 ## Behaves differently under rootless Podman
 
-These are Podman behaviours, not podup limitations — they apply equally to any
+These are Podman behaviours, not podup limitations; they apply equally to any
 Podman-based tool. Each one is something to expect, with the workaround.
 
 ### `network_mode: bridge`
@@ -92,12 +92,12 @@ Podman-based tool. Each one is something to expect, with the workaround.
 | **Workaround** | Remove `network_mode: bridge` and let the container join the project's default network, or declare a shared `networks:` entry the services share. podup emits a warning when it sees `network_mode: bridge`. |
 
 ```yaml
-# before — siblings unreachable under Podman
+# before: siblings unreachable under Podman
 services:
   web:
     network_mode: bridge
 
-# after — services share a network and resolve each other by name
+# after: services share a network and resolve each other by name
 services:
   web:
     networks: [app]
@@ -244,14 +244,14 @@ services:
 ```
 
 Both forms of `depends_on` behave this way, short and long. When **both**
-services carry the profile, podup agrees with docker compose and starts neither
-— the profile is doing its job and nothing contradicts it.
+services carry the profile, podup agrees with docker compose and starts neither:
+the profile is doing its job and nothing contradicts it.
 
 **The Compose Specification does not decide this.** It says only that a service
 with `profiles` "is only started if the profile is activated", and says nothing
 about a dependency whose profile is inactive. Docker's own documentation treats
-it as something the author must fix — the dependency has to be "in the same
-profile, started separately, or not assigned to any profile" — so its rejection
+it as something the author must fix (the dependency has to be "in the same
+profile, started separately, or not assigned to any profile"), so its rejection
 is an implementation choice in a case the specification leaves open, not a rule
 podup is breaking.
 
@@ -259,7 +259,7 @@ podup is breaking.
 is rejected by docker compose, so it is not portable back. If you want the
 dependency to stay out, or you need the file to work under both tools, give the
 dependant the same profile; then neither starts, everywhere. Note also that
-docker compose's message is misleading — `db` is not undefined, it is defined
+docker compose's message is misleading: `db` is not undefined, it is defined
 and filtered.
 
 ## Accepted but has no effect
@@ -267,7 +267,7 @@ and filtered.
 These fields parse cleanly so existing compose files validate, but podup cannot
 translate them on single-host rootless Podman. **podup emits a warning for each
 one it finds**, so nothing is dropped silently. The list below is a set of
-**examples, not exhaustive** — when in doubt, run `podup up` and read the
+**examples, not exhaustive**; when in doubt, run `podup up` and read the
 warnings (see [Seeing the warnings](#seeing-the-warnings)).
 
 ### Swarm / cluster orchestration
@@ -285,12 +285,12 @@ warnings (see [Seeing the warnings](#seeing-the-warnings)).
 ### BuildKit / buildx-only build options
 
 `build.privileged`, `build.ssh`, `build.ulimits`, `build.isolation`,
-`build.entitlements`, `build.provenance`, `build.sbom` — these have no libpod
+`build.entitlements`, `build.provenance`, `build.sbom`: these have no libpod
 build-API equivalent and are ignored.
 
 ### Windows / Hyper-V-only
 
-`cpu_count`, `cpu_percent`, `credential_spec`, `isolation` — no rootless Podman
+`cpu_count`, `cpu_percent`, `credential_spec`, `isolation`: no rootless Podman
 equivalent.
 
 ### Other parsed-but-ignored fields
@@ -311,20 +311,20 @@ equivalent.
 | Feature | Status |
 |---|---|
 | `env_file.format` values other than `dotenv` | A **warning** is emitted (`format is not honored; podup always parses env files as dotenv`); the file is still read as dotenv |
-| `provider:` / model-runner services (`provider`, top-level `models`) | Modeled and parsed, but **not honored** — a not-honored warning is emitted (these are no rootless-Podman equivalent, *not* "unknown key" errors) |
+| `provider:` / model-runner services (`provider`, top-level `models`) | Modeled and parsed, but **not honored**; a not-honored warning is emitted (these are no rootless-Podman equivalent, *not* "unknown key" errors) |
 | Real-hardware smoke tests on macOS | Pending; the code paths exist but are untested on physical Apple hardware. Windows was validated end-to-end on real hardware (Windows 11, Podman 5.8.3), including the interactive `exec`/`run` path added in 3.0.0. |
 
 ## Nothing is dropped silently
 
-podup follows the Compose spec's forward-compatibility rule — an unknown key is
+podup follows the Compose spec's forward-compatibility rule: an unknown key is
 never a hard error, so `x-*` extensions and newer compose fields keep parsing.
 But anything podup cannot translate is **reported**, never silently ignored, so
 a typo or an unmapped feature can't hide. At parse time podup warns about:
 
 - unknown keys at the top level and inside every modeled object (services and
   their `healthcheck`, `deploy`, `develop.watch`; top-level `networks`,
-  `networks.*.ipam`, and `volumes`) — usually a typo such as `enviroment:`;
-- modeled fields it cannot honor on rootless Podman — the
+  `networks.*.ipam`, and `volumes`), usually a typo such as `enviroment:`;
+- modeled fields it cannot honor on rootless Podman, the
   [accepted-but-has-no-effect](#accepted-but-has-no-effect) fields above.
 
 This is what lets a compose file written for a newer Docker or Podman release
@@ -340,15 +340,15 @@ The `podup` CLI prints these warnings automatically. Run with
 events. See the [`RUST_LOG` reference in `commands.md`](commands.md#environment)
 for the full level table.
 
-If you embed podup as a **library**, `parse_file` itself stays quiet — call
+If you embed podup as a **library**, `parse_file` itself stays quiet; call
 `podup::collect_diagnostics` on the parsed file to obtain the same warnings and
 surface them to your users.
 
 ## File references and path confinement
 
 Compose files are **trusted input**, like a Makefile. Path-valued keys that the
-spec resolves relative to the compose file — `extends.file`, `env_file`,
-`label_file`, and `include` — may use `../` to reach files outside the project
+spec resolves relative to the compose file (`extends.file`, `env_file`,
+`label_file`, and `include`) may use `../` to reach files outside the project
 directory, matching docker-compose. Absolute paths are accepted too (an
 absolute `include:` is used as given, as in docker-compose). This is an
 intentional divergence from a fully sandboxed parser: do not feed podup a
@@ -362,7 +362,7 @@ Before running `podup up` on an existing compose file:
 - [ ] Replace `network_mode: bridge` with a shared `networks:` entry if services need to reach each other.
 - [ ] Remove or remap any host ports below 1024 if running fully rootless.
 - [ ] Add `:Z` to bind mounts on SELinux hosts if containers cannot write to them.
-- [ ] Check for `mac_address:` at the service level — move to `networks:` to silence the warning.
-- [ ] Check for Swarm-only `deploy.*` fields — they are harmless but can be cleaned up.
+- [ ] Check for `mac_address:` at the service level; move to `networks:` to silence the warning.
+- [ ] Check for Swarm-only `deploy.*` fields; they are harmless but can be cleaned up.
 - [ ] Verify `env_file` uses dotenv format (key=value lines, `#` comments).
 - [ ] For GPUs, confirm the host has an NVIDIA driver + CDI configured.

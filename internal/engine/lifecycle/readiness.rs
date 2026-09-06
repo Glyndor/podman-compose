@@ -2,7 +2,7 @@
 //!
 //! When several services in a dependency level declare `depends_on: <svc>:
 //! {condition: service_healthy}`, they start concurrently and would each poll
-//! that container's healthcheck — and every poll *runs* the check inside the
+//! that container's healthcheck, and every poll *runs* the check inside the
 //! container, so a service N others wait on gets its healthcheck executed ~N×
 //! per interval for the whole startup. [`Engine::build_readiness_map`] memoizes
 //! one poller per container so the check runs once per interval regardless of
@@ -74,7 +74,7 @@ impl Engine {
 				if !enabled.contains(&dep) {
 					continue;
 				}
-				// A disabled healthcheck is treated as satisfied — never polled.
+				// A disabled healthcheck is treated as satisfied and never polled.
 				if dep_service
 					.healthcheck
 					.as_ref()
@@ -107,12 +107,12 @@ impl Engine {
 /// [`ComposeError::DependencyNotReady`] for every failure changes what `up()`
 /// returns: code matching `ComposeError::HealthCheckTimeout(_)` stops matching
 /// once the poller is shared, even though the message and the exit code are
-/// identical — an invisible break of a frozen public API.
+/// identical: an invisible break of a frozen public API.
 ///
 /// `wait_healthy` fails exactly three ways. Two carry cheap owned data and are
 /// reconstructed exactly, so a caller sees the variant it saw before the poller
 /// was shared. A [`ComposeError::Podman`] transport error holds a non-`Clone`
-/// payload and cannot be rebuilt, so it keeps the transparent wrapper — which is
+/// payload and cannot be rebuilt, so it keeps the transparent wrapper, which is
 /// what [`ComposeError::innermost`] exists to peel.
 pub(super) fn unshare_readiness_error(shared: &Arc<ComposeError>) -> ComposeError {
 	match &**shared {

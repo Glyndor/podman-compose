@@ -15,7 +15,7 @@ async fn build_with_target_stage() {
 		None => return,
 	};
 	let dir = tempfile::tempdir().unwrap();
-	// Multi-stage Dockerfile — build with target: base covers build.rs L77.
+	// Multi-stage Dockerfile: build with target: base covers build.rs L77.
 	// Each stage leaves its name on disk, so which one was built is readable from
 	// inside the container. With `RUN echo` alone both stages produce an image
 	// that looks the same from outside, and a build that ignored `target:`
@@ -74,7 +74,7 @@ async fn build_with_args_and_extra_tags() {
 	engine.up(&file).await.unwrap();
 	// Two separate problems, both of which made the old version unfalsifiable.
 	// `RUN echo` leaves nothing in the image, so a build that dropped the arg
-	// produced a byte-identical result — hence writing the value to a file. And
+	// produced a byte-identical result, hence writing the value to a file. And
 	// the `$$` is load-bearing: compose substitutes `$VERSION` in the YAML before
 	// the Dockerfile is ever assembled, so the single-dollar form the old test
 	// used reached the build as an empty string and the ARG was never exercised
@@ -253,8 +253,8 @@ async fn explicit_network_created() {
 
 	engine.up(&file).await.unwrap();
 	// These two are NOT mutation-proved, and the reason is worth keeping. Both
-	// mutations I tried — never creating declared networks, and creating them
-	// under a different name — take `up` itself down, because the container
+	// mutations I tried (never creating declared networks, and creating them
+	// under a different name) take `up` itself down, because the container
 	// references a network that is then missing. So the old `up().unwrap()` did
 	// already cover "the network exists under the name the container expects".
 	//
@@ -317,7 +317,7 @@ async fn secret_long_form_ref() {
 	.unwrap();
 
 	engine.up(&file).await.unwrap();
-	// `cat` alone only proves the path exists — it exits 0 on an empty or wrong
+	// `cat` alone only proves the path exists: it exits 0 on an empty or wrong
 	// file, and says nothing about the `mode:`/`uid:` the compose file asks for.
 	// Check the content and the permissions the long form actually requested.
 	let read = engine
@@ -436,7 +436,7 @@ async fn external_secret_injected_into_container() {
 	let proj = proj("insec");
 	let secret_name = format!("{proj}-tok");
 
-	// Create the backing Podman secret out-of-band — the external-secret idiom.
+	// Create the backing Podman secret out-of-band, the external-secret idiom.
 	// Skip the test if the podman CLI is unavailable (socket alone is not enough).
 	let dir = tempfile::tempdir().unwrap();
 	let secret_src = dir.path().join("tok");
@@ -497,7 +497,7 @@ async fn remove_orphans_removes_container() {
 	.unwrap();
 	engine.up(&file_svc1).await.unwrap();
 
-	// file_svc2 only declares svc2 — svc1 becomes an orphan
+	// file_svc2 only declares svc2, so svc1 becomes an orphan
 	let file_svc2 = parse_str(
 		"services:\n  svc2:\n    image: alpine:latest\n    command: [\"sleep\", \"infinity\"]\n",
 	)
@@ -522,7 +522,7 @@ async fn remove_orphans_removes_container() {
 
 // ---------------------------------------------------------------------------
 
-/// The image ID a tag currently resolves to, via the podman CLI — the same
+/// The image ID a tag currently resolves to, via the podman CLI, the same
 /// out-of-band check the sibling tests in this file use to observe state podup
 /// itself reports on. Empty when the tag is absent.
 fn image_id(tag: &str) -> String {
@@ -536,7 +536,7 @@ fn image_id(tag: &str) -> String {
 /// #1094: `up` must not rebuild a service whose image is already present.
 ///
 /// It used to rebuild unconditionally, *with* the cache, so the rebuild could
-/// resolve to an older layer chain and retag the image backwards — silently
+/// resolve to an older layer chain and retag the image backwards, silently
 /// discarding a `build --no-cache` that had just run. That breaks the ordinary
 /// deploy shape: build explicitly, then start.
 ///

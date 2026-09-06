@@ -1,4 +1,4 @@
-//! `podup` — docker-compose → Podman translator library.
+//! `podup` is the docker-compose → Podman translator library.
 //!
 //! Provides parsing, variable substitution, topological ordering, and an
 //! async engine that drives container lifecycle via Podman's native libpod
@@ -53,7 +53,7 @@ pub use compose::{
 	validate_config,
 };
 /// The lifecycle `Engine` and its per-command option/override types, plus the
-/// project-name/listing helpers — the surface a CLI drives compose operations
+/// project-name/listing helpers: the surface a CLI drives compose operations
 /// through.
 pub use engine::{
 	is_safe_project_name, list_projects, list_projects_filtered, resolve_image_digests,
@@ -74,7 +74,7 @@ pub use libpod::Client;
 ///
 /// An embedding daemon has to tell a transport fault it should retry from a
 /// rejection it should not, and the only alternative to these predicates is
-/// matching on the message text — which breaks silently the day libpod rewords
+/// matching on the message text, which breaks silently the day libpod rewords
 /// one.
 pub use libpod::PodmanError;
 /// Log frames as libpod delivers them, and the stream parsers that produce

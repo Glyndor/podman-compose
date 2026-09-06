@@ -1,8 +1,8 @@
 //! Mapping a failure onto a process exit status, and printing its reason.
 //!
 //! Split out of `main` because it is a closed responsibility with conventions
-//! of its own to hold — docker's 126/127 for a command that cannot be launched,
-//! 130 for an interrupt — and because `main` had reached the source line limit.
+//! of its own to hold (docker's 126/127 for a command that cannot be launched,
+//! 130 for an interrupt) and because `main` had reached the source line limit.
 
 /// Map a failed launch onto docker's conventional exit codes by inspecting the
 /// OCI/crun error text: a "command not found" failure → 127, a

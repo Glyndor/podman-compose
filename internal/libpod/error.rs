@@ -28,7 +28,7 @@ pub enum PodmanError {
 	/// specific field of the request it sent.
 	///
 	/// libpod validates a handful of fields at the `SpecGenerator` (container
-	/// create) and build-query layer — namespaces via `ParseNamespace`,
+	/// create) and build-query layer: namespaces via `ParseNamespace`,
 	/// `device_cgroup_rule` access strings via `parseLinuxResourcesDeviceAccess`,
 	/// build-arg/label keys, and a few others. When podup pre-validates these,
 	/// or when it identifies the offending field by inspecting the request it
@@ -116,9 +116,9 @@ fn conflict_hint(message: &str) -> Option<&'static str> {
 		// force"); the state is only in the leading "as it is paused/running"
 		// clause. Match that so a paused container is not mislabelled as running.
 		if m.contains("is paused") {
-			Some("the container is paused — unpause it first, or pass `-f` to force removal")
+			Some("the container is paused; unpause it first, or pass `-f` to force removal")
 		} else {
-			Some("the container is running — stop it first, or pass `-f` to force removal")
+			Some("the container is running; stop it first, or pass `-f` to force removal")
 		}
 	} else if m.contains("already paused") {
 		Some("the container is already paused")
@@ -204,7 +204,7 @@ impl PodmanError {
 	/// indistinguishable from either (#1104, pinned by `stream_end_tests`).
 	///
 	/// Every streaming command therefore answers it out of band instead, by
-	/// asking something the transport cannot see — whether the container it was
+	/// asking something the transport cannot see: whether the container it was
 	/// following is still running, or whether the caller asked for a bounded
 	/// stream at all.
 	///
@@ -219,7 +219,7 @@ impl PodmanError {
 			Self::Hyper(e) if e.is_timeout() => "hyper-timeout",
 			// A body that stopped short is none of the above. `is_incomplete_message`
 			// is about the message head, so a severed *body* misses every predicate
-			// hyper exposes and used to land in `hyper-other` — the least
+			// hyper exposes and used to land in `hyper-other`, the least
 			// informative label, for the likeliest shape.
 			//
 			// Measured against a fake socket that cuts a chunked body deliberately
@@ -287,7 +287,7 @@ impl PodmanError {
 	/// True if this API error reports the target image is still referenced by a
 	/// container. A non-force `down --rmi` must skip such an image (matching
 	/// docker compose) instead of force-removing it and cascading the deletion of
-	/// every dependent container — including ones owned by other projects. Podman
+	/// every dependent container, including ones owned by other projects. Podman
 	/// returns this as a 409 conflict, or on some versions a 500 whose message
 	/// names the in-use cause.
 	pub fn is_image_in_use(&self) -> bool {
@@ -322,7 +322,7 @@ impl PodmanError {
 	}
 }
 
-/// Whether a hyper error is a body that ended before it was complete — the shape
+/// Whether a hyper error is a body that ended before it was complete: the shape
 /// a severed stream takes, which none of hyper's own predicates report. Walks the
 /// source chain for an `io::Error` of kind `UnexpectedEof` rather than matching on
 /// message text.

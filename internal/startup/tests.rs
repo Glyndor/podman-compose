@@ -96,7 +96,7 @@ mod render_help_tests {
 	}
 
 	/// And the coloured arm actually differs, rather than being a no-op nobody
-	/// noticed — which is what a plain `assert!(out.contains("Usage"))` on both
+	/// noticed, which is what a plain `assert!(out.contains("Usage"))` on both
 	/// arms would have failed to catch.
 	#[test]
 	fn with_colour_the_text_still_reads_the_same() {
@@ -235,7 +235,7 @@ mod startup_tests {
 
 	/// `podup logs --wrong-flag` reaches `format_clap_error` with an
 	/// `UnknownArgument` error and the rendered output must lead with the
-	/// binary's `podup:` prefix and the bold-red `error:` label — matching
+	/// binary's `podup:` prefix and the bold-red `error:` label, matching
 	/// `exit_status::print_error` and the `tracing` formatter. The clap usage
 	/// block follows, unprefixed, so a script that greps `podup:` knows what
 	/// category the failure is.
@@ -267,7 +267,7 @@ mod startup_tests {
 		);
 	}
 
-	/// `podup scale` requires a `SERVICE=N` positional — omitting it is a
+	/// `podup scale` requires a `SERVICE=N` positional, so omitting it is a
 	/// `MissingRequiredArgument`. The error must read the same as any other:
 	/// `podup: error: …`, not a bare clap line.
 	#[test]

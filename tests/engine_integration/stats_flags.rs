@@ -103,7 +103,7 @@ fn run(c: &str, proj: &str, args: &[&str]) -> String {
 
 /// #1082: `stats --format json` while streaming emitted one pretty-printed array
 /// per sampling frame, concatenated. That is neither a single JSON document nor
-/// NDJSON, so no parser accepts it — the machine-readable format was unreadable
+/// NDJSON, so no parser accepts it: the machine-readable format was unreadable
 /// by machines for as long as it streamed.
 ///
 /// Streaming now emits one compact array per line. `--no-stream` prints a single

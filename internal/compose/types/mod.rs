@@ -28,7 +28,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Top-level `secrets:` entry — defines a named secret available to services.
+/// Top-level `secrets:` entry: defines a named secret available to services.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[non_exhaustive]
 pub struct SecretConfig {
@@ -61,7 +61,7 @@ pub struct SecretConfig {
 	pub template_driver: Option<String>,
 }
 
-/// Top-level `configs:` entry — defines a named config available to services.
+/// Top-level `configs:` entry: defines a named config available to services.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[non_exhaustive]
 pub struct ConfigConfig {
@@ -94,7 +94,7 @@ pub struct ConfigConfig {
 	pub template_driver: Option<String>,
 }
 
-/// Top-level `models:` entry (Compose v2.38) — declares an AI model the
+/// Top-level `models:` entry (Compose v2.38) declares an AI model the
 /// project depends on. podup runs no model runner, so the diagnostics pass
 /// reports any declared model as not honored; the fields are parsed for
 /// fidelity and round-tripped by `config`.
@@ -154,7 +154,7 @@ pub struct ComposeFile {
 	/// not honored.
 	#[serde(default)]
 	pub models: IndexMap<String, ModelConfig>,
-	/// Top-level `x-*` extension fields — preserved and round-tripped via `config` subcommand.
+	/// Top-level `x-*` extension fields, preserved and round-tripped via `config` subcommand.
 	#[serde(flatten, default, skip_serializing_if = "IndexMap::is_empty")]
 	pub extensions: IndexMap<String, serde_yaml::Value>,
 }
@@ -175,7 +175,7 @@ impl ComposeFile {
 	/// Replace every inline `content:` value under `secrets:` and `configs:`
 	/// with [`REDACTED_PLACEHOLDER`], so rendering the file for display (the
 	/// `config` subcommand) never writes secret material to stdout. References
-	/// to a `file:` or `environment:` source are left untouched — they name a
+	/// to a `file:` or `environment:` source are left untouched: they name a
 	/// source, they do not embed the value.
 	pub fn redact_inline_content(&mut self) {
 		for secret in self.secrets.values_mut() {
@@ -192,8 +192,8 @@ impl ComposeFile {
 
 	/// Drop every captured unknown key that the diagnostics pass reports as
 	/// "ignored", so a rendered `config` reflects only what podup actually
-	/// applies. Compose-spec `x-*` extension keys are kept — they are valid and
-	/// round-tripped — but a typo or an unmapped key is removed rather than
+	/// applies. Compose-spec `x-*` extension keys are kept (they are valid and
+	/// round-tripped) but a typo or an unmapped key is removed rather than
 	/// echoed back, which is what makes re-feeding the output stop re-triggering
 	/// the same warning. Mirrors the levels walked by the diagnostics collector.
 	pub fn strip_ignored_unknown_keys(&mut self) {

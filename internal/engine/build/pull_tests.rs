@@ -231,7 +231,7 @@ async fn pull_dedupes_a_shared_image_into_a_single_pull() {
 
 /// Two services sharing an image but with *different* resolved pull
 /// policies (no `--pull` override) must each get their own pull request,
-/// not collapse into one — the dedup key must include the resolved
+/// not collapse into one: the dedup key must include the resolved
 /// policy, not just the image reference.
 #[tokio::test]
 #[cfg(unix)]
@@ -276,7 +276,7 @@ async fn pull_issues_separate_requests_for_same_image_different_policy() {
 }
 
 /// A shared image that fails to pull must still be reported for *every*
-/// service that names it — derived from the one shared outcome, not from
+/// service that names it, derived from the one shared outcome, not from
 /// a redundant pull per service. `ignore_failures` lets both warnings
 /// through instead of aborting on the first.
 #[tokio::test]
@@ -313,7 +313,7 @@ async fn pull_failure_on_a_shared_image_is_still_only_pulled_once() {
 }
 
 /// Without `ignore_failures`, a shared image that never lands must still
-/// abort the whole pull — the per-service error report is derived from
+/// abort the whole pull: the per-service error report is derived from
 /// the image's single shared outcome, so the failure is not silently
 /// dropped for services 2..N once service 1 already reported it.
 #[tokio::test]
@@ -347,7 +347,7 @@ async fn pull_failure_on_a_shared_image_aborts_without_ignore_failures() {
 // fan-out's `join_bounded` uses (see `parallel::tests::
 // join_bounded_preserves_input_order`), and a synchronous fake responder
 // cannot observe real concurrency without a multi-thread runtime and a
-// blocking rendezvous — exactly the flakiness the testing standard rules
+// blocking rendezvous, exactly the flakiness the testing standard rules
 // out. The dedup tests above already pin the dispatch contract (every
 // unique image is attempted, exactly once).
 
@@ -355,7 +355,7 @@ async fn pull_failure_on_a_shared_image_aborts_without_ignore_failures() {
 /// response. That line used to be warned about and dropped, so every caller
 /// believed the pull had succeeded.
 ///
-/// The image is present here — a stale copy from an earlier pull — which is
+/// The image is present here (a stale copy from an earlier pull) which is
 /// exactly the case a presence probe cannot catch: it passes while the pull
 /// failed. `up --pull always` against an unreachable registry therefore
 /// started yesterday's image and exited 0.

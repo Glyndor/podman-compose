@@ -15,7 +15,7 @@ fn prune_json_drops_nulls_and_empty_then_collapses() {
 	});
 	prune_json_nulls(&mut v);
 	// null fields and the section emptied by its own nulls are gone, but an
-	// explicit empty array (`command: []`) survives — it overrides the image.
+	// explicit empty array (`command: []`) survives; it overrides the image.
 	assert_eq!(v, serde_json::json!({ "image": "nginx", "command": [] }));
 }
 
@@ -237,7 +237,7 @@ fn render_config_strips_ignored_unknown_keys() {
 
 /// #1078: a null value under `networks:` means "attach with default
 /// options", not "nothing". It used to be pruned like any other empty leaf,
-/// which silently removed a network the service is genuinely on — reachable
+/// which silently removed a network the service is genuinely on, reachable
 /// once merging could produce a map mixing a configured network with a bare
 /// one.
 #[test]

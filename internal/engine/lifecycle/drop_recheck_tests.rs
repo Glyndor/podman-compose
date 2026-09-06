@@ -1,7 +1,7 @@
 //! A lifecycle POST whose response is dropped is resolved out of band (#1339).
 //!
 //! Measured on Podman 6 under concurrency: the drops land on state-changing
-//! POSTs — `exec`, `restart`, `stop`, container `DELETE` — and follow a slow
+//! POSTs (`exec`, `restart`, `stop`, container `DELETE`) and follow a slow
 //! one, a restart that burned its full stop grace before the next request lost
 //! its response. It is not a client deadline (`READ_TIMEOUT` is 120s) and not a
 //! pooled-connection race (there is no pool; every request opens a fresh
@@ -18,7 +18,7 @@ fn a_goal_is_reached_only_by_the_state_that_satisfies_it() {
 	assert!(!LifecycleGoal::Running.reached(Some("exited")));
 	assert!(!LifecycleGoal::Running.reached(Some("paused")));
 	// A container that no longer exists never satisfies `Running`, and always
-	// satisfies `NotRunning` — `rm` and a lost `kill` response both land here.
+	// satisfies `NotRunning`: `rm` and a lost `kill` response both land here.
 	assert!(!LifecycleGoal::Running.reached(None));
 	assert!(LifecycleGoal::NotRunning.reached(None));
 	assert!(LifecycleGoal::NotRunning.reached(Some("exited")));
@@ -46,7 +46,7 @@ mod over_the_wire {
 			// which is a test that measures nothing.
 			let touches_it = target.contains("/proj-web-1");
 			if touches_it && (method == "POST" || method == "DELETE") {
-				// Accept, then hang up without a response — the one shape that
+				// Accept, then hang up without a response: the one shape that
 				// produces hyper's `IncompleteMessage`.
 				return FakeReply::ClosedWithoutResponse;
 			}
@@ -99,7 +99,7 @@ mod over_the_wire {
 		// Pin the variant: a dropped response that re-checks to a non-running
 		// state must surface as the underlying libpod error, not as some
 		// other variant a future refactor might swap in. `confirm_lost_response`
-		// is the one place that does this — a regression here would otherwise
+		// is the one place that does this, and a regression here would otherwise
 		// be invisible because the test would still see *some* Err.
 		assert!(
 			matches!(err, crate::error::ComposeError::Podman(_)),
@@ -156,7 +156,7 @@ mod over_the_wire {
 }
 
 /// `Gone` is not `NotRunning`. A removal that lost its response must not be read
-/// as success just because the container stopped — it has to be absent.
+/// as success just because the container stopped; it has to be absent.
 #[test]
 fn gone_needs_absence_not_merely_a_stopped_container() {
 	assert!(LifecycleGoal::Gone.reached(None));
@@ -192,7 +192,7 @@ mod stop_and_remove {
 			.expect_err("still running is not a stop");
 		// The dropped-stop branch in `stop_container` falls through to
 		// `confirm_lost_response` with `LifecycleGoal::NotRunning`, which
-		// builds `ComposeError::Podman` on a state mismatch — pin the
+		// builds `ComposeError::Podman` on a state mismatch, so pin the
 		// variant so a regression that swaps in `StreamTruncated` (the
 		// other "ended unexpectedly" variant) cannot silently satisfy this
 		// test.
@@ -202,7 +202,7 @@ mod stop_and_remove {
 		);
 	}
 
-	/// And removal, which needs the container **absent** — a stopped-but-present
+	/// And removal, which needs the container **absent**: a stopped-but-present
 	/// container would satisfy `NotRunning` and read a failed removal as success.
 	#[tokio::test]
 	async fn a_lost_removal_response_fails_when_the_container_is_merely_stopped() {
@@ -215,7 +215,7 @@ mod stop_and_remove {
 		// Same pattern as the stop test: `teardown_one_container`'s dropped
 		// arm goes through `confirm_lost_response` with `LifecycleGoal::Gone`,
 		// and a stopped-but-present container fails `Gone`. The variant is
-		// the contract — anything else would be a regression in the
+		// the contract; anything else would be a regression in the
 		// fail-closed shape this whole file pins.
 		assert!(
 			matches!(err, crate::error::ComposeError::Podman(_)),

@@ -29,7 +29,7 @@ fn build_event_filters_merges_user_predicates() {
 }
 
 /// #1081: a predicate with no `=` used to be dropped, so `events --filter
-/// garbage` silently scoped to the whole project and printed everything — a
+/// garbage` silently scoped to the whole project and printed everything, a
 /// caller reads that back as "these all matched".
 #[test]
 fn malformed_filter_is_rejected_not_dropped() {
