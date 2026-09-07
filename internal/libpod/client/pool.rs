@@ -33,15 +33,24 @@ use super::stream::SocketStream;
 use super::{BoxBody, PodmanError, Result};
 
 /// Default cap on the number of live (idle + in-use) buffered connections held
-/// to a single libpod socket. Matches the documented default in
-/// `docs/commands.md` and `internal/cli/mod.rs`; a pool that is on by
-/// default is the whole point of the feature, and a 20-service `up -d`
-/// benefits from reuse without the operator having to opt in. A cap of
-/// `0` keeps the previous "no pool" behaviour (every acquire opens a
-/// fresh connection that is dropped on release); set
-/// `--connection-pool-size 0` or `PODUP_LIBPOD_POOL=0` to opt out.
-/// Tunable via [`Client::with_pool_size`](super::Client::with_pool_size).
-pub(super) const DEFAULT_POOL_SIZE: usize = 8;
+/// to a single libpod socket. **The pool is opt-in**: a cap of `0` (the
+/// default) means "no pool", and every acquire opens a fresh connection.
+///
+/// It stays opt-in on purpose. Turning it on by default was tried and the
+/// live-Podman lane refused it: four lifecycle cases
+/// (`up_scale_creates_replicas_and_down_removes_them`,
+/// `restart_scaled_service_all_replicas`,
+/// `depends_on_scaled_service_completed`,
+/// `top_skips_a_stopped_service_and_reports_the_rest`) fail against a real
+/// socket with `Canceled, "connection was not ready"`. Holding the guard
+/// across the body read (#1740) closed the chunked-framing corruption and
+/// did not close that, so the remaining defect is tracked separately and
+/// the default does not move until it is understood.
+///
+/// To opt in to connection reuse, set `--connection-pool-size` or
+/// `PODUP_LIBPOD_POOL` to a positive value. Tunable via
+/// [`Client::with_pool_size`](super::Client::with_pool_size).
+pub(super) const DEFAULT_POOL_SIZE: usize = 0;
 
 /// One pooled HTTP/1.1 connection.
 ///

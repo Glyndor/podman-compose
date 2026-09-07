@@ -17,7 +17,7 @@ These appear before the subcommand and may also come from the environment.
 | `-f, --file <PATH>` | `COMPOSE_FILE` | Compose file. Repeatable; later files merge over earlier ones. When unset, the compose-spec precedence list is probed: `compose.yaml`, `compose.yml`, `docker-compose.yaml`, `docker-compose.yml`. |
 | `-p, --project <NAME>` | `COMPOSE_PROJECT_NAME` | Project name, prefixing container/network/volume names. When unset: the top-level `name:`, then the sanitized project-directory basename. |
 | `--socket <PATH>` | `PODMAN_SOCKET` | Podman socket path; overrides auto-detection. |
-| `--connection-pool-size <N>` | `PODUP_LIBPOD_POOL` | Maximum HTTP/1.1 connections the libpod client keeps open to the Podman socket for reuse. Streaming calls each take a dedicated connection outside this cap. Default: 8. The earlier spelling `PODUP_LIBCOD_POOL` (a typo of `LIBPOD`) is read as a fallback when the new name is unset, so an existing script that exports the old name keeps working. |
+| `--connection-pool-size <N>` | `PODUP_LIBPOD_POOL` | Maximum HTTP/1.1 connections the libpod client keeps open to the Podman socket for reuse. Streaming calls each take a dedicated connection outside this cap. Default: 0, which means no pool; connection reuse is opt-in. The earlier spelling `PODUP_LIBCOD_POOL` (a typo of `LIBPOD`) is read as a fallback when the new name is unset, so an existing script that exports the old name keeps working. |
 | `--profile <NAMES>` | `COMPOSE_PROFILES` | Active profiles, comma-separated. |
 
 | `--project-directory <PATH>` | | Base directory for relative paths (env_file, build context, bind mounts, config/secret sources). Defaults to the compose file's directory. |
@@ -865,7 +865,7 @@ when both are set.
 | `COMPOSE_PROJECT_NAME` | Default project name (`--project`). |
 | `COMPOSE_PROFILES` | Default active profiles (`--profile`). |
 | `PODMAN_SOCKET` | Podman socket path (`--socket`). |
-| `PODUP_LIBPOD_POOL` | HTTP/1.1 connection-pool size for the libpod client (`--connection-pool-size`). Default 8. `PODUP_LIBCOD_POOL` (the earlier typo'd name) is still read when the new name is unset. |
+| `PODUP_LIBPOD_POOL` | HTTP/1.1 connection-pool size for the libpod client (`--connection-pool-size`). Default 0 (no pool); connection reuse is opt-in. `PODUP_LIBCOD_POOL` (the earlier typo'd name) is still read when the new name is unset. |
 | `DOCKER_HOST` | Docker-compatible fallback for the Podman socket, used only when `PODMAN_SOCKET` is unset. Must be a local `unix://` socket (or `npipe://` on Windows); a remote `tcp://`/`ssh://` value is rejected. |
 | `RUST_LOG` | Log verbosity filter. Unset shows warnings and errors; e.g. `RUST_LOG=podup=info` or `RUST_LOG=podup=debug` for more detail. |
 

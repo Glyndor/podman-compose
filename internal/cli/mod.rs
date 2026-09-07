@@ -138,7 +138,7 @@ pub(crate) struct Cli {
 	/// Maximum number of HTTP/1.1 connections the libpod client keeps open
 	/// to the Podman socket for reuse (or `PODUP_LIBPOD_POOL`). Buffered calls
 	/// share the pool; streaming calls each take a dedicated connection
-	/// outside this cap. Default: 8. The earlier spelling
+	/// outside this cap. Default: 0, which means no pool; connection reuse is opt-in. The earlier spelling
 	/// `PODUP_LIBCOD_POOL` (a typo of `LIBPOD`) is still accepted as a
 	/// fallback so an existing script that exports the old name keeps
 	/// working; the new name wins when both are set.
