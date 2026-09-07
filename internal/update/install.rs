@@ -335,8 +335,9 @@ pub(crate) fn write_temp(tmp: &Path, new_bytes: &[u8], target: &Path) -> crate::
 	let mut f = {
 		use std::os::windows::fs::OpenOptionsExt;
 		// Mirror the Unix branch's invariants on Windows. `create_new(true)`
-		// is the Windows analogue of `O_CREAT|O_EXCL`: the open fails if
-		// anything already lives at `tmp` rather than truncating it, so a
+		// is the Windows analogue of `O_CREAT|O_EXCL`: after the unlink
+		// below, the open fails if anything reappeared at `tmp` rather
+		// than truncating it, so a
 		// planted junction cannot redirect the verified bytes into a host
 		// path the operator did not name. `custom_flags(0x0020_0000)` is
 		// `FILE_FLAG_OPEN_REPARSE_POINT`: the open is given a handle to

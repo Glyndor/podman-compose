@@ -4,6 +4,7 @@
 //! #1742); the rest of the file is pure reconciliation logic with no
 //! socket. The split follows that seam rather than a line count.
 
+#[cfg(unix)]
 use super::*;
 
 // Every case in this file stands up a fake libpod socket, and the fixture
