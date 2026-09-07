@@ -31,7 +31,11 @@ use super::network::resolve_network_mode;
 use super::volume_mounts::build_mounts_all;
 use super::Engine;
 use fields::{build_blkio_config, warn_swarm_only_deploy};
-use security::parse_security_opts;
+// Re-exported at the container root so `crate::engine::container::*` is a
+// valid path inside the crate (lib.rs's `effective_no_new_privileges`
+// wrapper reaches it for the audit module, #1743). Private here would shadow
+// the `pub(crate)` visibility into private.
+pub(crate) use security::parse_security_opts;
 
 impl Engine {
 	pub(super) async fn create_and_start(
