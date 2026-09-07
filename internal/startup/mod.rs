@@ -212,6 +212,22 @@ pub(crate) fn run_labels_for(command: &Commands) -> Vec<String> {
 	}
 }
 
+/// Bridge the legacy `PODUP_LIBCOD_POOL` env to the corrected
+/// `PODUP_LIBPOD_POOL` before clap parses the CLI. The new var is the one
+/// clap reads (`#[arg(env = "PODUP_LIBPOD_POOL")]` on
+/// `Cli::connection_pool_size`); this helper exists purely so a script that
+/// already exports the old typo'd name keeps taking effect after the rename.
+/// Only set when the new var is unset; an explicit new-var export is left
+/// untouched. Pure on the env at the moment it runs.
+fn bridge_legacy_pool_env() {
+	if std::env::var_os("PODUP_LIBPOD_POOL").is_some() {
+		return;
+	}
+	if let Some(legacy) = std::env::var_os("PODUP_LIBCOD_POOL") {
+		std::env::set_var("PODUP_LIBPOD_POOL", legacy);
+	}
+}
+
 /// Parse the CLI, framing `--help`/`--version` output with a blank line top and
 /// bottom (clap trims template edges, so wrap the rendered text here).
 /// Render a clap help/usage screen, with or without its styling.
@@ -299,6 +315,14 @@ fn takes_a_value(cmd: &clap::Command, token: &str) -> bool {
 }
 
 pub(crate) fn parse_cli() -> Cli {
+	// Bridge the legacy `PODUP_LIBCOD_POOL` env var before clap reads the new
+	// `PODUP_LIBPOD_POOL`. The earlier name was a typo for `LIBPOD`; renaming
+	// the env var keeps the docs and the rest of the codebase consistent,
+	// but the rename is non-breaking only if an existing script that exports
+	// the old name still takes effect. We only set the new var when the old
+	// one is set AND the new one is not, so a script that explicitly
+	// overrides with the new name is unaffected.
+	bridge_legacy_pool_env();
 	// Apply `--ansi` before clap renders anything: `--help` and clap's own
 	// errors are produced inside the parse call below, so a choice applied
 	// afterwards arrives too late for them.
@@ -395,5 +419,8 @@ fn format_clap_error(err: &clap::error::Error) -> String {
 	format!("{prefix}{body}")
 }
 
+#[cfg(test)]
+#[path = "bridge_tests.rs"]
+mod bridge_tests;
 #[cfg(test)]
 mod tests;

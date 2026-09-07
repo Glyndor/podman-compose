@@ -9,7 +9,7 @@ impl Client {
 	pub async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
 		let req = Self::build_request(hyper::Method::GET, path, full(Bytes::new()), None)?;
 		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		Self::check_status(status, &body)?;
 		serde_json::from_slice(&body).map_err(super::PodmanError::Json)
 	}

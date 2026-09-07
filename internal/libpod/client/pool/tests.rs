@@ -272,3 +272,11 @@ async fn a_poisoned_connection_is_replaced_on_next_acquire() {
 		"a poisoned connection must be replaced; got {after_second}"
 	);
 }
+
+// Chunked-framing regression for #1740. The chunked server + test live in a
+// sibling module so the harness file stays under the soft 300-line warn. The
+// `path` attribute anchors the lookup next to this file rather than the
+// conventional `tests/chunked_tests.rs`, because this file itself is the
+// module Rust resolves from a `mod tests;` reference in the parent.
+#[path = "chunked_tests.rs"]
+mod chunked_tests;

@@ -9,7 +9,7 @@ impl Client {
 	pub async fn delete_existed(&self, path: &str) -> Result<bool> {
 		let req = Self::build_request(Method::DELETE, path, full(Bytes::new()), None)?;
 		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		if status == hyper::StatusCode::NOT_FOUND {
 			return Ok(false);
 		}

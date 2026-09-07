@@ -22,7 +22,7 @@ impl Client {
 			Some("application/json"),
 		)?;
 		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		Self::check_status(status, &body)?;
 		serde_json::from_slice(&body).map_err(super::PodmanError::Json)
 	}
@@ -37,7 +37,7 @@ impl Client {
 			Some("application/json"),
 		)?;
 		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		Self::check_status(status, &body)
 	}
 
@@ -69,7 +69,7 @@ impl Client {
 			Some("application/json"),
 		)?;
 		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		Self::check_status_with_field(status, &body, field)?;
 		serde_json::from_slice(&body).map_err(super::PodmanError::Json)
 	}
@@ -95,7 +95,7 @@ impl Client {
 			Some("application/json"),
 		)?;
 		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		Self::check_status_with_field(status, &body, field)
 	}
 
@@ -119,7 +119,7 @@ impl Client {
 	pub async fn post_empty_ok(&self, path: &str) -> Result<()> {
 		let req = Self::build_request(Method::POST, path, full(Bytes::new()), None)?;
 		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		if status == hyper::StatusCode::NOT_MODIFIED {
 			return Ok(());
 		}
@@ -135,7 +135,7 @@ impl Client {
 	) -> Result<()> {
 		let req = Self::build_request(Method::POST, path, full(Bytes::new()), None)?;
 		let resp = self.send(req, deadline).await?;
-		let (status, body) = Self::read_body(resp, deadline).await?;
+		let (status, body) = resp.read_body(deadline).await?;
 		if status == hyper::StatusCode::NOT_MODIFIED {
 			return Ok(());
 		}
@@ -170,7 +170,7 @@ impl Client {
 	pub async fn post_empty_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
 		let req = Self::build_request(Method::POST, path, full(Bytes::new()), None)?;
 		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		Self::check_status(status, &body)?;
 		serde_json::from_slice(&body).map_err(super::PodmanError::Json)
 	}
@@ -179,7 +179,7 @@ impl Client {
 	pub async fn post_empty_json_unbounded<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
 		let req = Self::build_request(Method::POST, path, full(Bytes::new()), None)?;
 		let resp = self.send(req, None).await?;
-		let (status, body) = Self::read_body(resp, None).await?;
+		let (status, body) = resp.read_body(None).await?;
 		Self::check_status(status, &body)?;
 		serde_json::from_slice(&body).map_err(super::PodmanError::Json)
 	}
@@ -219,7 +219,7 @@ impl Client {
 	) -> Result<T> {
 		let req = Self::build_request(Method::POST, path, full(bytes), Some(content_type))?;
 		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		Self::check_status(status, &body)?;
 		serde_json::from_slice(&body).map_err(super::PodmanError::Json)
 	}

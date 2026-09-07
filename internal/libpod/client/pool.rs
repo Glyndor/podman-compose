@@ -33,14 +33,15 @@ use super::stream::SocketStream;
 use super::{BoxBody, PodmanError, Result};
 
 /// Default cap on the number of live (idle + in-use) buffered connections held
-/// to a single libpod socket. **The pool is opt-in**: a cap of `0` (the
-/// default) means "no pool", and every acquire opens a fresh connection.
-/// This is the previous behaviour and is what the live-Podman lane
-/// regression test relied on. To opt in to connection reuse, set the
-/// `--connection-pool-size` CLI flag or `PODUP_LIBCOD_POOL` env to a
-/// positive value. Tunable via
-/// [`Client::with_pool_size`](super::Client::with_pool_size).
-pub(super) const DEFAULT_POOL_SIZE: usize = 0;
+/// to a single libpod socket. Matches the documented default in
+/// `docs/commands.md` and `internal/cli/mod.rs`; a pool that is on by
+/// default is the whole point of the feature, and a 20-service `up -d`
+/// benefits from reuse without the operator having to opt in. A cap of
+/// `0` keeps the previous "no pool" behaviour (every acquire opens a
+/// fresh connection that is dropped on release); set
+/// `--connection-pool-size 0` or `PODUP_LIBPOD_POOL=0` to opt out.
+/// Tunable via [`Client::with_pool_size`](super::Client::with_pool_size).
+pub(super) const DEFAULT_POOL_SIZE: usize = 8;
 
 /// One pooled HTTP/1.1 connection.
 ///
