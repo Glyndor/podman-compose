@@ -613,3 +613,120 @@ jobs:
           if __name__ == "__main__":
               main()
           PY
+
+      # A `uses:` pin shorter or longer than 40 hex characters makes the
+      # referenced job unreachable: GitHub answers 422 for any other length,
+      # the workflow's run never starts, and the only thing that notices is
+      # a release that was supposed to be exercised. This is the check
+      # #1741 missed on the way in, and it sits at this layer rather than
+      # in the shell suite for the same reason tooling-isolation does:
+      # the defect is a pin GitHub rejects, and any other required job is
+      # the one whose pinned action never ran.
+      #
+      # Local reusable calls (`uses: ./.github/workflows/x.yml`) carry no
+      # `@` and are naturally excluded: the form has no pin to measure.
+      # The third-party form (`uses: owner/repo@<hex> # vX.Y.Z`) is the
+      # only one with a pin and the only one this check reaches.
+      #
+      # A tag or branch reference (`uses: owner/repo@v7`) fails the same
+      # assertion, and deliberately so: nothing else in this repository
+      # refuses one, and no workflow here uses the form, so measuring it
+      # closes the gap rather than deferring it to a check that does not
+      # exist. `tests/shell/reusable-workflow-lint-pin-length.test.sh`
+      # covers every branch of this step, including that one.
+      - name: Every `uses:` pin must be 40 hex characters
+        run: |
+          python3 - <<'PY'
+          import glob
+          import re
+          import sys
+
+          # A SHA-1 pin is exactly 40 lowercase hex characters. Anything
+          # shorter is the defect #1741 caught: a 39-character copy-paste
+          # typo GitHub answers 422 for, leaving the workflow's job never
+          # to run. Anything longer is rejected for the same reason.
+          SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+
+          # `uses:` at the start of a YAML scalar value, optionally
+          # preceded by a list dash. Captures the value to end-of-line;
+          # the trailing `# vX.Y.Z` comment rides along and is stripped
+          # by the part-split below.
+          USES_LINE_RE = re.compile(
+              r"^\s*-\s+uses:\s*(\S.*?)\s*$|^\s*uses:\s*(\S.*?)\s*$"
+          )
+
+
+          def find_violations(spec_path):
+              out = []
+              try:
+                  with open(spec_path) as fh:
+                      lines = fh.readlines()
+              except OSError as exc:
+                  # Silent skip would hide a workflow the linter cannot
+                  # read; reporting as a warning keeps the silence
+                  # visible the way tooling-isolation does.
+                  print(
+                      f"::warning file={spec_path}::skipped: {exc}",
+                      file=sys.stderr,
+                  )
+                  return out
+              for n, raw in enumerate(lines, start=1):
+                  line = raw.rstrip("\n")
+                  if line.lstrip().startswith("#"):
+                      continue
+                  m = USES_LINE_RE.match(line)
+                  if m is None:
+                      continue
+                  value = m.group(1) or m.group(2)
+                  if value is None:
+                      continue
+                  # Local reusable form: `uses: ./.github/workflows/x.yml`.
+                  # No pin, no `@`, not in scope.
+                  if value.startswith("./"):
+                      continue
+                  if "@" not in value:
+                      # No `@` at all is a malformed reference GitHub
+                      # rejects before it gets as far as a pin, and it
+                      # carries nothing to measure.
+                      continue
+                  _owner_repo, _at, after = value.partition("@")
+                  # The pin is the leading whitespace-separated token of
+                  # everything after `@`; the trailing `# vX.Y.Z` rides
+                  # along but does not enter the pin.
+                  pin = after.split()[0] if after.split() else ""
+                  if not SHA1_RE.match(pin):
+                      out.append((spec_path, n, value, pin))
+              return out
+
+
+          def main():
+              files = sorted(set(
+                  glob.glob(".github/workflows/*.yml")
+                  + glob.glob(".github/workflows/*.yaml")
+              ))
+              violations = []
+              for path in files:
+                  violations.extend(find_violations(path))
+              if violations:
+                  for path, line_no, value, pin in violations:
+                      print(
+                          f"::error file={path}::line {line_no}: "
+                          f"`uses:` value `{value}` pins to `{pin}`, "
+                          f"which is {len(pin)} characters; a SHA-1 "
+                          f"pin must be exactly 40 hexadecimal "
+                          f"characters. GitHub answers 422 for any "
+                          f"other length and the job never runs. A tag "
+                          f"or branch name is refused for a second "
+                          f"reason: it moves, so it is not a pin."
+                      )
+                  sys.exit(1)
+              print(
+                  "checkout-pin-length: every `uses:` pin in "
+                  ".github/workflows/ is exactly 40 hexadecimal "
+                  "characters."
+              )
+
+
+          if __name__ == "__main__":
+              main()
+          PY
