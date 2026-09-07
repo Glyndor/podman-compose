@@ -255,3 +255,32 @@ fn mapping_rebuild_is_skipped_when_nothing_needs_interpolation() {
 	assert_eq!(a.services["app"].image, b.services["app"].image);
 	assert_eq!(a.services["db"].restart, b.services["db"].restart);
 }
+
+#[test]
+fn a_quote_inside_the_other_quote_does_not_disable_the_alias_guard() {
+	// The second bypass of the same guard, after the apostrophe in a plain
+	// scalar. Entering single-quote state did not require being outside
+	// double-quote state, so `"hello '"` left the scanner inside a quoted
+	// scalar for the rest of the document and every `*alias` after it was
+	// counted as text. Both caps were then skipped by the `refs == 0`
+	// early return.
+	//
+	// The payload after the poisoning line carries no stray single quote:
+	// a later `'` in value position closes the state again and the document
+	// is refused normally, which would make this pass for the wrong reason.
+	let anchor = "y".repeat(200);
+	let refs: String = (0..101).map(|_| "  - *a\n").collect();
+	let poisoned = format!("x: &a {anchor}\nx-note: \"hello '\"\nl:\n{refs}");
+	let control = format!("x: &a {anchor}\nl:\n{refs}");
+
+	// The control exceeds the reference cap on its own, so if the two
+	// behaved the same the test would prove nothing.
+	assert!(
+		crate::compose::parse_str(&control).is_err(),
+		"the control must be refused on its own"
+	);
+	assert!(
+		crate::compose::parse_str(&poisoned).is_err(),
+		"a quote inside the other quote must not switch the guard off"
+	);
+}
