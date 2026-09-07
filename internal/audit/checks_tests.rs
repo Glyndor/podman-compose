@@ -151,12 +151,12 @@ fn audit_dangerous_capability_flags_sys_admin_and_all() {
 }
 
 #[test]
-fn audit_dangerous_capability_passes_when_empty() {
+fn audit_dangerous_capability_passes_when_safe() {
 	let yaml = r#"
 services:
   web:
     image: alpine:3.20
-    cap_add: [NET_ADMIN]
+    cap_add: [CHOWN]
 "#;
 	let findings = report_for(yaml);
 	assert!(

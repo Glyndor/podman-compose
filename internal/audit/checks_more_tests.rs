@@ -181,3 +181,65 @@ fn audit_no_new_privileges_off_flags_an_explicit_false() {
 	);
 	assert!(report.iter().any(|f| f.check == "no_new_privileges_off"));
 }
+
+// ---------------------------------------------------------------------------
+// #1743: audit must read the resolved value the engine will use
+// ---------------------------------------------------------------------------
+//
+// Each of the three tests below targets one of the issue's findings and is
+// built from a compose file that `audit --strict` accepted on the unfixed
+// tree but must not afterwards. They are the issue's acceptance criterion,
+// and were failing when the brief was written. Keeping them in a single
+// section so the file's `grep "1743"` lands the reviewer on the lot.
+
+/// `mem_limit: not-a-size` keeps the compose field non-empty, so an
+/// `.is_none()` audit reads it as a limit, but `parse_memory` returns
+/// `None` and the runtime applies no limit. The audit must agree.
+#[test]
+fn audit_no_memory_limit_flags_an_unparseable_limit() {
+	let report =
+		report_for("services:\n  web:\n    image: alpine:3.20\n    mem_limit: not-a-size\n");
+	assert!(
+		report.iter().any(|f| f.check == "no_memory_limit"),
+		"a mem_limit the runtime cannot parse must still fire: {report:#?}"
+	);
+}
+
+/// `security_opt: [no-new-privileges:true, no-new-privileges:false]`: the
+/// engine last-wins (resolves to disabled), the unfixed audit iterates and
+/// finds the first entry matches (resolves to enabled). The two must agree.
+#[test]
+fn audit_no_new_privileges_off_flags_contradictory_entries() {
+	let report = report_for(
+		"services:\n  web:\n    image: alpine:3.20\n    security_opt:\n      - no-new-privileges:true\n      - no-new-privileges:false\n",
+	);
+	assert!(
+		report.iter().any(|f| f.check == "no_new_privileges_off"),
+		"contradictory security_opt entries where the engine disables the \
+		 protection must fire: {report:#?}"
+	);
+}
+
+/// The runtime honours exactly what was asked for in `cap_add:`. The audit
+/// must reject the curated dangerous list (`SYS_MODULE` and friends)
+/// regardless of what the engine does with them.
+#[test]
+fn audit_dangerous_capability_flags_the_curated_list() {
+	let report = report_for(
+		"services:\n  web:\n    image: alpine:3.20\n    cap_add: [SYS_MODULE, DAC_READ_SEARCH, SYS_RAWIO]\n",
+	);
+	assert!(
+		report.iter().any(|f| f.check == "dangerous_capability"),
+		"SYS_MODULE / DAC_READ_SEARCH / SYS_RAWIO must fire: {report:#?}"
+	);
+	// Every entry in the curated list is its own finding, so the count
+	// pins the list rather than just any-of.
+	assert_eq!(
+		report
+			.iter()
+			.filter(|f| f.check == "dangerous_capability")
+			.count(),
+		3,
+		"three distinct dangerous_capability findings expected: {report:#?}"
+	);
+}
