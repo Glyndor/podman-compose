@@ -480,3 +480,44 @@ fn strict_build_vars_allows_multiline_and_tab_values() {
 	);
 	assert_eq!(vars.get("TABBED").map(String::as_str), Some("a\tb"));
 }
+
+// variable-repetition cap (#1738)
+
+#[test]
+fn interpolation_cap_refuses_variable_repetition_in_one_scalar() {
+	// 300 KB of `${PAYLOAD}` references in one scalar with a moderately sized
+	// PAYLOAD value would otherwise produce hundreds of MB of output and
+	// (on the host from the issue) SIGABRT in under a second. The cap is
+	// checked as `out` grows inside `substitute_depth`, so the refusal
+	// fires before the offending allocation is committed, and names both
+	// the variable and the size so a legitimate large value can be told
+	// apart from a hostile one (#1738).
+	let payload = "x".repeat(2 * 1024);
+	let mut input = String::new();
+	while input.len() < 300 * 1024 {
+		input.push_str("${PAYLOAD}");
+	}
+	let v = vars(&[("PAYLOAD", &payload)]);
+	let err = substitute(&input, &v)
+		.expect_err("expected the interpolation cap to refuse variable repetition");
+	let msg = format!("{err}");
+	assert!(
+		matches!(err, crate::error::ComposeError::InvalidSubstitution(_)),
+		"refusal should be InvalidSubstitution; got: {msg}"
+	);
+	assert!(
+		msg.contains("PAYLOAD"),
+		"refusal should name the variable; got: {msg}"
+	);
+	assert!(
+		msg.contains("bytes"),
+		"refusal should name the size reached; got: {msg}"
+	);
+}
+
+#[test]
+fn interpolation_cap_allows_legitimate_repetition() {
+	// A handful of repetitions of a small value stay well under the cap.
+	let v = vars(&[("TAG", "v1")]);
+	assert_eq!(substitute("${TAG}-${TAG}-${TAG}", &v).unwrap(), "v1-v1-v1");
+}
