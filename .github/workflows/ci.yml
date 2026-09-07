@@ -149,6 +149,43 @@ jobs:
       workflow: benchmark.yml
       max-age-days: 65
 
+  # Fails when the newest COMPLETED run of `ci.yml` on a protected branch is
+  # not a success. The freshness watchers above cannot catch this: they read
+  # the newest SUCCESSFUL scheduled run, so a failing scheduled run is
+  # missing from their answer by construction. A protected branch whose
+  # gates are red is the published state failing rather than a broken
+  # integration branch, and that is the gap this closes.
+  #
+  # Two jobs, one per branch. They MUST stay separate. Each name carries
+  # the branch it watches, and a single job that watched both would emit
+  # one check name covering two branches - and a check name that does not
+  # move is the property required checks depend on (Glyndor/podup#1552).
+  #
+  # MUST NOT BECOME A REQUIRED STATUS CHECK. A red `main` would then block
+  # the pull request that repairs it, which is the exact failure mode this
+  # check exists to surface. The reason is repeated inside the reusable,
+  # where somebody wiring required checks would look first. Do not remove
+  # either copy.
+  health-main:
+    name: branch health (main)
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/reusable-branch-health.yml
+    with:
+      workflow: ci.yml
+      branch: main
+
+  health-develop:
+    name: branch health (develop)
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/reusable-branch-health.yml
+    with:
+      workflow: ci.yml
+      branch: develop
+
   # Dependabot silently stops proposing updates when its config is not
   # re-registered, and like a dead cron it reports nothing at all. This fails
   # when no pull request has been opened recently enough.
