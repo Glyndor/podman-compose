@@ -360,3 +360,256 @@ jobs:
           if __name__ == "__main__":
               sys.exit(main())
           PY
+
+      # A caller-level `if:` on a job that emits a required check name is a
+      # switch, not a filter. GitHub reports a SKIPPED required check as
+      # SUCCESS, so one `if:` line can switch off coverage, the MSRV floor,
+      # or the validation on both supported Podman majors while the ruleset
+      # reports the gate as satisfied.
+      #
+      # Measured against this repository on 2026-09-06: eleven status checks
+      # are required on `main` and ten on `develop`. Every one of them is
+      # emitted either directly by a job in this tree or by a reusable a job
+      # here calls. Nothing in this repository asserts that property; #1718.
+      #
+      # The interesting case is `if: always()`. It can never evaluate false,
+      # so the job always runs and the check is always reported. Allowed.
+      # That is the load-bearing pattern from #1552: a gate job summarises a
+      # matrix that may fail, so it has to run on `failure` too and reads
+      # `needs.*.result` to make the verdict. The reusable-rust-ci and
+      # podman-lane gates are full of it.
+      #
+      # `if:` lines INSIDE a reusable are not in scope here. They are how
+      # the reusable is configured (`if: inputs.msrv != ''`), and refusing
+      # them would take down the repository by deleting controls. The step
+      # below skips files whose basename starts with `reusable-` so the
+      # rejection cannot reach them.
+      #
+      # Why a list of names and not "any job in any reusable": a ruleset
+      # requires a stable name (Glyndor/podup#1552), so the named set is the
+      # actual contract. A reuse-side `name: foo (bar)` whose value moves
+      # is its own problem; this step refuses a switch in front of it, not
+      # the move.
+      #
+      # Lives here for the same reason tooling-isolation does: a workflow-lint
+      # job inside the shell suite would share the fate of the `if:` it tries
+      # to gate, and any other required job is the one whose `if:` is the
+      # defect being caught.
+      - name: A caller of a required check must not carry a switchable `if:`
+        run: |
+          python3 - <<'PY'
+          import glob
+          import os
+          import sys
+
+          import yaml
+
+          # Reusables whose jobs' `name:` becomes part of a required check
+          # name when a job here calls them. Each entry is the basename of
+          # the reusable; the matching caller is any job with
+          # `uses: ./.github/workflows/<name>`.
+          #
+          # The names below are the ones the rulesets on `main` and `develop`
+          # require, deduplicated and corrected against
+          # `gh pr checks <merged-PR> --required` on 2026-09-06. They move
+          # only when a required check is added or removed, and that is
+          # pulled by reading the live ruleset, not by guessing.
+          REQUIRED_REUSABLES = {
+              "reusable-rust-ci.yml": [
+                  "Format & lint", "Test", "Coverage", "Doc warnings",
+                  "MSRV", "Extra platforms",
+              ],
+              "reusable-dco.yml": [
+                  "Signed-off-by present on every commit",
+              ],
+              "reusable-line-limit.yml": [
+                  "line limit",
+              ],
+              "reusable-main-guard.yml": [
+                  "develop-only",
+              ],
+              "reusable-workflow-lint.yml": [
+                  "workflow-lint",
+              ],
+          }
+
+          # Required check names emitted directly by a job in this
+          # repository, not via a reusable call. The set is the value of
+          # the job's `name:` field that GitHub reports. A future addition
+          # lands here with its check name; the file it sits in is
+          # incidental.
+          DIRECT_EMITTER_NAMES = {
+              "Supported Podman majors",
+          }
+
+          # `if: always()` is the only `if:` value allowed on a caller of
+          # a required check. It evaluates true on every outcome, so the
+          # job runs and the check is reported. Anything else can evaluate
+          # false (`false`, `github.event_name == ...`, `inputs.x`,
+          # `success()`), and a skipped required check reports Success.
+          ALWAYS = "always()"
+
+
+          def is_switchable(value):
+              """True if an `if:` value can skip the job. Anything other
+              than `always()` can, including `true` (redundant but not
+              skip-causing on its own; refuse on principle so the rule is
+              easy to read and the tree does not grow decorative
+              conditionals). The point is that the assertion is precise:
+              the only blessed form is `always()`, and the reason is that
+              it cannot evaluate false."""
+              if isinstance(value, bool):
+                  return True
+              if not isinstance(value, str):
+                  return True
+              # A bare `if:` is evaluated as an expression whether or not
+              # the author wraps it in the dollar-brace form, so the wrapped
+              # spelling of `always()` means the same thing. Comparing the
+              # raw text would refuse it, which is valid and common, and
+              # push somebody to rewrite working code. The wrapper is
+              # stripped once, and only when it wraps the whole value:
+              # `always() && needs.x.result` keeps its tail, stays unequal
+              # and is refused, which is right because it can be false.
+              # The opening delimiter is built rather than written out:
+              # actionlint parses any literal one it finds inside this
+              # `run:` block as an expression of this workflow and fails on
+              # it, which is a real trap for anybody editing this scanner.
+              open_expr = "$" + "{{"
+              text = value.strip()
+              if text.startswith(open_expr) and text.endswith("}}"):
+                  text = text[len(open_expr):-2].strip()
+              return text != ALWAYS
+
+
+          def main():
+              files = sorted(set(
+                  glob.glob(".github/workflows/*.yml")
+                  + glob.glob(".github/workflows/*.yaml")
+              ))
+
+              # First pass: walk the reusables themselves to learn which
+              # required check names each one emits. The map is asserted
+              # against the static list above: a move in a reusable's
+              # `name:` is a defect this step refuses to silently follow.
+              # Skipping reusable-* in the caller scan below is the reason
+              # the static map is needed: those files are scanned for
+              # their own internals, not for how callers use them.
+              reusable_emits = {}
+              for path in files:
+                  name = os.path.basename(path)
+                  if not name.startswith("reusable-"):
+                      continue
+                  if name not in REQUIRED_REUSABLES:
+                      # An unknown reusable is not in scope; a caller
+                      # wrapping it is not gated. Leave it alone.
+                      continue
+                  try:
+                      with open(path) as fh:
+                          spec = yaml.safe_load(fh)
+                  except yaml.YAMLError as e:
+                      print(f"::warning file={path}::skipped: YAML parse error: {e}")
+                      continue
+                  if not isinstance(spec, dict):
+                      continue
+                  expected = set(REQUIRED_REUSABLES[name])
+                  found = set()
+                  jobs = spec.get("jobs") or {}
+                  for job_id, job in jobs.items():
+                      if not isinstance(job, dict):
+                          continue
+                      jname = job.get("name")
+                      if isinstance(jname, str) and jname in expected:
+                          found.add(jname)
+                  missing = expected - found
+                  if missing:
+                      print(
+                          f"::warning file={path}::reusable `{name}` no longer "
+                          f"emits expected required check name(s) {sorted(missing)}; "
+                          "the static map may be stale. Verify against "
+                          "`gh pr checks <merged-PR> --required`."
+                      )
+                  reusable_emits[name] = expected
+
+              violations = []
+
+              for path in files:
+                  name = os.path.basename(path)
+                  # A reusable's own `if:` lines are INSIDE the reusable
+                  # and configure it (`if: inputs.msrv != ''`). They are
+                  # not a caller switch and must stay allowed. The same
+                  # file is also scanned above for the emit assertion.
+                  if name.startswith("reusable-"):
+                      continue
+                  try:
+                      with open(path) as fh:
+                          spec = yaml.safe_load(fh)
+                  except yaml.YAMLError as e:
+                      print(f"::warning file={path}::skipped: YAML parse error: {e}")
+                      continue
+                  if not isinstance(spec, dict):
+                      continue
+                  jobs = spec.get("jobs") or {}
+                  if not isinstance(jobs, dict):
+                      continue
+                  for job_id, job in jobs.items():
+                      if not isinstance(job, dict):
+                          continue
+                      # Direct emitter: the job's `name:` is a required
+                      # check name. The file the job sits in is
+                      # incidental; what the ruleset matches is the
+                      # name GitHub reports.
+                      job_name = job.get("name")
+                      if isinstance(job_name, str) and job_name in DIRECT_EMITTER_NAMES:
+                          required_name = job_name
+                      else:
+                          required_name = None
+                      # Reusable caller: `uses:` references a known
+                      # required-emitting reusable.
+                      caller_required_names = []
+                      uses = job.get("uses")
+                      if isinstance(uses, str) and uses.startswith("./"):
+                          ref = uses[2:]
+                          for entry in reusable_emits:
+                              if ref.endswith(entry):
+                                  caller_required_names = sorted(reusable_emits[entry])
+                                  break
+                      if required_name is None and not caller_required_names:
+                          continue
+                      if "if" not in job:
+                          continue
+                      value = job["if"]
+                      if not is_switchable(value):
+                          # `if: always()` is the blessed form. Allowed.
+                          continue
+                      listed = (
+                          f"required check `{required_name}`"
+                          if required_name is not None
+                          else f"required checks {caller_required_names}"
+                      )
+                      violations.append((
+                          path, job_id, value, listed,
+                      ))
+
+              if violations:
+                  for path, job_id, value, listed in violations:
+                      print(
+                          f"::error file={path}::job `{job_id}` in {path} "
+                          f"emits {listed} and carries a job-level `if:` "
+                          f"of `{value!r}`. A caller-level conditional on a "
+                          "required check is a switch, not a filter: a "
+                          "skipped required check reports Success and does "
+                          "not block a merge. Only `if: always()` is allowed "
+                          "(it always evaluates true). Move the condition "
+                          "into the job's steps, or change it to "
+                          "`if: always()` if that is what you mean."
+                      )
+                  sys.exit(1)
+              print(
+                  "caller-if: every caller of a required check carries no "
+                  "switchable `if:` (only `if: always()` is allowed)."
+              )
+
+
+          if __name__ == "__main__":
+              main()
+          PY
