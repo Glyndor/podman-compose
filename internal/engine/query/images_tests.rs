@@ -1,4 +1,10 @@
 use super::size_cell;
+#[cfg(unix)]
+use crate::compose::types::Service;
+#[cfg(unix)]
+use crate::engine::fake_podman;
+#[cfg(unix)]
+use crate::engine::Engine;
 
 /// The exact strings the reference tools printed for these byte counts on
 /// 2026-08-03: `docker compose` v5.1.3 rendered `98.2MB` for `redis:8-alpine`,
@@ -39,4 +45,79 @@ fn a_missing_image_leaves_the_cell_empty() {
 #[test]
 fn a_one_byte_image_still_renders() {
 	assert_eq!(size_cell(1), "1B");
+}
+
+#[cfg(unix)]
+fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
+	Engine::with_base_dir(client, project.into(), std::env::temp_dir())
+}
+
+/// #1742: `podup images` used to walk services sequentially, issuing one
+/// `GET /images/{ref}/json` per service, even when several services share an
+/// image. The fix dedupes by image reference so several services on one image
+/// cost one inspect, the same shape `resolve_image_digests` already follows
+/// when a `config --resolve-image-digests` call asks for the same thing.
+/// The
+/// request count, not the row count, is what catches a regression here: the
+/// rows come back identical whether the listing is fetched once per service
+/// or once per unique reference.
+#[tokio::test]
+#[cfg(unix)]
+async fn images_inspects_each_unique_image_reference_once() {
+	let fake = fake_podman::start(|method, target| {
+		if method == "GET" && target.contains("/images/shared/json") {
+			(
+				200,
+				r#"{"Id":"sha256:1111111111111111111111111111111111111111111111111111111111111111","Size":1,"Created":"2026-01-01T00:00:00Z"}"#
+					.to_string(),
+			)
+		} else if method == "GET" && target.contains("/images/other/json") {
+			(
+				200,
+				r#"{"Id":"sha256:2222222222222222222222222222222222222222222222222222222222222222","Size":2,"Created":"2026-01-01T00:00:00Z"}"#
+					.to_string(),
+			)
+		} else {
+			(404, r#"{"message":"not found"}"#.to_string())
+		}
+	});
+	let e = engine_with(fake.client(), "proj");
+
+	let mut file = crate::compose::types::ComposeFile::default();
+	for name in ["a", "b", "c"] {
+		let svc = Service {
+			image: Some("shared".into()),
+			..Service::default()
+		};
+		file.services.insert(name.into(), svc);
+	}
+	let other = Service {
+		image: Some("other".into()),
+		..Service::default()
+	};
+	file.services.insert("d".into(), other);
+
+	e.images_with_services(&file, &[], super::super::super::ImagesOptions::default())
+		.await
+		.expect("images listing over present tags must succeed");
+
+	let seen = fake.requests.lock().unwrap();
+	let inspects = seen
+		.iter()
+		.filter(|r| r.starts_with("GET") && r.contains("/images/") && r.contains("/json"))
+		.count();
+	assert_eq!(
+		inspects, 2,
+		"three services on one image plus one on another must inspect two unique images, \
+		 not four: requests were {seen:?}"
+	);
+	let shared_inspects = seen
+		.iter()
+		.filter(|r| r.contains("GET") && r.contains("/images/shared/json"))
+		.count();
+	assert_eq!(
+		shared_inspects, 1,
+		"the shared image must be inspected once across the three services, \
+		 not once per service: requests were {seen:?}"
+	);
 }

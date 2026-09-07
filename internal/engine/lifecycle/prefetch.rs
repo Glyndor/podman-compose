@@ -105,22 +105,24 @@ impl Engine {
 			// unconditionally: that request is a pure win, since
 			// `up_one_service` would have made it anyway, just later.
 			if policy == "missing" && self.image_present(image).await {
-				// Record what this check just observed, so the per-service pull
-				// site does not repeat it: without this the stage returns having
-				// learned the image is here, and `acquire_service_image` pulls it
-				// once per service anyway: 42 of the 88 requests a 42-service
-				// warm `up` used to issue.
+				// The `image_present` call above went through `image_id`,
+				// which populated [`Engine::images_seen`] with the
+				// `(image, id)` pair the per-replica `unchanged` site
+				// later reads back (#1742). Recording the observation a
+				// second time here would just overwrite the same entry.
 				//
-				// Not recorded for a service pinning `platform:`. Presence is
-				// matched on the reference, which says nothing about which
-				// architecture variant is local, so a hit here could stand in for
+				// `platform:` is not honoured for the cache, mirroring the
+				// old behaviour: presence is matched on the reference, which
+				// carries no architecture, so a hit here could stand in for
 				// the wrong image.
+				//
+				// The "skip" is therefore conditional on `platform.is_none()`
+				// only for the *pull* below, not for the cache record: the
+				// cache record is a side effect of `image_present`, which
+				// itself is platform-blind.
 				if service.platform.is_none() {
-					if let Ok(mut seen) = self.images_seen_present.lock() {
-						seen.insert(image.to_string());
-					}
+					return Ok(());
 				}
-				return Ok(());
 			}
 			// Quietly: this stage only warms the cache, and `up_one_service`'s
 			// own pull below is the authoritative one. Reporting from both is
