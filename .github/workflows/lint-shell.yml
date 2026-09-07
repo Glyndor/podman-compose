@@ -16,6 +16,7 @@ on:
       - ".github/scripts/check-hardening-macos.sh"
       - "tests/shell/check-hardening-macos.test.sh"
       - "tests/shell/check-suite-completeness.test.sh"
+      - "tests/shell/install-help.test.sh"
       - "tests/shell/install-rollback-cleans-staged.test.sh"
       - ".cargo/**"
       - "Cargo.toml"
@@ -42,6 +43,7 @@ on:
       - "tests/shell/reusable-workflow-lint-pin-length.test.sh"
       - "tests/shell/reusable-workflow-lint-caller-with.test.sh"
       - "tests/shell/reusable-workflow-lint-tooling-installers.test.sh"
+      - "tests/shell/install-help.test.sh"
       - "tests/shell/install-rollback-cleans-staged.test.sh"
       - ".cargo/**"
       - "Cargo.toml"
@@ -80,7 +82,7 @@ jobs:
       # never produces the sentinel, and this check names the file that
       # did not. Without this check, a truncated test and a passing one
       # look the same to the chain: exit 0, no count line.
-      test-command: bash ./tests/shell/check-suite-completeness.test.sh ./tests/shell/locale-pinned.test.sh ./tests/shell/ci-runs-every-test.test.sh ./tests/shell/check-hardening.test.sh ./tests/shell/check-hardening-macos.test.sh ./tests/shell/branch-health-conclusion.test.sh ./tests/shell/reusable-workflow-lint-tooling-isolation.test.sh ./tests/shell/reusable-workflow-lint-tooling-installers.test.sh ./tests/shell/reusable-workflow-lint-caller-if.test.sh ./tests/shell/reusable-workflow-lint-caller-with.test.sh ./tests/shell/reusable-workflow-lint-pin-length.test.sh ./tests/shell/install-rollback-cleans-staged.test.sh
+      test-command: bash ./tests/shell/check-suite-completeness.test.sh ./tests/shell/locale-pinned.test.sh ./tests/shell/ci-runs-every-test.test.sh ./tests/shell/check-hardening.test.sh ./tests/shell/check-hardening-macos.test.sh ./tests/shell/branch-health-conclusion.test.sh ./tests/shell/reusable-workflow-lint-tooling-isolation.test.sh ./tests/shell/reusable-workflow-lint-tooling-installers.test.sh ./tests/shell/reusable-workflow-lint-caller-if.test.sh ./tests/shell/reusable-workflow-lint-caller-with.test.sh ./tests/shell/reusable-workflow-lint-pin-length.test.sh ./tests/shell/install-rollback-cleans-staged.test.sh ./tests/shell/install-help.test.sh
       # branch-health-conclusion.test.sh pipes API JSON into the
       # conclusion script and asserts exit codes. jq is the tool that
       # turns the response into shell-readable lines, and it is not in

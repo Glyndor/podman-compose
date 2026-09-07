@@ -125,7 +125,10 @@ temp-env = "0.3"
 # dev-dependency features out of the shipped binary): the fake-Podman test
 # harness (`internal/engine/fake_podman.rs`) reads/writes a raw HTTP/1.1
 # request over a Unix socket by hand, needing `AsyncReadExt`/`AsyncWriteExt`.
-tokio = { version = "1", features = ["io-util"] }
+# `test-util` enables `#[tokio::test(start_paused = true)]` and
+# `tokio::time::pause()`, which the hijack-timeout tests need to verify
+# wall-clock ceilings without making the suite wait thirty real seconds.
+tokio = { version = "1", features = ["io-util", "test-util"] }
 
 [workspace]
 exclude = ["bench/timeit", "fuzz"]

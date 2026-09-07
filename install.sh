@@ -39,7 +39,40 @@ fail() {
 }
 
 usage() {
-	sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//'
+	# The previous version read the help from this script's own header
+	# via `sed -n '3,21p' "$0"`. That works for `./install.sh --help`
+	# and `bash install.sh --help`, but fails the documented pipe
+	# `curl ... | bash -s -- --help` because $0 there is the program
+	# name "bash", not the script path: the helper tries to read a file
+	# literally named "bash" and exits with `sed: can't read bash`.
+	# The header is also unreachable from /dev/stdin in that mode;
+	# bash has already consumed the piped script bytes for parsing by
+	# the time the function runs, so /dev/stdin is empty.
+	#
+	# The heredoc duplicates the header deliberately. The script header
+	# is the source of truth by convention, so any drift between the two
+	# is detected by `install_help_matches_header` in the shell suite.
+	cat <<'USAGE'
+podup installer.
+
+Default: download a release binary, verify it and install it to a directory.
+Updates come from `podup update`.
+
+  curl -fsSL https://glyndor.net/podup/install/unix | bash
+
+--apt (Debian/Ubuntu, amd64/arm64): set up the Glyndor apt repository and install
+with apt. Updates - including signing-key renewals - come from `apt upgrade`.
+
+  curl -fsSL https://glyndor.net/podup/install/unix | bash -s -- --apt
+
+--skip-podman-check: bypass the local-Podman-version precheck. Use this when
+the engine podup will use is on a different host than the local podman
+binary (e.g. a `podman machine` VM, or a remote socket).
+
+Environment:
+  PODUP_VERSION      Release tag to install (e.g. v0.3.0). Default: latest.
+  PODUP_INSTALL_DIR  Installation directory (binary mode). Default: /usr/local/bin.
+USAGE
 	exit 0
 }
 

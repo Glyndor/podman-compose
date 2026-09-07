@@ -411,3 +411,44 @@ fn cleanup_stale_backup_is_a_no_op_without_a_leftover() {
 	cleanup_stale_backup();
 	assert!(!backup.exists());
 }
+/// #1747 (L7): Windows-side `create_new` invariant. The Unix branch's
+/// `O_EXCL`-equivalent is `OpenOptions::create_new(true)`, which fails
+/// the open when the target path already exists. `write_temp` had been
+/// using `File::create` on Windows, which truncates anything it finds
+/// rather than rejecting it: a planted junction in a shared install
+/// directory could already exist, the open would silently traverse it,
+/// and the verified bytes would land wherever the junction points
+/// rather than at the named temp. The fixture plants a regular file at
+/// `tmp` and confirms the call fails: on the unfixed code the file is
+/// truncated and the call returns `Ok`, on the fixed code the call
+/// returns an `Update` error.
+///
+/// Linux-only: we cannot exercise the Windows branch from a Linux host
+/// (the call sits behind `#[cfg(windows)]`). On non-Windows targets
+/// this test compiles out, mirroring the existing Windows-only suite.
+/// The companion `write_temp_never_propagates_a_special_bit_from_the_target`
+/// pins the same shape on Linux for the Unix branch, so the two
+/// platforms share coverage.
+#[cfg(windows)]
+#[test]
+fn write_temp_refuses_a_pre_existing_tmp_on_windows() {
+	let dir = tempfile::tempdir().expect("tempdir");
+	let target = dir.path().join("podup");
+	std::fs::write(&target, b"old").expect("write target");
+	// Plant a regular file at `tmp` to simulate a previously-uncleaned
+	// leftover the unfixed code would silently truncate over.
+	let tmp = dir.path().join("podup.update-1234");
+	std::fs::write(&tmp, b"planted leftover").expect("write tmp");
+	let err = write_temp(&tmp, b"verified bytes", &target)
+		.expect_err("write_temp must refuse a pre-existing tmp on Windows");
+	let msg = format!("{err}");
+	assert!(
+		msg.contains("cannot write update"),
+		"the error should come from write_temp, got: {err}"
+	);
+	assert_eq!(
+		std::fs::read(&tmp).expect("read tmp"),
+		b"planted leftover",
+		"write_temp must not truncate the pre-existing tmp"
+	);
+}

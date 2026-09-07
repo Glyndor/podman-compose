@@ -160,11 +160,20 @@ impl Engine {
 	/// failure is remembered and returned once every replica has been
 	/// attempted, so `scale`/`up --scale` does not exit 0 with a surplus
 	/// replica silently left running (#598).
+	///
+	/// `existing` is the bulk project's container snapshot the caller fetched
+	/// earlier in the same `up` walk; filtering it in memory saves one
+	/// `/containers/json` round trip per `--scale` override, since the
+	/// per-service label is already carried on each `ExistingContainer`
+	/// (entry #1747). `scale` (the standalone command) does not have that
+	/// snapshot, so it builds one inline by issuing the same endpoint
+	/// itself; the duplicate-fetch concern is the `up` path, not this one.
 	pub(super) async fn remove_surplus_replicas(
 		&self,
 		service_name: &str,
 		service: &Service,
 		target: u32,
+		existing: &std::collections::HashMap<String, super::ExistingContainer>,
 	) -> Result<()> {
 		// The desired set is the index-suffixed name at every count (`svc-1`
 		// even for a single replica), so a scale N→1 keeps the running `svc-1`
@@ -175,10 +184,16 @@ impl Engine {
 			.into_iter()
 			.collect();
 		let grace = self.grace_period_secs(service);
-		let surplus: Vec<String> = self
-			.list_project_container_names(Some(service_name))
-			.await?
-			.into_iter()
+		// Filter the in-memory bulk snapshot by the per-service label rather
+		// than issuing a fresh `/containers/json`. On the `up` path the
+		// caller fetched that whole snapshot at the top of `run_up`; a second
+		// per-service fetch re-reads a data set that is already on hand.
+		let surplus: Vec<String> = existing
+			.iter()
+			.filter_map(|(name, entry)| match entry.service.as_deref() {
+				Some(svc) if svc == service_name => Some(name.clone()),
+				_ => None,
+			})
 			.filter(|name| !desired.contains(name))
 			.collect();
 		// Scaling down removes surplus replicas but keeps their data volumes

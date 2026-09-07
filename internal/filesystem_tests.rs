@@ -1,3 +1,8 @@
+// `mkfifo` is the only way to plant a FIFO node; the call is a single libc
+// FFI, it operates on the supplied path, and it never reads from the FIFO
+// itself. The opt-out is scoped to this test file.
+#![allow(unsafe_code)]
+
 use super::{read_capped_from, read_capped_with, read_to_string_capped_with};
 
 #[test]
@@ -58,4 +63,57 @@ fn read_capped_rejects_bytes_over_limit() {
 #[test]
 fn read_capped_missing_file_is_error() {
 	assert!(read_capped_with(std::path::Path::new("/no/such/file"), 16).is_err());
+}
+/// #1747 (L2): an `env_file:` (or any compose-side path) that points at a
+/// FIFO with no writer used to wedge the parser: `File::open` blocked in
+/// the kernel, no message, no timeout. Refuse up front with an actionable
+/// error so a typo in compose.yml is a 1-second failure, not a hang. The
+/// reader never opens the FIFO, so the test does not need a writer.
+#[cfg(unix)]
+#[test]
+fn read_to_string_capped_rejects_a_fifo() {
+	use std::ffi::CString;
+	use std::os::unix::ffi::OsStrExt;
+	let dir = tempfile::tempdir().expect("tempdir");
+	let fifo = dir.path().join("env.fifo");
+	// Plant the FIFO via libc::mkfifo (no `nix` dependency); the goal is
+	// to land the node on disk without ever opening the read end, which is
+	// what wedged the unfixed code.
+	let c_path = CString::new(fifo.as_os_str().as_bytes()).expect("cstring");
+	let rc = unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) };
+	assert_eq!(rc, 0, "mkfifo failed: {}", std::io::Error::last_os_error());
+	let err = read_to_string_capped_with(&fifo, 64).unwrap_err();
+	assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+	let msg = err.to_string();
+	assert!(
+		msg.contains("FIFO"),
+		"the kind label should be in the message, got: {msg}"
+	);
+	assert!(
+		msg.contains("would block"),
+		"the error should explain the hang, got: {msg}"
+	);
+}
+#[cfg(unix)]
+#[test]
+fn read_capped_rejects_a_fifo() {
+	// Same refused-input shape from the bytes reader (build secrets).
+	use std::ffi::CString;
+	use std::os::unix::ffi::OsStrExt;
+	let dir = tempfile::tempdir().expect("tempdir");
+	let fifo = dir.path().join("env.fifo");
+	let c_path = CString::new(fifo.as_os_str().as_bytes()).expect("cstring");
+	let rc = unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) };
+	assert_eq!(rc, 0, "mkfifo failed: {}", std::io::Error::last_os_error());
+	let err = read_capped_with(&fifo, 64).unwrap_err();
+	assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+	let msg = err.to_string();
+	assert!(
+		msg.contains("FIFO"),
+		"the kind label should be in the message, got: {msg}"
+	);
+	assert!(
+		msg.contains("would block"),
+		"the error should explain the hang, got: {msg}"
+	);
 }

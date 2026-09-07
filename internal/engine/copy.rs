@@ -25,6 +25,39 @@ use archive::{extract_archive, pack_path};
 /// file/dir copies); larger transfers should use `podman cp` directly.
 const MAX_CP_ARCHIVE_BYTES: usize = 1024 * 1024 * 1024;
 
+/// What `dst` looks like for the container→host cp routing decision.
+///
+/// Three cases drive [`Engine::cp_from_container`]:
+/// - `Directory`: an existing real directory; the streaming extractor can
+///   pipe the archive body straight into it without buffering.
+/// - `Symlink`: a destination that is itself a symlink. `Path::is_dir`
+///   would follow it and report a directory, so the routing used to take
+///   the streaming branch and the bytes landed in the link target rather
+///   than the named destination. The same class of bug #1736 closed
+///   inside `extract_archive`; this is that fix mirrored at the call site
+///   that picks between streaming and buffering.
+/// - `NotADirectory`: a missing path (the buffered `extract_archive`
+///   branch will create it) or an existing non-directory (the same
+///   branch will land the single entry there).
+pub(super) enum CpDestinationKind {
+	Directory,
+	Symlink,
+	NotADirectory,
+}
+
+/// Classify `dst` for the cp routing. `symlink_metadata` is used rather
+/// than `is_dir`/`exists` so a destination that is a symlink is reported
+/// as a symlink, not the directory it points at. Without this, the
+/// streaming branch would extract into the link target rather than the
+/// named destination (#1736 + the call-site follow-up).
+pub(super) fn cp_destination_kind(dst: &Path) -> CpDestinationKind {
+	match std::fs::symlink_metadata(dst) {
+		Ok(meta) if meta.file_type().is_symlink() => CpDestinationKind::Symlink,
+		Ok(meta) if meta.is_dir() => CpDestinationKind::Directory,
+		_ => CpDestinationKind::NotADirectory,
+	}
+}
+
 /// Options for [`Engine::cp_with_options`], mirroring `docker compose cp` flags.
 ///
 /// `#[non_exhaustive]` since 4.0.0, so a new field can be added in a minor
@@ -173,8 +206,27 @@ impl Engine {
 		// A stream cannot be rewound, so that path still buffers. Making it
 		// single-pass means changing what `cp` does with an ambiguous
 		// destination, which is a behaviour decision rather than a memory one.
-		if dst.is_dir() {
-			return stream::extract_streamed(resp, dst, MAX_CP_ARCHIVE_BYTES as u64).await;
+		//
+		// The classification goes through `symlink_metadata` rather than
+		// `is_dir` so a destination that is a symlink is reported as a symlink
+		// rather than the directory it points at; the streaming branch would
+		// otherwise extract into the link target. Same class of bug #1736
+		// closed inside `extract_archive`, mirrored here at the routing site.
+		match cp_destination_kind(&dst) {
+			CpDestinationKind::Symlink => {
+				return Err(ComposeError::Copy(format!(
+					"cp: refusing symlink destination: {}",
+					dst.display()
+				)));
+			}
+			CpDestinationKind::Directory => {
+				return stream::extract_streamed(resp, dst, MAX_CP_ARCHIVE_BYTES as u64).await;
+			}
+			CpDestinationKind::NotADirectory => {
+				// Fall through: `extract_archive` will either create a fresh
+				// directory (directory source) or land the single entry at
+				// exactly `dst` (single file source).
+			}
 		}
 
 		// Cap the buffered archive so a huge/hostile container path cannot OOM

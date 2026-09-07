@@ -52,6 +52,12 @@ pub(crate) struct ExistingContainer {
 	config_hash: Option<String>,
 	/// The 64-hex ID of the image the container was created from.
 	image_id: String,
+	/// The `podup.service` label, when present. Carried alongside the bulk
+	/// project's container list so the scale-reconciliation step in `run_up`
+	/// can filter the same in-memory snapshot instead of issuing one
+	/// per-service `/containers/json` against an already-fetched data set
+	/// (#1747).
+	service: Option<String>,
 }
 
 impl Engine {

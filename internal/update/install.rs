@@ -331,7 +331,34 @@ pub(crate) fn write_temp(tmp: &Path, new_bytes: &[u8], target: &Path) -> crate::
 				ComposeError::Update(format!("cannot write update to {}: {e}", tmp.display()))
 			})?
 	};
-	#[cfg(not(unix))]
+	#[cfg(windows)]
+	let mut f = {
+		use std::os::windows::fs::OpenOptionsExt;
+		// Mirror the Unix branch's invariants on Windows. `create_new(true)`
+		// is the Windows analogue of `O_CREAT|O_EXCL`: the open fails if
+		// anything already lives at `tmp` rather than truncating it, so a
+		// planted junction cannot redirect the verified bytes into a host
+		// path the operator did not name. `custom_flags(0x0020_0000)` is
+		// `FILE_FLAG_OPEN_REPARSE_POINT`: the open is given a handle to
+		// the reparse point itself rather than the target it points at,
+		// failing the call rather than silently traversing the link.
+		// Together with the `remove_file` above (which unlinks a planted
+		// symlink rather than following it) the verified bytes can only
+		// land in a freshly created file at `tmp`. The constants are
+		// intentionally inlined rather than imported from `windows-sys`
+		// to keep this branch buildable on hosts that only have the
+		// `Console` features wired up.
+		let _ = std::fs::remove_file(tmp);
+		std::fs::OpenOptions::new()
+			.write(true)
+			.create_new(true)
+			.custom_flags(0x0020_0000)
+			.open(tmp)
+			.map_err(|e| {
+				ComposeError::Update(format!("cannot write update to {}: {e}", tmp.display()))
+			})?
+	};
+	#[cfg(not(any(unix, windows)))]
 	let mut f = std::fs::File::create(tmp).map_err(|e| {
 		ComposeError::Update(format!("cannot write update to {}: {e}", tmp.display()))
 	})?;

@@ -18,6 +18,7 @@ pub(crate) fn read_to_string_capped(path: impl AsRef<Path>) -> io::Result<String
 }
 
 fn read_to_string_capped_with(path: &Path, max: u64) -> io::Result<String> {
+	reject_non_regular(path)?;
 	// Read through a single file handle capped at `max + 1` bytes. Reading
 	// rather than stat-then-read closes the TOCTOU window: a writer that grows
 	// the file (or swaps in a symlink) after a size check cannot make podup
@@ -57,6 +58,7 @@ pub(crate) fn read_capped(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
 }
 
 fn read_capped_with(path: &Path, max: u64) -> io::Result<Vec<u8>> {
+	reject_non_regular(path)?;
 	// Same single-handle, cap-on-the-read strategy as the string variant: the
 	// limit is enforced on the read itself, so a file that grows (or a symlink
 	// swapped in) after any size check cannot push podup past the cap.
@@ -70,6 +72,62 @@ fn read_capped_with(path: &Path, max: u64) -> io::Result<Vec<u8>> {
 		));
 	}
 	Ok(buf)
+}
+
+/// Refuse to read a path whose file type would block rather than return data.
+///
+/// A FIFO (named pipe) opened with the default flags blocks in the kernel
+/// until a writer opens the other end. With no writer (or a writer that
+/// never closes), `File::open` and the follow-up `read` both hang. `env_file:`
+/// entries are configuration the operator wrote into a compose file, so the
+/// only way a FIFO shows up here is a mistake (typo, accidentally pointing
+/// at a leftover `/tmp/some.fifo`); rather than wedge the parser, refuse
+/// the read with an actionable error before the open. The same goes for the
+/// character/block device kinds, where reading `/dev/zero` would otherwise
+/// spin until the cap. `symlink_metadata` rather than `metadata` keeps a
+/// planted symlink at `path` from quietly reverting to the target type.
+#[cfg(unix)]
+fn reject_non_regular(path: &Path) -> io::Result<()> {
+	use std::os::unix::fs::FileTypeExt;
+	let meta = match path.symlink_metadata() {
+		Ok(m) => m,
+		// The follow-up `File::open` will report NotFound with the same path;
+		// fall through to that so the error message stays consistent.
+		Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+		Err(e) => return Err(e),
+	};
+	let ty = meta.file_type();
+	if ty.is_file() {
+		return Ok(());
+	}
+	let kind_label = if ty.is_fifo() {
+		"FIFO (named pipe)"
+	} else if ty.is_char_device() {
+		"character device"
+	} else if ty.is_block_device() {
+		"block device"
+	} else if ty.is_socket() {
+		"socket"
+	} else if ty.is_dir() {
+		"directory"
+	} else {
+		"non-regular file"
+	};
+	Err(io::Error::new(
+		io::ErrorKind::InvalidInput,
+		format!(
+			"refusing to read {kind_label} {}: would block forever",
+			path.display()
+		),
+	))
+}
+
+/// Non-Unix: keep the old behaviour. `FileType` only knows about files and
+/// directories in the platform-neutral surface, and a FIFO on Windows is not
+/// reachable through the env_file path anyway.
+#[cfg(not(unix))]
+fn reject_non_regular(_path: &Path) -> io::Result<()> {
+	Ok(())
 }
 
 #[cfg(test)]
