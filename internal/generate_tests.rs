@@ -1,5 +1,6 @@
-use super::{quadlet_platform_advisory, validate_for_quadlet, write_quadlet};
+use super::{quadlet_platform_advisory, write_quadlet};
 use podup::parse_str;
+use podup::quadlet::validate_for_quadlet;
 
 #[test]
 fn quadlet_advisory_only_on_non_linux() {

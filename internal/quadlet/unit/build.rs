@@ -8,7 +8,9 @@ use std::path::Path;
 
 use crate::compose::types::{BuildConfig, Service};
 
-use super::{owner_marker, sorted_label_pairs, unit_stem, QuadletUnit, Section};
+use super::{
+	owner_marker, quote_podman_arg_value, sorted_label_pairs, unit_stem, QuadletUnit, Section,
+};
 
 /// Resolve a compose build `context` to an absolute `SetWorkingDirectory` value.
 ///
@@ -112,8 +114,18 @@ pub(crate) fn build_unit(
 				// drop the whole unit at daemon-reload), so route build args through
 				// PodmanArgs= as `--build-arg`, like the container CPU/memory limits.
 				match val {
-					Some(v) => section.add("PodmanArgs", format!("--build-arg {key}={v}")),
-					None => section.add("PodmanArgs", format!("--build-arg {key}")),
+					Some(v) => section.add(
+						"PodmanArgs",
+						format!(
+							"--build-arg {}={}",
+							quote_podman_arg_value(&key),
+							quote_podman_arg_value(&v)
+						),
+					),
+					None => section.add(
+						"PodmanArgs",
+						format!("--build-arg {}", quote_podman_arg_value(&key)),
+					),
 				}
 			}
 			for (key, val) in sorted_label_pairs(labels.to_map()) {

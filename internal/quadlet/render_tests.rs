@@ -282,6 +282,46 @@ fn escape_arg_line_keys_are_left_intact() {
 	);
 }
 
+// --- quote_podman_arg_value (smuggle guard for the seven sites) ---
+
+#[test]
+fn quote_podman_arg_value_always_quotes_and_doubles_percent() {
+	// The seven interpolation sites call this on a raw compose value before
+	// splicing it into a `--flag=value` template. The result must be one
+	// systemd-token, regardless of whether the value has whitespace.
+	assert_eq!(quote_podman_arg_value("512m"), "\"512m\"");
+	// A value carrying whitespace must still be one quoted token; the
+	// smuggled `--privileged` would otherwise become its own argv element.
+	let quoted = quote_podman_arg_value("0 --privileged -v /:/hostfs2");
+	assert_eq!(quoted, "\"0 --privileged -v /:/hostfs2\"");
+}
+
+#[test]
+fn quote_podman_arg_value_strips_control_characters() {
+	// A newline injection must be flattened; the sanitiser strips it so the
+	// value stays one physical line inside the PodmanArgs= directive.
+	assert_eq!(
+		quote_podman_arg_value("ok\nExecStartPre=/bin/rm -rf /"),
+		"\"okExecStartPre=/bin/rm -rf /\""
+	);
+}
+
+#[test]
+fn quote_podman_arg_value_doubles_percent_for_literal() {
+	// systemd specifiers like %h must not be expanded; doubling to %%h is
+	// what Environment= does (#1734). podman receives the literal `%h`.
+	assert_eq!(quote_podman_arg_value("%h/mem"), "\"%%h/mem\"");
+}
+
+#[test]
+fn quote_podman_arg_value_escapes_backslash_and_quote() {
+	// A backslash inside the quoted group would fold the next physical
+	// line, swallowing whatever directive follows; an unescaped `"` would
+	// terminate the quoted group early.
+	assert_eq!(quote_podman_arg_value("back\\slash"), "\"back\\\\slash\"");
+	assert_eq!(quote_podman_arg_value("with\"quote"), "\"with\\\"quote\"");
+}
+
 #[test]
 fn safe_unit_stem_strips_leading_dash() {
 	// A name starting with `-`/`--` must not yield a file name beginning with
