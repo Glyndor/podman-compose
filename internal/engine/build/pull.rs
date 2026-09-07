@@ -428,18 +428,12 @@ impl Engine {
 	/// endpoint reports failures as in-band progress lines, not an HTTP error),
 	/// and by the `up` image-prefetch stage to skip a redundant pull request
 	/// for an image a `missing`-policy service already has cached.
-	///
-	/// `image_present` and [`Self::image_id`] share an inspect: the prefetch
-	/// stage's call here populates [`Self::images_seen`], and a later
-	/// per-replica `unchanged` reads the same entry back without re-asking
-	/// libpod (#1742). Both go through [`Self::image_id`], so the cache and
-	/// the 404/other-error handling live in one place.
 	pub(in crate::engine) async fn image_present(&self, image: &str) -> bool {
-		// Match the old `client.get_json(...).is_ok()` semantics: any error
-		// (including non-404 transport errors) reads as "not present". The
-		// caller (prefetch) then falls through to the pull, which is the path
-		// that actually fails `up` on a real I/O error.
-		self.image_id(image).await.ok().flatten().is_some()
+		let path = format!("{API_PREFIX}/images/{}/json", urlencoded(image));
+		self.client
+			.get_json::<crate::libpod::types::image::ImageInspect>(&path)
+			.await
+			.is_ok()
 	}
 
 	/// The 64-hex ID the image reference resolves to in local storage right
@@ -452,35 +446,17 @@ impl Engine {
 	/// transport error is returned rather than folded into `None`, because the
 	/// caller's fallback for "unknown" is to recreate, and a flaky socket must
 	/// not silently turn every skip into a rebuild.
-	///
-	/// Caches successful observations in [`Self::images_seen`] so the
-	/// per-replica `unchanged` site does not re-ask libpod for every replica
-	/// of a scaled service (#1742): one inspect serves every replica of a
-	/// service that shares a tag. The cache is only populated on `Ok(Some(_))`
-	/// because `Ok(None)` means "absent" and there is nothing to record, and
-	/// on `Err(_)` because a flaky socket must not pin a wrong answer.
 	pub(in crate::engine) async fn image_id(&self, image: &str) -> Result<Option<String>> {
-		if let Ok(seen) = self.images_seen.lock() {
-			if let Some(id) = seen.get(image) {
-				return Ok(Some(id.clone()));
-			}
-		}
 		let path = format!("{API_PREFIX}/images/{}/json", urlencoded(image));
-		let result = match self
+		match self
 			.client
 			.get_json::<crate::libpod::types::image::ImageInspect>(&path)
 			.await
 		{
-			Ok(inspect) => Ok(Some(inspect.id.clone())),
+			Ok(inspect) => Ok(Some(inspect.id)),
 			Err(e) if e.is_status(404) => Ok(None),
 			Err(e) => Err(ComposeError::Podman(e)),
-		};
-		if let Ok(Some(ref id)) = result {
-			if let Ok(mut seen) = self.images_seen.lock() {
-				seen.insert(image.to_string(), id.clone());
-			}
 		}
-		result
 	}
 }
 

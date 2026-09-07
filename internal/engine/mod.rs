@@ -118,14 +118,9 @@ pub struct Engine {
 	/// CLI `up -V/--renew-anon-volumes`: when recreating a container, also remove
 	/// its old anonymous volumes instead of leaving them orphaned.
 	pub(super) renew_anon_volumes: bool,
-	/// Image references this engine observed on the host during the current
-	/// invocation, recorded by the prefetch stage so the per-service pull
-	/// site and the per-replica `unchanged` site do not re-ask. Maps the
-	/// reference to the ID libpod returned at observation time, so a single
-	/// inspect serves both: the prefetch records presence and the digest, and
-	/// every `up_one_replica` that resolves the same tag later reads the
-	/// digest off the same map (#1742). Replicas of one service always share
-	/// the tag, so one inspect is enough where 21 used to happen.
+	/// Image references this engine observed present on the host during the
+	/// current invocation, recorded by the prefetch stage so the per-service
+	/// pull site does not ask again.
 	///
 	/// Only ever a record of what this engine saw itself, this run: it is not
 	/// persisted and not shared between engines. Two engines against different
@@ -133,7 +128,7 @@ pub struct Engine {
 	/// skip a pull for an image that only exists on the other's host, which
 	/// matters because podup is consumed as a library and a caller may hold more
 	/// than one engine.
-	pub(super) images_seen: std::sync::Mutex<std::collections::HashMap<String, String>>,
+	pub(super) images_seen_present: std::sync::Mutex<std::collections::HashSet<String>>,
 	/// CLI `--no-warn`: suppress the host-binding / privilege-escalation
 	/// warnings the engine emits during `up`/`create`/`run`/`exec`. The
 	/// operator wrote the compose file deliberately, so the default-warning
@@ -188,7 +183,7 @@ impl Engine {
 			run_labels: Vec::new(),
 			run_no_tty: false,
 			renew_anon_volumes: false,
-			images_seen: std::sync::Mutex::new(std::collections::HashMap::new()),
+			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
 			no_warn: false,
 			project_label: build_project_label_parts(&project),
 		}
@@ -211,7 +206,7 @@ impl Engine {
 			run_labels: Vec::new(),
 			run_no_tty: false,
 			renew_anon_volumes: false,
-			images_seen: std::sync::Mutex::new(std::collections::HashMap::new()),
+			images_seen_present: std::sync::Mutex::new(std::collections::HashSet::new()),
 			no_warn: false,
 			project_label: build_project_label_parts(&project),
 		}

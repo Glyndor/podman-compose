@@ -1,4 +1,3 @@
-use crate::engine::container::config_hash;
 use crate::engine::fake_podman;
 use crate::engine::Engine;
 use crate::ui::progress::capture::Capture;
@@ -132,10 +131,10 @@ async fn image_already_seen_present_rejects_an_unknown_pull_policy() {
 	// service whose effective policy it read as `missing`, including a
 	// typo'd `pull_policy:`, and the only pull that could have surfaced
 	// the bad value would be skipped.
-	e.images_seen
+	e.images_seen_present
 		.lock()
 		.unwrap()
-		.insert("shared".to_string(), "any_id".to_string());
+		.insert("shared".to_string());
 
 	let file = crate::parse_str("services:\n  web:\n    image: shared\n    pull_policy: alaways\n")
 		.unwrap();
@@ -255,68 +254,5 @@ async fn up_with_a_missing_image_builds_on_the_same_board() {
 	assert!(
 		capture.every_board_ended(),
 		"the board closes on the way out, even with a build"
-	);
-}
-
-/// #1742: a warm `up` of a scaled service used to ask libpod for the image
-/// digest once per replica, 21 identical `GET /images/{tag}/json` requests
-/// for 21 replicas of one service. Every replica of one service shares the
-/// tag, and the digest either matches every container's recorded image ID or
-/// fails every one, so one inspect is enough. The fix caches the inspect on
-/// the engine (the same shape `images_seen_present` already uses for the
-/// prefetch stage), so `unchanged` reuses the prefetch's hit instead of
-/// re-asking. The prefetch itself contributes exactly one inspect under any
-/// shape, so the post-fix total is one, not zero.
-#[tokio::test]
-async fn warm_up_inspects_each_unique_image_tag_once_not_per_replica() {
-	let image = "shared";
-	let hash = "sha256:cafe";
-	// Five existing replicas of the same service, all sharing one image.
-	// `unchanged` is the call site under test: it returns `true` only when
-	// the per-container config hash matches and the live image ID equals
-	// the recorded one, so we must compute the same hash `up` would compute
-	// for the file.
-	let file = crate::parse_str(&format!(
-		"services:\n  web:\n    image: {image}\n    scale: 5\n"
-	))
-	.unwrap();
-	let web_hash = config_hash(&file.services["web"], &file).expect("config_hash");
-	let listing = format!(
-		r#"[
-		{{"Names":["/proj-web-1"],"ImageID":"{hash}","State":"running","Labels":{{"podup.project":"proj","podup.service":"web","podup.config-hash":"{web_hash}"}},"Created":"2026-01-01T00:00:00Z"}},
-		{{"Names":["/proj-web-2"],"ImageID":"{hash}","State":"running","Labels":{{"podup.project":"proj","podup.service":"web","podup.config-hash":"{web_hash}"}},"Created":"2026-01-01T00:00:00Z"}},
-		{{"Names":["/proj-web-3"],"ImageID":"{hash}","State":"running","Labels":{{"podup.project":"proj","podup.service":"web","podup.config-hash":"{web_hash}"}},"Created":"2026-01-01T00:00:00Z"}},
-		{{"Names":["/proj-web-4"],"ImageID":"{hash}","State":"running","Labels":{{"podup.project":"proj","podup.service":"web","podup.config-hash":"{web_hash}"}},"Created":"2026-01-01T00:00:00Z"}},
-		{{"Names":["/proj-web-5"],"ImageID":"{hash}","State":"running","Labels":{{"podup.project":"proj","podup.service":"web","podup.config-hash":"{web_hash}"}},"Created":"2026-01-01T00:00:00Z"}}
-	]"#
-	);
-
-	let fake = fake_podman::start(move |method, target| {
-		if method == "GET" && target.contains("/containers/json") {
-			(200, listing.clone())
-		} else if method == "GET" && target.contains("/images/") && target.contains("/json") {
-			(200, format!(r#"{{"Id":"{hash}"}}"#))
-		} else if method == "POST" && target.contains("/start") {
-			(200, String::new())
-		} else {
-			(404, r#"{"message":"not found"}"#.to_string())
-		}
-	});
-	let engine = engine_with(fake.client(), "proj");
-
-	engine
-		.up_with_options(&file, true, &[], &[], false, false, false, false)
-		.await
-		.expect("a warm up on a matching image must succeed");
-
-	let seen = fake.requests.lock().unwrap();
-	let image_inspects = seen
-		.iter()
-		.filter(|r| r.starts_with("GET") && r.contains("/images/") && r.contains("/json"))
-		.count();
-	assert_eq!(
-		image_inspects, 1,
-		"five replicas of one service must inspect the shared image once, not once per replica (#1742); \
-		 requests were {seen:?}"
 	);
 }

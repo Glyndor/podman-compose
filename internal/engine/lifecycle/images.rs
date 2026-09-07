@@ -118,9 +118,9 @@ impl Engine {
 			return Ok(false);
 		};
 		Ok(self
-			.images_seen
+			.images_seen_present
 			.lock()
-			.map(|seen| seen.contains_key(image))
+			.map(|seen| seen.contains(image))
 			.unwrap_or(false))
 	}
 }
