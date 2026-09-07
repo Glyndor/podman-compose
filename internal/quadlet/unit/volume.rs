@@ -2,7 +2,9 @@
 
 use crate::compose::types::VolumeConfig;
 
-use super::{owner_marker, sorted_label_pairs, unit_stem, QuadletUnit, Section};
+use super::{
+	owner_marker, quote_podman_arg_value, sorted_label_pairs, unit_stem, QuadletUnit, Section,
+};
 
 /// Build the `.volume` unit for one declared named volume. Emits a single
 /// `[Volume]` section (VolumeName, then driver/driver-opts/labels), always
@@ -30,7 +32,23 @@ pub(crate) fn volume_unit(name: &str, project: &str, config: Option<&VolumeConfi
 				"type" => vol.add("Type", val),
 				"device" => vol.add("Device", val),
 				"o" => vol.add("Options", val),
-				_ => vol.add("PodmanArgs", format!("--opt {key}={val}")),
+				// Quoted for the same reason the container sites are (#1734):
+				// `PodmanArgs=` is exempt from `escape_unit_value`, so an
+				// unquoted value here smuggles extra `podman volume create`
+				// flags. This site was missed when the container sites were
+				// fixed, because the search stopped at the `.container` unit.
+				// Both halves. Quoting only the value leaves the same hole on
+				// the other side of the `=`: a key carrying whitespace splits
+				// into extra flags, and a key carrying `%` is expanded by
+				// systemd. `--opt "k"="v"` is one argv element either way.
+				_ => vol.add(
+					"PodmanArgs",
+					format!(
+						"--opt {}={}",
+						quote_podman_arg_value(&key),
+						quote_podman_arg_value(&val)
+					),
+				),
 			}
 		}
 		for (key, val) in sorted_label_pairs(cfg.labels.to_map()) {
