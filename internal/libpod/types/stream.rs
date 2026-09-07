@@ -116,11 +116,41 @@ pub fn take_json_line(buf: &mut BytesMut) -> Option<Bytes> {
 /// Emits [`LogOutput`] items as frames arrive. The returned stream ends when
 /// the response body is fully consumed.
 pub fn parse_multiplexed(body: Incoming) -> BoxStream<LogOutput> {
+	parse_multiplexed_body(body)
+}
+
+/// Generic body form of [`parse_multiplexed`]. Public surface stays
+/// `parse_multiplexed(body: Incoming)`; the generic form is the test seam
+/// so the accounting this file is responsible for can be driven against
+/// an in-memory body without standing up a Podman socket.
+fn parse_multiplexed_body<B>(body: B) -> BoxStream<LogOutput>
+where
+	B: hyper::body::Body<Data = Bytes, Error = hyper::Error> + Send + Unpin + 'static,
+{
 	Box::pin(futures_util::stream::try_unfold(
 		(body, BytesMut::new(), 0u64),
 		|(mut body, mut buf, mut total_received)| async move {
 			loop {
 				if let Some((stream_type, payload)) = parse_frame(&mut buf)? {
+					// The frame header (8 bytes) plus its payload have just
+					// been split off the front of `buf`; account for the freed
+					// space so the counter tracks "bytes still owed to the
+					// parser", not "bytes ever seen". The sibling
+					// `parse_json_lines` does the same on `take_json_line`.
+					//
+					// Without this the cap is a running tally of received
+					// bytes rather than a bound on the reassembly buffer,
+					// and a stream of many small frames that exceeds
+					// MAX_STREAM_BUF cumulatively trips `StreamTooLarge` near
+					// 1024 frames in and `podup logs` exits 0 (#1739).
+					//
+					// The cap stays: it is the safety net against a
+					// daemon-controlled allocation on a slow consumer
+					// (moby bounds per-frame payloads at the same mark), and
+					// per-frame overruns are still caught one level down by
+					// `parse_frame`'s `size > MAX_STREAM_BUF` check.
+					let consumed = (8 + payload.len()) as u64;
+					total_received = total_received.saturating_sub(consumed);
 					let output = match stream_type {
 						1 => LogOutput::StdOut { message: payload },
 						2 => LogOutput::StdErr { message: payload },
