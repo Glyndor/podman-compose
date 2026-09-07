@@ -182,11 +182,11 @@ fn parse_unterminated_modifier_is_error() {
 fn resolve_none_uses_value_or_empty() {
 	let v = vars(&[("A", "1")]);
 	assert_eq!(
-		resolve_modifier("A".into(), Modifier::None, &v, 0).unwrap(),
+		resolve_modifier("A".into(), Modifier::None, &v, 0, &mut 0usize).unwrap(),
 		"1"
 	);
 	assert_eq!(
-		resolve_modifier("MISSING".into(), Modifier::None, &v, 0).unwrap(),
+		resolve_modifier("MISSING".into(), Modifier::None, &v, 0, &mut 0usize).unwrap(),
 		""
 	);
 }
@@ -195,12 +195,18 @@ fn resolve_none_uses_value_or_empty() {
 fn resolve_default_if_unset_or_empty() {
 	let v = vars(&[("EMPTY", ""), ("SET", "x")]);
 	let m = || Modifier::DefaultIfUnsetOrEmpty("def".into());
-	assert_eq!(resolve_modifier("EMPTY".into(), m(), &v, 0).unwrap(), "def");
 	assert_eq!(
-		resolve_modifier("MISSING".into(), m(), &v, 0).unwrap(),
+		resolve_modifier("EMPTY".into(), m(), &v, 0, &mut 0usize).unwrap(),
 		"def"
 	);
-	assert_eq!(resolve_modifier("SET".into(), m(), &v, 0).unwrap(), "x");
+	assert_eq!(
+		resolve_modifier("MISSING".into(), m(), &v, 0, &mut 0usize).unwrap(),
+		"def"
+	);
+	assert_eq!(
+		resolve_modifier("SET".into(), m(), &v, 0, &mut 0usize).unwrap(),
+		"x"
+	);
 }
 
 #[test]
@@ -211,7 +217,8 @@ fn resolve_default_if_unset_keeps_empty_value() {
 			"EMPTY".into(),
 			Modifier::DefaultIfUnset("def".into()),
 			&v,
-			0
+			0,
+			&mut 0usize
 		)
 		.unwrap(),
 		""
@@ -221,7 +228,8 @@ fn resolve_default_if_unset_keeps_empty_value() {
 			"MISSING".into(),
 			Modifier::DefaultIfUnset("def".into()),
 			&v,
-			0
+			0,
+			&mut 0usize
 		)
 		.unwrap(),
 		"def"
@@ -236,7 +244,8 @@ fn resolve_alt_forms() {
 			"SET".into(),
 			Modifier::AltIfSetAndNonEmpty("a".into()),
 			&v,
-			0
+			0,
+			&mut 0usize
 		)
 		.unwrap(),
 		"a"
@@ -246,17 +255,32 @@ fn resolve_alt_forms() {
 			"EMPTY".into(),
 			Modifier::AltIfSetAndNonEmpty("a".into()),
 			&v,
-			0
+			0,
+			&mut 0usize
 		)
 		.unwrap(),
 		""
 	);
 	assert_eq!(
-		resolve_modifier("EMPTY".into(), Modifier::AltIfSet("a".into()), &v, 0).unwrap(),
+		resolve_modifier(
+			"EMPTY".into(),
+			Modifier::AltIfSet("a".into()),
+			&v,
+			0,
+			&mut 0usize
+		)
+		.unwrap(),
 		"a"
 	);
 	assert_eq!(
-		resolve_modifier("MISSING".into(), Modifier::AltIfSet("a".into()), &v, 0).unwrap(),
+		resolve_modifier(
+			"MISSING".into(),
+			Modifier::AltIfSet("a".into()),
+			&v,
+			0,
+			&mut 0usize
+		)
+		.unwrap(),
 		""
 	);
 }
@@ -268,7 +292,8 @@ fn resolve_error_forms() {
 		"EMPTY".into(),
 		Modifier::ErrorIfUnsetOrEmpty("e".into()),
 		&v,
-		0
+		0,
+		&mut 0usize
 	)
 	.is_err());
 	assert_eq!(
@@ -276,14 +301,29 @@ fn resolve_error_forms() {
 			"SET".into(),
 			Modifier::ErrorIfUnsetOrEmpty("e".into()),
 			&v,
-			0
+			0,
+			&mut 0usize
 		)
 		.unwrap(),
 		"x"
 	);
-	assert!(resolve_modifier("MISSING".into(), Modifier::ErrorIfUnset("e".into()), &v, 0).is_err());
+	assert!(resolve_modifier(
+		"MISSING".into(),
+		Modifier::ErrorIfUnset("e".into()),
+		&v,
+		0,
+		&mut 0usize
+	)
+	.is_err());
 	assert_eq!(
-		resolve_modifier("EMPTY".into(), Modifier::ErrorIfUnset("e".into()), &v, 0).unwrap(),
+		resolve_modifier(
+			"EMPTY".into(),
+			Modifier::ErrorIfUnset("e".into()),
+			&v,
+			0,
+			&mut 0usize
+		)
+		.unwrap(),
 		""
 	);
 }

@@ -28,6 +28,27 @@ const MAX_INTERP_DEPTH: usize = 64;
 /// secret, a multi-line config blob) can be told apart from a hostile one.
 const MAX_INTERP_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 
+/// Upper bound on the total interpolated output of one document.
+///
+/// [`MAX_INTERP_OUTPUT_BYTES`] bounds a single scalar, which is the wrong
+/// unit on its own: repetition split across scalars is unbounded while every
+/// individual substitution stays legal. Measured on the tree before this
+/// bound existed, with a 1 MiB `.env` value and one service whose
+/// environment carries N entries all reading it: 256 entries reached 1.6 GB,
+/// 512 reached 3.2 GB, and 1024 aborted at 5.27 GB. No single substitution
+/// exceeded 1 MiB, so the per-scalar cap never fired once.
+///
+/// 16 MiB, the same number the per-file cap already uses, so a reader meets
+/// one size rather than two. It was picked by measurement rather than taste:
+/// at 64 MiB a document of 64 one-mebibyte entries is accepted and costs
+/// 419 MB resident, which is not a bound worth having. At 16 MiB the same
+/// shape is refused and a document that is legitimately large, a long secret
+/// or a config blob across a handful of services, still parses.
+///
+/// The per-scalar cap stays as the cheaper first line: it refuses a single
+/// runaway value without walking the rest of the document.
+pub(crate) const MAX_INTERP_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -37,7 +58,18 @@ const MAX_INTERP_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 /// `vars` should contain both the process environment and the `.env` file
 /// entries (process environment takes precedence).
 pub fn substitute(input: &str, vars: &HashMap<String, String>) -> Result<String> {
-	substitute_depth(input, vars, 0)
+	let mut spent = 0usize;
+	substitute_depth(input, vars, 0, &mut spent)
+}
+
+/// [`substitute`] with a budget that outlives the call, so a caller
+/// interpolating many scalars bounds their total rather than each one.
+pub(crate) fn substitute_budgeted(
+	input: &str,
+	vars: &HashMap<String, String>,
+	spent: &mut usize,
+) -> Result<String> {
+	substitute_depth(input, vars, 0, spent)
 }
 
 /// Inner substitution carrying the current nesting `depth` so recursive
@@ -46,6 +78,7 @@ pub(super) fn substitute_depth(
 	input: &str,
 	vars: &HashMap<String, String>,
 	depth: usize,
+	spent: &mut usize,
 ) -> Result<String> {
 	if depth > MAX_INTERP_DEPTH {
 		return Err(ComposeError::InvalidSubstitution(format!(
@@ -73,8 +106,9 @@ pub(super) fn substitute_depth(
 			Some('{') => {
 				chars.next();
 				let (var, modifier) = parse_braced_var(&mut chars)?;
-				let value = resolve_modifier(var.clone(), modifier, vars, depth)?;
+				let value = resolve_modifier(var.clone(), modifier, vars, depth, spent)?;
 				check_output_cap(&out, &value, &var)?;
+				check_document_budget(spent, &value, &var)?;
 				out.push_str(&value);
 			}
 			Some(c) if is_var_start(*c) => {
@@ -90,6 +124,7 @@ pub(super) fn substitute_depth(
 					}
 				};
 				check_output_cap(&out, &value, &var)?;
+				check_document_budget(spent, &value, &var)?;
 				out.push_str(&value);
 			}
 			Some(_) => {
@@ -105,6 +140,18 @@ pub(super) fn substitute_depth(
 /// output past [`MAX_INTERP_OUTPUT_BYTES`]. Called before the `push_str` so the
 /// refusal fires before the offending allocation, with a message naming the
 /// variable and the size it had reached.
+fn check_document_budget(spent: &mut usize, value: &str, var: &str) -> Result<()> {
+	*spent = spent.saturating_add(value.len());
+	if *spent > MAX_INTERP_DOCUMENT_BYTES {
+		return Err(ComposeError::InvalidSubstitution(format!(
+			"interpolating '{var}' pushes this document past {MAX_INTERP_DOCUMENT_BYTES} \
+			 bytes of substituted output; at most that much is allowed across the whole \
+			 file; the value may repeat across many fields"
+		)));
+	}
+	Ok(())
+}
+
 fn check_output_cap(out: &str, value: &str, var: &str) -> Result<()> {
 	let new_len = out.len().saturating_add(value.len());
 	if new_len > MAX_INTERP_OUTPUT_BYTES {
