@@ -131,6 +131,84 @@ fn guard_rejects_large_aliased_document() {
 	assert!(format!("{err}").contains("at most"));
 }
 
+// The original scanner toggled `in_single` on every `'` regardless of position
+// inside a plain scalar, so `don't, *a *a` had every `*a` silently inside
+// "a quoted scalar" and counted zero aliases. The guard's `refs == 0` early
+// return then let the file through. The opposite of the existing scanner
+// test (which only asserted the not-over-counted direction).
+#[test]
+fn count_alias_refs_counts_aliases_after_apostrophe_in_plain_scalar() {
+	// The `'` sits in the middle of a plain scalar (`don't,`), so it does
+	// NOT open a quoted scalar: every `*a` after the comma is a real alias.
+	assert_eq!(count_alias_refs("x: don't, *a *a\n"), 2);
+	assert_eq!(count_alias_refs("x: won't, *a *a *a\n"), 3);
+}
+
+#[test]
+fn count_alias_refs_counts_aliases_after_hash_in_plain_scalar() {
+	// `#` is a comment only when preceded by whitespace. `foo#x *a` is
+	// plain scalar `foo#x` followed by alias `*a`; the scanner used to
+	// break on `#` and miss the alias.
+	assert_eq!(count_alias_refs("x: foo#x *a *a\n"), 2);
+}
+
+#[test]
+fn guard_rejects_aliases_after_apostrophe_in_plain_scalar() {
+	// End-to-end: a document whose alias-bearing lines start with a
+	// plain-scalar apostrophe used to count zero refs and slip past the
+	// guard. Build enough lines to exceed `MAX_ALIAS_REFS`; the guard must
+	// refuse instead of returning Ok.
+	let mut yaml = String::from("anchor: &a 1\n");
+	for _ in 0..(MAX_ALIAS_REFS / 10 + 2) {
+		yaml.push_str("x: don't, *a *a *a *a *a *a *a *a *a *a\n");
+	}
+	let err = guard_alias_expansion(&yaml).unwrap_err();
+	let msg = format!("{err}");
+	assert!(
+		msg.contains("alias"),
+		"refusal should mention aliases; got: {msg}"
+	);
+}
+
+#[test]
+fn guard_rejects_aliases_after_hash_in_plain_scalar() {
+	// Same hole via `#`: the scanner used to treat `#` as a comment start
+	// anywhere on the line, swallowing the aliases after it.
+	let mut yaml = String::from("anchor: &a 1\n");
+	for _ in 0..(MAX_ALIAS_REFS / 10 + 2) {
+		yaml.push_str("x: foo#pad *a *a *a *a *a *a *a *a *a *a\n");
+	}
+	let err = guard_alias_expansion(&yaml).unwrap_err();
+	let msg = format!("{err}");
+	assert!(
+		msg.contains("alias"),
+		"refusal should mention aliases; got: {msg}"
+	);
+}
+
+#[test]
+fn interpolate_scalar_refuses_alias_payload_from_env() {
+	// The re-parse in `interpolate_scalar` runs `serde_yaml::from_str` on
+	// the resolved text. Without a guard, a `.env`-supplied value that
+	// contains many alias references would have the parser build the full
+	// Value tree (allocating memory) before the result is discarded and the
+	// raw string is kept. The re-parse must go through the same alias guard
+	// the file-level path uses.
+	let mut payload = String::from("&a [x]\n");
+	for _ in 0..(MAX_ALIAS_REFS + 50) {
+		payload.push_str("c: *a\n");
+	}
+	let v = vars(&[("P", &payload)]);
+	let yaml = "services:\n  app:\n    image: ${P}\n";
+	let result = deserialize_with_merge_interp(yaml, Some(&v));
+	let err = result.expect_err("expected guard to refuse alias-bearing payload");
+	let msg = format!("{err}");
+	assert!(
+		msg.contains("alias") || msg.contains("anchor"),
+		"refusal should mention aliases; got: {msg}"
+	);
+}
+
 // interpolation rebuild gate (#1364)
 
 fn needs_interp(yaml: &str) -> bool {

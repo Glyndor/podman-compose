@@ -18,6 +18,13 @@ use crate::error::{ComposeError, Result};
 /// practice; the worst-case expansion they allow (refs × doc size) stays bounded.
 const MAX_ALIAS_REFS: usize = 100;
 const MAX_ALIAS_DOC_BYTES: usize = 512 * 1024;
+/// Upper bound on the worst-case size the alias tree can reach in memory when
+/// expanded. Each `*anchor` reference can copy up to the whole document, so
+/// `refs × content.len()` is the safe upper bound on expansion size; the cap
+/// stops a flat document with a small anchor referenced many times
+/// (~450 KB / 63 refs reaches ~2.5 GB resident under the old caps) while
+/// leaving real compose files untouched.
+const MAX_ALIAS_EXPANSION_BYTES: usize = 4 * 1024 * 1024;
 
 /// Upper bound on flow-style nesting depth (`[`/`{`). serde_yaml_ng's own
 /// recursion cap eventually rejects pathological nesting, but its tokenizer is
@@ -160,11 +167,18 @@ fn value_needs_interp(value: &serde_yaml::Value) -> bool {
 /// result that parses into a mapping or sequence (an injected
 /// `root\n  privileged: true`, or a trailing-colon `repo:`) is kept verbatim as
 /// a string, so an attacker-influenced value can never introduce structure.
+///
+/// The re-parse goes through the same alias-expansion guard the file-level
+/// path uses: a `.env`-supplied value that resolves to many alias references
+/// would otherwise have `serde_yaml::from_str` build the full Value tree
+/// (allocating memory proportional to refs × anchor size) before we discard
+/// the result and keep the raw string.
 fn interpolate_scalar(s: &str, vars: &HashMap<String, String>) -> Result<serde_yaml::Value> {
 	let resolved = crate::substitute::substitute(s, vars)?;
 	if resolved.is_empty() {
 		return Ok(serde_yaml::Value::String(String::new()));
 	}
+	guard_alias_expansion(&resolved)?;
 	match serde_yaml::from_str::<serde_yaml::Value>(&resolved) {
 		Ok(v @ (serde_yaml::Value::Bool(_) | serde_yaml::Value::Number(_))) => Ok(v),
 		_ => Ok(serde_yaml::Value::String(resolved)),
@@ -205,6 +219,16 @@ fn guard_alias_expansion(content: &str) -> Result<()> {
 			 allowed; inline the repeated content instead"
 		)));
 	}
+	let expansion = refs.saturating_mul(content.len());
+	if expansion > MAX_ALIAS_EXPANSION_BYTES {
+		return Err(ComposeError::Unsupported(format!(
+			"compose document uses {refs} YAML alias references across {} bytes; \
+			 expanded alias content would reach about {expansion} bytes; \
+			 at most {MAX_ALIAS_EXPANSION_BYTES} bytes of expanded alias content \
+			 are allowed; inline the repeated content instead",
+			content.len()
+		)));
+	}
 	Ok(())
 }
 
@@ -240,34 +264,75 @@ fn guard_flow_depth(content: &str) -> Result<()> {
 
 /// Count YAML alias references (`*anchor`) outside quoted scalars and comments.
 ///
-/// A heuristic (it does not fully parse YAML) but it only needs to bound a
-/// DoS and it is conservative: `*` inside single/double quotes or after `#` is
-/// ignored, and an alias is counted only when `*` sits at a node position and is
-/// followed by an anchor-name character.
+/// `serde_yaml_ng`'s event stream is not part of its public API
+/// (`Event::Alias` is `pub(crate)` in `serde_yaml_ng::de`), so we hand-roll a
+/// state machine that mirrors the YAML 1.2 lexer just closely enough to know
+/// where a `*name` could legally be an alias. The previous scanner toggled
+/// `in_single` on every `'` regardless of position inside a plain scalar,
+/// which broke on `don't, *a *a`: once the toggle flipped, every `*a` on the
+/// rest of the line was silently inside "a quoted scalar" and never counted,
+/// the guard saw zero refs and returned Ok, and both the reference cap and the
+/// document-size cap were bypassed. The fix:
+///
+///   - `'` and `"` only OPEN a quoted scalar when they sit at a value position
+///     (preceded by start-of-input, whitespace, or one of `[`, `{`, `,`, `:`).
+///     A `'` in the middle of a plain scalar (`don't`) stays a plain character.
+///   - Once open, the matching close toggles unconditionally (the close of a
+///     quoted scalar is always at a non-value position).
+///   - `#` outside any quoted scalar starts a comment to end-of-line; `#` in
+///     the middle of a plain scalar (`foo#x`) is a plain character and does
+///     not start a comment.
+///   - `*` is counted only at a value position, followed by an anchor-name
+///     character (`[A-Za-z0-9_-]`), and never inside a quoted scalar or
+///     comment.
+///
+/// Block scalars (`|`, `>`) are not tracked: real compose files do not put
+/// alias references inside a block scalar value, and the file-level guards
+/// (doc-size + expansion-size) still bound the worst case if they do.
 fn count_alias_refs(content: &str) -> usize {
 	let mut count = 0;
-	for line in content.lines() {
-		let mut chars = line.chars().peekable();
-		let (mut in_single, mut in_double) = (false, false);
-		let mut prev: Option<char> = None;
-		while let Some(c) = chars.next() {
-			match c {
-				'\'' if !in_double => in_single = !in_single,
-				'"' if !in_single => in_double = !in_double,
-				'#' if !in_single && !in_double => break,
-				'*' if !in_single && !in_double => {
-					let at_node = matches!(prev, None | Some(' ' | '\t' | '[' | '{' | ',' | ':'));
-					let next_ok = chars
-						.peek()
-						.is_some_and(|n| n.is_ascii_alphanumeric() || *n == '_' || *n == '-');
-					if at_node && next_ok {
-						count += 1;
+	let mut chars = content.chars().peekable();
+	let mut in_single = false;
+	let mut in_double = false;
+	let mut prev: Option<char> = None;
+	while let Some(c) = chars.next() {
+		let at_value_pos = matches!(
+			prev,
+			None | Some(' ' | '\t' | '\n' | '\r' | '[' | '{' | ',' | ':')
+		);
+		match c {
+			'\'' if in_single => {
+				in_single = false;
+			}
+			'\'' if !in_single && at_value_pos => {
+				in_single = true;
+			}
+			'"' if in_double => {
+				in_double = false;
+			}
+			'"' if !in_double && at_value_pos => {
+				in_double = true;
+			}
+			'#' if !in_single && !in_double && at_value_pos => {
+				for c in chars.by_ref() {
+					if c == '\n' {
+						break;
 					}
 				}
-				_ => {}
+				prev = Some('\n');
+				continue;
 			}
-			prev = Some(c);
+			'*' if !in_single && !in_double && at_value_pos => {
+				let next_ok = chars
+					.peek()
+					.is_some_and(|n| n.is_ascii_alphanumeric() || *n == '_' || *n == '-');
+				if next_ok {
+					count += 1;
+				}
+			}
+			_ => {}
 		}
+		prev = Some(c);
 	}
 	count
 }
