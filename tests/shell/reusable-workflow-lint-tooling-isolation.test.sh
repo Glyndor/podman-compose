@@ -265,4 +265,5 @@ check "a workflow that does not parse does not fail the step" "0" "$rc"
 check "but is reported as skipped, so the silence is visible" "1" "$(said "$out" '::warning')"
 
 echo "$pass passed, $fail failed"
+printf 'DONE %s %d %d\n' "${BASH_SOURCE[0]##*/}" "$pass" "$fail"
 [ "$fail" -eq 0 ]
