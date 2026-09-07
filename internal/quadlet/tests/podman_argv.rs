@@ -90,45 +90,40 @@ pub fn assert_argv_has_no_token(unit_contents: &str, needle: &str) {
 	);
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
+#[test]
+fn tokenise_splits_on_whitespace() {
+	assert_eq!(
+		tokenise_podman_argv("--memory=512m --privileged"),
+		vec!["--memory=512m", "--privileged"]
+	);
+}
 
-	#[test]
-	fn tokenise_splits_on_whitespace() {
-		assert_eq!(
-			tokenise_podman_argv("--memory=512m --privileged"),
-			vec!["--memory=512m", "--privileged"]
-		);
-	}
+#[test]
+fn tokenise_respects_double_quotes() {
+	// `--cpuset-cpus="0 --privileged"` is ONE argv element. That is what
+	// the seven-site fix must produce, and what this helper proves.
+	assert_eq!(
+		tokenise_podman_argv(r#"--cpuset-cpus="0 --privileged""#),
+		vec!["--cpuset-cpus=0 --privileged"]
+	);
+}
 
-	#[test]
-	fn tokenise_respects_double_quotes() {
-		// `--cpuset-cpus="0 --privileged"` is ONE argv element. That is what
-		// the seven-site fix must produce, and what this helper proves.
-		assert_eq!(
-			tokenise_podman_argv(r#"--cpuset-cpus="0 --privileged""#),
-			vec!["--cpuset-cpus=0 --privileged"]
-		);
-	}
-
-	#[test]
-	fn multiple_podman_args_lines_concatenate() {
-		// systemd accepts multiple `PodmanArgs=` lines; their values merge.
-		let unit = "\
+#[test]
+fn multiple_podman_args_lines_concatenate() {
+	// systemd accepts multiple `PodmanArgs=` lines; their values merge.
+	let unit = "\
 PodmanArgs=--memory=512m
 PodmanArgs=--cpuset-cpus=0,1
 ";
-		assert_eq!(
-			podman_argv_from_unit(unit),
-			vec!["--memory=512m", "--cpuset-cpus=0,1"]
-		);
-	}
+	assert_eq!(
+		podman_argv_from_unit(unit),
+		vec!["--memory=512m", "--cpuset-cpus=0,1"]
+	);
+}
 
-	#[test]
-	fn comments_are_ignored() {
-		// The podup ownership marker is the first line of every unit.
-		let unit = "# podup-owner: p\nPodmanArgs=--privileged\n";
-		assert_eq!(podman_argv_from_unit(unit), vec!["--privileged"]);
-	}
+#[test]
+fn comments_are_ignored() {
+	// The podup ownership marker is the first line of every unit.
+	let unit = "# podup-owner: p\nPodmanArgs=--privileged\n";
+	assert_eq!(podman_argv_from_unit(unit), vec!["--privileged"]);
 }
