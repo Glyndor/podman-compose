@@ -209,3 +209,77 @@ fn at_cap_buffer_is_accepted() {
 	// buffer strictly greater than MAX_STREAM_BUF.
 	assert!(cap_check(MAX_STREAM_BUF).is_none());
 }
+
+// ---------------------------------------------------------------------------
+// parse_multiplexed accounting (issue #1739)
+// ---------------------------------------------------------------------------
+
+/// Operator-facing regression for #1739: `podup logs` used to truncate
+/// silently around 1 MiB and exit 0. The cap is a safety net against an
+/// unbounded reassembly buffer, not against a cumulative byte count, so a
+/// stream of many small frames that exceeds the cap cumulatively must keep
+/// flowing. The sibling `parse_json_lines` decrements the same counter when
+/// it drains a record; `parse_multiplexed` must do the same when `parse_frame`
+/// drains a frame.
+///
+/// Driving it with a constructed body sidesteps the Podman socket dependency
+/// in the engine integration suite and pins the contract in the file the
+/// parser lives in. The body yields 2048 complete multiplexed frames, each
+/// carrying a 1 KiB stdout payload: 2 MiB of payload in total, well past the
+/// 1 MiB cap. The buggy accounting trips `StreamTooLarge` near the
+/// 1024th frame and the test fails at "no error" before the count and
+/// total byte assertions ever run. A silent truncation at any other size
+/// loses either count or bytes and fails those.
+#[tokio::test]
+async fn parse_multiplexed_handles_cumulative_payloads_above_max_stream_buf() {
+	use bytes::Bytes;
+	use futures_util::{stream, StreamExt};
+	use http_body_util::StreamBody;
+	use hyper::body::Frame;
+
+	const PAYLOAD: usize = 1024;
+	const COUNT: usize = 2048;
+
+	let mut chunks: Vec<Result<Frame<Bytes>, hyper::Error>> = Vec::with_capacity(COUNT);
+	for _ in 0..COUNT {
+		// One stdout frame: 8-byte header (type=1, size=PAYLOAD) + payload.
+		let mut frame = Vec::with_capacity(8 + PAYLOAD);
+		frame.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]);
+		frame.extend_from_slice(&(PAYLOAD as u32).to_be_bytes());
+		frame.resize(8 + PAYLOAD, 0x78);
+		chunks.push(Ok(Frame::data(Bytes::from(frame))));
+	}
+	let source = stream::iter(chunks);
+	let body = StreamBody::new(source);
+
+	let mut parser = super::parse_multiplexed_body(body);
+	let mut received_bytes: usize = 0;
+	let mut received_count: usize = 0;
+	let mut first_err: Option<PodmanError> = None;
+	while let Some(item) = parser.next().await {
+		match item {
+			Ok(LogOutput::StdOut { message }) => {
+				received_bytes += message.len();
+				received_count += 1;
+			}
+			Ok(LogOutput::StdErr { .. }) => {}
+			Err(e) => {
+				first_err = Some(e);
+				break;
+			}
+		}
+	}
+	assert!(
+		first_err.is_none(),
+		"parser must not error on cumulative payload > MAX_STREAM_BUF; got {first_err:?}"
+	);
+	assert_eq!(
+		received_count, COUNT,
+		"parser must surface every frame, not silently truncate (got {received_count}/{COUNT})"
+	);
+	assert_eq!(
+		received_bytes,
+		COUNT * PAYLOAD,
+		"every payload byte must reach the caller, with no truncation (got {received_bytes})"
+	);
+}
