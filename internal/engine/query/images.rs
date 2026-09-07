@@ -73,6 +73,15 @@ impl Engine {
 		}
 		// Collect rows first so quiet/json modes can render without the header.
 		let mut rows: Vec<ImageRow> = Vec::new();
+		// Group services by image reference so several services on one image
+		// cost one inspect, not one per service (#1742). The dedupe map is
+		// built before any network call so the per-reference result can be
+		// reused for every service that pins the same tag. Errors propagate
+		// per-reference, not per-service, so one missing image does not
+		// blank the whole table.
+		let mut by_ref: std::collections::HashMap<String, Vec<String>> =
+			std::collections::HashMap::new();
+		let mut ordered_refs: Vec<String> = Vec::new();
 		for (name, service) in &file.services {
 			if !target_services.is_empty() && !target_services.iter().any(|t| t == name) {
 				continue;
@@ -86,35 +95,49 @@ impl Engine {
 				}
 				(None, None) => continue,
 			};
-			let (repository, tag) = split_repo_tag(&image_ref);
-			let path = format!("{API_PREFIX}/images/{}/json", urlencoded(&image_ref));
+			let entry = by_ref.entry(image_ref.clone()).or_default();
+			if entry.is_empty() {
+				ordered_refs.push(image_ref);
+			}
+			entry.push(name.clone());
+		}
+
+		// One inspect per unique reference. A 404 here means the image is
+		// simply not present locally, so the per-service row below uses an
+		// empty ID rather than silently dropping it, matching docker compose.
+		// Any other error (a connection failure / unreachable socket, or an
+		// HTTP 500) is a real failure that must propagate with a non-zero exit
+		// rather than printing an empty table and exiting 0.
+		for image_ref in &ordered_refs {
+			let names = by_ref.remove(image_ref).unwrap_or_default();
+			let (repository, tag) = split_repo_tag(image_ref);
+			let path = format!("{API_PREFIX}/images/{}/json", urlencoded(image_ref));
 			match self.client.get_json::<ImageInspect>(&path).await {
 				Ok(img) => {
 					let id = img.id.trim_start_matches("sha256:").get(..12).unwrap_or("");
-					rows.push(ImageRow {
-						service: name.clone(),
-						repository,
-						tag,
-						id: id.to_string(),
-						size: img.size,
-						created: img.created,
-					});
+					for name in names {
+						rows.push(ImageRow {
+							service: name,
+							repository: repository.clone(),
+							tag: tag.clone(),
+							id: id.to_string(),
+							size: img.size,
+							created: img.created.clone(),
+						});
+					}
 				}
-				// A 404 means the image is simply not present locally, so list it with
-				// an empty ID rather than silently dropping it, matching docker
-				// compose. Any other error (a connection failure / unreachable
-				// socket, or an HTTP 500) is a real failure that must propagate with
-				// a non-zero exit rather than printing an empty table and exiting 0.
 				Err(e) if e.is_status(404) => {
-					tracing::debug!("images {name}: not present ({e})");
-					rows.push(ImageRow {
-						service: name.clone(),
-						repository,
-						tag,
-						id: String::new(),
-						size: 0,
-						created: String::new(),
-					});
+					for name in names {
+						tracing::debug!("images {name}: not present ({e})");
+						rows.push(ImageRow {
+							service: name,
+							repository: repository.clone(),
+							tag: tag.clone(),
+							id: String::new(),
+							size: 0,
+							created: String::new(),
+						});
+					}
 				}
 				Err(e) => return Err(ComposeError::Podman(e)),
 			}
