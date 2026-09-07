@@ -85,4 +85,5 @@ check "no arguments is a usage error, exit 2" "2" "$rc"
 
 echo
 echo "passed: $pass  failed: $fail"
+printf 'DONE %s %d %d\n' "${BASH_SOURCE[0]##*/}" "$pass" "$fail"
 [ "$fail" -eq 0 ]

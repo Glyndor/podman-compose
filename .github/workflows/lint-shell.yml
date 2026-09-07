@@ -15,6 +15,7 @@ on:
       - ".github/workflows/reusable-shell-ci.yml"
       - ".github/scripts/check-hardening-macos.sh"
       - "tests/shell/check-hardening-macos.test.sh"
+      - "tests/shell/check-suite-completeness.test.sh"
       - ".cargo/**"
       - "Cargo.toml"
   pull_request:
@@ -34,6 +35,7 @@ on:
       - ".github/scripts/check-hardening-macos.sh"
       - "tests/shell/check-hardening-macos.test.sh"
       - "tests/shell/reusable-workflow-lint-tooling-isolation.test.sh"
+      - "tests/shell/check-suite-completeness.test.sh"
       - ".cargo/**"
       - "Cargo.toml"
 
@@ -62,7 +64,16 @@ jobs:
       #
       # branch-health-conclusion.test.sh exercises the conclusion script
       # the branch-health reusable calls.
-      test-command: bash ./tests/shell/locale-pinned.test.sh && bash ./tests/shell/ci-runs-every-test.test.sh && bash ./tests/shell/check-hardening.test.sh && bash ./tests/shell/check-hardening-macos.test.sh && bash ./tests/shell/branch-health-conclusion.test.sh && bash ./tests/shell/reusable-workflow-lint-tooling-isolation.test.sh
+      #
+      # check-suite-completeness.test.sh runs every other shell test and
+      # requires each one to print its sentinel (the DONE line is the last
+      # thing every test writes, after the last check and before the
+      # `[ "$fail" -eq 0 ]` gate). A test that exits early -- a planted
+      # `exit 0`, a `set -e` abort, anything that cuts the run short --
+      # never produces the sentinel, and this check names the file that
+      # did not. Without this check, a truncated test and a passing one
+      # look the same to the chain: exit 0, no count line.
+      test-command: bash ./tests/shell/check-suite-completeness.test.sh ./tests/shell/locale-pinned.test.sh ./tests/shell/ci-runs-every-test.test.sh ./tests/shell/check-hardening.test.sh ./tests/shell/check-hardening-macos.test.sh ./tests/shell/branch-health-conclusion.test.sh ./tests/shell/reusable-workflow-lint-tooling-isolation.test.sh
       # branch-health-conclusion.test.sh pipes API JSON into the
       # conclusion script and asserts exit codes. jq is the tool that
       # turns the response into shell-readable lines, and it is not in
