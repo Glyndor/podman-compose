@@ -142,6 +142,9 @@ pub(super) fn container_rm_path(name: &str, remove_volumes: bool) -> String {
 #[cfg(test)]
 mod drop_recheck_tests;
 #[cfg(test)]
+#[path = "scale_request_tests.rs"]
+mod scale_request_tests;
+#[cfg(test)]
 mod scale_tests;
 #[cfg(test)]
 mod teardown_tests;
