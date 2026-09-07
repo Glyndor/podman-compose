@@ -97,10 +97,13 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 download() {
 	# download <url> <dest>
 	#
-	# --proto '=https' only restricts the initial URL: GitHub release assets
-	# redirect to its CDN, and that redirect is governed by --proto-redir, not
-	# --proto, so it needs its own pin - this is the fix that actually closes
-	# the downgrade (an unpinned redirect could otherwise fall back to http).
+	# --proto '=https' denies http, and that denial carries over to redirects:
+	# curl's own manual says protocols denied by --proto are not overridden by
+	# --proto-redir. Measured on curl 8.18.0 and 7.81.0 against a local https
+	# origin answering 302 to an http URL: the redirect is refused with or
+	# without --proto-redir. The pin stays as a second lock, because the bare
+	# form --proto https adds rather than restricts, and under that spelling
+	# --proto-redir is the only thing holding the redirect to https.
 	# --max-filesize caps the response at 200 MB, but only on curl that honours
 	# it: it aborts mid-stream on curl >= 8.4.0, or on any curl version when the
 	# server sends Content-Length. It does NOT bound the size on an older curl
