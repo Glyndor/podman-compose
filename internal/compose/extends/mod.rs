@@ -76,12 +76,28 @@ fn bump_parse_file_inner_counter() {
 #[derive(Default)]
 struct ExtendsCache {
 	entries: HashMap<PathBuf, ComposeFile>,
+	/// Paths currently being resolved. `entries` is populated only after a
+	/// file's own chains resolve, so it cannot answer "is this path on the
+	/// current path" and a cycle across files would recurse forever.
+	in_progress: HashSet<PathBuf>,
 }
 
 impl ExtendsCache {
-	fn get_or_load(&mut self, abs: &Path, base_dir: &Path) -> Result<ComposeFile> {
+	fn get_or_load(&mut self, abs: &Path, base_dir: &Path, depth: usize) -> Result<ComposeFile> {
 		if let Some(cached) = self.entries.get(abs) {
 			return Ok(cached.clone());
+		}
+		// An entry is inserted only after its own `extends:` chains resolve,
+		// so a file that is still being resolved is absent from `entries`
+		// and a cycle across files would recurse until the stack ran out.
+		// `in_progress` is the marker the cache alone cannot provide: it
+		// says "this path is on the current resolution path", which is what
+		// the visited set does for in-file chains.
+		if !self.in_progress.insert(abs.to_path_buf()) {
+			return Err(ComposeError::Extends(format!(
+				"circular extends.file: {} is already being resolved",
+				abs.display()
+			)));
 		}
 		#[cfg(test)]
 		bump_parse_file_inner_counter();
@@ -95,13 +111,19 @@ impl ExtendsCache {
 		// service gives a fully-merged value. The cached entry is the
 		// resolved file; per-service callers still do their own merges
 		// of the base into the child.
-		resolve_all_extends_with_cache(&mut other, &dir, self)?;
+		// The caller's depth travels with the recursion. Passing 0 here
+		// would restart the count in every external file, so a chain of
+		// more than MAX_EXTENDS_DEPTH files never reached the limit and
+		// overflowed the stack instead.
+		resolve_all_extends_with_cache(&mut other, &dir, self, depth)?;
 		if self.entries.len() >= MAX_EXTENDS_CACHE_ENTRIES && !self.entries.contains_key(abs) {
+			self.in_progress.remove(abs);
 			return Err(ComposeError::Extends(format!(
 				"extends.file cache exceeded {MAX_EXTENDS_CACHE_ENTRIES} distinct files; \
 				 refactor the project so fewer services point at distinct external files"
 			)));
 		}
+		self.in_progress.remove(abs);
 		let cloned = other.clone();
 		self.entries.insert(abs.to_path_buf(), other);
 		Ok(cloned)
@@ -126,18 +148,19 @@ pub(super) fn resolve_extends_same_file(file: &mut ComposeFile) -> Result<()> {
 /// path; see [`ExtendsCache`].
 pub(super) fn resolve_all_extends(file: &mut ComposeFile, base_dir: &Path) -> Result<()> {
 	let mut cache = ExtendsCache::default();
-	resolve_all_extends_with_cache(file, base_dir, &mut cache)
+	resolve_all_extends_with_cache(file, base_dir, &mut cache, 0)
 }
 
 fn resolve_all_extends_with_cache(
 	file: &mut ComposeFile,
 	base_dir: &Path,
 	cache: &mut ExtendsCache,
+	depth: usize,
 ) -> Result<()> {
 	let names: Vec<String> = file.services.keys().cloned().collect();
 	for name in names {
 		let mut visited: HashSet<String> = HashSet::new();
-		resolve_one_extends(file, &name, base_dir, &mut visited, 0, cache)?;
+		resolve_one_extends(file, &name, base_dir, &mut visited, depth, cache)?;
 	}
 	Ok(())
 }
@@ -233,7 +256,7 @@ fn resolve_one_extends(
 		// service gets a clone. Without the cache, twenty services
 		// pointing at the same file would parse it twenty times and
 		// peak at 5.8 GB before the process aborts (#1746).
-		let mut other = cache.get_or_load(&abs, base_dir)?;
+		let mut other = cache.get_or_load(&abs, base_dir, depth + 1)?;
 		let ext_dir = abs.parent().unwrap_or(base_dir);
 		let mut nested_visited: HashSet<String> = HashSet::new();
 		resolve_one_extends(
