@@ -26,15 +26,24 @@ fn run_bridge(new: Option<&str>, legacy: Option<&str>) -> Option<String> {
 	after
 }
 
+// The three cases live in ONE test on purpose. They mutate the process
+// environment, and `cargo test` runs test functions on parallel threads
+// inside a single process, so as separate tests they race for
+// `PODUP_LIBPOD_POOL` and the loser reads the winner's value. That is
+// what `rust / Test (windows-latest)` caught here: the same three passed
+// on Linux, where the scheduling happened to interleave differently. One
+// test function is one thread, and the shared resource is then not
+// shared.
 #[test]
-fn bridge_does_nothing_when_neither_var_is_set() {
+fn the_bridge_honours_precedence_across_the_three_env_shapes() {
 	// The early-return path: with neither env present the helper is
 	// a no-op and `PODUP_LIBPOD_POOL` stays unset after the call.
-	assert_eq!(run_bridge(None, None), None);
-}
+	assert_eq!(
+		run_bridge(None, None),
+		None,
+		"neither var set must leave the new name unset",
+	);
 
-#[test]
-fn bridge_copies_legacy_into_the_new_var_when_new_is_unset() {
 	// The contract a script that exports only `PODUP_LIBCOD_POOL`
 	// depends on: after the call the new var reads the old value.
 	assert_eq!(
@@ -42,10 +51,7 @@ fn bridge_copies_legacy_into_the_new_var_when_new_is_unset() {
 		Some("4".to_string()),
 		"legacy value must be visible to clap under the new name",
 	);
-}
 
-#[test]
-fn bridge_leaves_an_explicit_new_var_untouched() {
 	// Set precedence: a script that exports BOTH wins when its new-var
 	// value is the explicit one; the legacy value must not overwrite.
 	assert_eq!(
