@@ -1,3 +1,15 @@
+podup (5.9.2) unstable; urgency=medium
+
+  * `audit` stops reporting `unpinned_image` against a tag the service builds
+    itself: a `build:` section makes the tag a local output, not an unpinned
+    pull, so the finding was noise on every compose file that builds.
+  * `audit` matches `secret_in_environment` on name segments rather than
+    substrings, so a variable whose name merely contains a flagged word, for
+    example `PASSWORD_FILE_PATH` alongside `NOT_A_PASSWORD_HINT`, is no longer
+    reported on the substring alone.
+
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Mon, 07 Sep 2026 00:05:00 -0500
+
 podup (5.9.1) unstable; urgency=medium
 
   * `up --build` draws one board: the image rows sit at the top and are
