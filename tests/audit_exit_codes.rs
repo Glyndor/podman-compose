@@ -41,6 +41,11 @@ fn run(args: &[&str]) -> Output {
 	// treats as global configuration; `PATH` and the locale stay so the
 	// process can locate shared libraries and render messages.
 	for key in [
+		"PODUP_LIBPOD_POOL",
+		// `PODUP_LIBCOD_POOL` is the legacy typo'd spelling; the runtime
+		// still reads it as a fallback so a developer's exported value
+		// would otherwise leak into the spawned binary and silently
+		// override its default pool size.
 		"PODUP_LIBCOD_POOL",
 		"PODMAN_SOCKET",
 		"DOCKER_HOST",

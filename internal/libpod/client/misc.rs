@@ -20,7 +20,7 @@ impl Client {
 			.and_then(|v| v.to_str().ok())
 			.unwrap_or_default()
 			.to_owned();
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		Self::check_status(status, &body)?;
 		if !meets_minimum(&reported) {
 			return Err(super::PodmanError::IncompatibleApiVersion { reported });
@@ -34,21 +34,25 @@ impl Client {
 
 		let req = Self::build_request(hyper::Method::HEAD, path, full(Bytes::new()), None)?;
 		let resp = self.send(req, Some(READ_TIMEOUT)).await?;
-		let status = resp.status();
-		if status == StatusCode::NOT_FOUND {
-			return Ok(None);
-		}
-		let stat = resp
+		// Drain the body on every status (including 404) so the pool guard
+		// is released only after the response is fully consumed. Short-
+		// circuiting before the read would let the connection return to
+		// the idle queue while the daemon is still framing a body, and
+		// the next acquirer would see interleaved bytes (#1740). For
+		// `HEAD` the body is empty; for a successful 200 it carries the
+		// stat the headers already described. Either way, reading it is
+		// the connection-cleanup step.
+		let stat_header = resp
 			.headers()
 			.get("X-Docker-Container-Path-Stat")
 			.and_then(|v| v.to_str().ok())
 			.map(str::to_string);
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		if status == StatusCode::NOT_FOUND {
 			return Ok(None);
 		}
 		Self::check_status(status, &body)?;
-		let Some(stat) = stat else {
+		let Some(stat) = stat_header else {
 			return Ok(Some(PathStat::default()));
 		};
 		let json = base64::engine::general_purpose::STANDARD
