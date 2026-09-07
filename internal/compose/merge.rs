@@ -304,13 +304,23 @@ fn count_alias_refs(content: &str) -> usize {
 			'\'' if in_single => {
 				in_single = false;
 			}
-			'\'' if !in_single && at_value_pos => {
+			// `!in_double` is the half this was missing. Without it a `'`
+			// inside a double-quoted scalar opened single-quote state, the
+			// closing `"` cleared `in_double` and left `in_single` set for
+			// the rest of the document, and every `*alias` after it was
+			// counted as quoted text. `count_alias_refs` then returned 0,
+			// the `refs == 0` early return fired, and BOTH caps were
+			// skipped. Two files 18 bytes apart: without the poisoning
+			// line the document is refused, with it accepted.
+			'\'' if !in_single && !in_double && at_value_pos => {
 				in_single = true;
 			}
 			'"' if in_double => {
 				in_double = false;
 			}
-			'"' if !in_double && at_value_pos => {
+			// Symmetrical: a `"` inside a single-quoted scalar is ordinary
+			// text and must not open double-quote state either.
+			'"' if !in_double && !in_single && at_value_pos => {
 				in_double = true;
 			}
 			'#' if !in_single && !in_double && at_value_pos => {
