@@ -306,7 +306,18 @@ impl Engine {
 			entry_name,
 			dest_dir,
 		} = plan_sync_placement(root, changed, target);
-		let tar_bytes = build_sync_tar(changed, Path::new(&entry_name))?;
+		// `build_sync_tar` walks the changed directory (possibly many entries)
+		// and runs the result through a synchronous flate2+gzip encoder. On an
+		// async runtime, doing that on the calling task would block the executor
+		// for the duration; a multi-megabyte tree turns a one-line edit into a
+		// freeze that the rest of `watch`'s I/O cannot escape. Hand it to the
+		// blocking pool, like `cp`/`build` already do for their tar packing.
+		let changed_buf = changed.to_path_buf();
+		let entry_name_buf = PathBuf::from(&entry_name);
+		let tar_bytes =
+			tokio::task::spawn_blocking(move || build_sync_tar(&changed_buf, &entry_name_buf))
+				.await
+				.map_err(|e| ComposeError::Build(format!("watch sync tar: {e}")))??;
 
 		// docker compose watch creates the sync target directory when it is
 		// missing; match that so a sync to a not-yet-existing path works instead

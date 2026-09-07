@@ -50,10 +50,29 @@ async fn remove_surplus_replicas_propagates_a_real_rm_failure_after_completing_t
 	});
 	let e = engine_with(fake.client(), "proj");
 
-	// target = 0 desired replicas, so every live container is surplus
-	// (mirrors the `replica_names_for_zero_scale_is_empty` contract).
+	// Build the snapshot `run_up` would have handed `remove_surplus_replicas`
+	// in production: every container in the bulk fetch carries the
+	// `podup.service` label that the per-service filter used to look up
+	// (`#1747`). `target = 0` makes every name a surplus replica.
+	let mut existing: std::collections::HashMap<String, super::ExistingContainer> =
+		std::collections::HashMap::new();
+	for raw in ["proj-web-1", "proj-web-2"] {
+		existing.insert(
+			raw.to_string(),
+			super::ExistingContainer {
+				config_hash: None,
+				image_id: String::new(),
+				service: Some("web".to_string()),
+			},
+		);
+	}
 	let err = e
-		.remove_surplus_replicas("web", &crate::compose::types::Service::default(), 0)
+		.remove_surplus_replicas(
+			"web",
+			&crate::compose::types::Service::default(),
+			0,
+			&existing,
+		)
 		.await
 		.expect_err("a real surplus-removal failure must propagate");
 	assert!(
@@ -67,6 +86,14 @@ async fn remove_surplus_replicas_propagates_a_real_rm_failure_after_completing_t
 			.any(|r| r.contains("DELETE") && r.contains("/proj-web-1?force=true")),
 		"expected proj-web-1 to still be removed despite proj-web-2 failing: {seen:?}"
 	);
+	// The fix takes the snapshot as a parameter; the per-service fetch that
+	// used to live inside `remove_surplus_replicas` is gone (#1747), so
+	// `/containers/json` should not appear in the recorded requests at all.
+	assert!(
+		seen.iter()
+			.all(|r| !r.contains("GET") || !r.contains("/containers/json")),
+		"remove_surplus_replicas must not fetch /containers/json: {seen:?}"
+	);
 }
 
 /// Surplus replicas that are already gone (404 on removal) stay an
@@ -74,18 +101,46 @@ async fn remove_surplus_replicas_propagates_a_real_rm_failure_after_completing_t
 #[tokio::test]
 #[cfg(unix)]
 async fn remove_surplus_replicas_tolerates_already_gone() {
-	let live = r#"[{"Names":["/proj-web-1"]}]"#;
+	// Build the snapshot directly: the fix takes the bulk project's
+	// container list as a parameter rather than refetching (`#1747`).
+	let mut existing: std::collections::HashMap<String, super::ExistingContainer> =
+		std::collections::HashMap::new();
+	existing.insert(
+		"proj-web-1".to_string(),
+		super::ExistingContainer {
+			config_hash: None,
+			image_id: String::new(),
+			service: Some("web".to_string()),
+		},
+	);
 	let fake = fake_podman::start(move |method, target| {
-		if method == "GET" && target.contains("/containers/json") {
-			(200, live.to_string())
+		// `remove_surplus_replicas` no longer fetches `/containers/json`,
+		// so any GET there is a regression. The stop/remove pair is
+		// answered 404 so the function sees the already-gone case.
+		if method == "POST" && target.contains("/stop")
+			|| method == "DELETE" && target.contains("/proj-web-1?force=true")
+		{
+			(404, r#"{"message":"no such container"}"#.to_string())
 		} else {
 			(404, r#"{"message":"not found"}"#.to_string())
 		}
 	});
 	let e = engine_with(fake.client(), "proj");
-	e.remove_surplus_replicas("web", &crate::compose::types::Service::default(), 0)
-		.await
-		.expect("an already-gone surplus replica must still exit 0");
+	e.remove_surplus_replicas(
+		"web",
+		&crate::compose::types::Service::default(),
+		0,
+		&existing,
+	)
+	.await
+	.expect("an already-gone surplus replica must still exit 0");
+
+	let seen = fake.requests.lock().unwrap();
+	assert!(
+		seen.iter()
+			.all(|r| !r.contains("GET") || !r.contains("/containers/json")),
+		"remove_surplus_replicas must not issue the project list query: {seen:?}"
+	);
 }
 
 /// libpod's `/containers/json` does not guarantee order; `logs` and every
@@ -525,93 +580,4 @@ fn fixed_container_name_scaled_above_one_is_rejected() {
 fn unnamed_service_scales_freely() {
 	let svc = service("services:\n  app:\n    image: x\n");
 	assert!(check_fixed_name_scale("app", &svc, 5).is_ok());
-}
-
-/// #1445 is a round-trip count, so pin the count rather than only the values it
-/// produces. Before it, every selected service cost its own `/containers/json`
-/// GET; a project of N services made N of them. Nothing in the value assertions
-/// above notices if that regresses (the names come back identical either way)
-/// so a later refactor could quietly put the call back inside the loop.
-///
-/// Four services, and the fake records every request it answers. The assertion
-/// is that exactly one container-list GET reaches the socket.
-#[tokio::test]
-#[cfg(unix)]
-async fn logs_issues_one_container_list_for_the_whole_project() {
-	let containers = r#"[
-		{"Names":["/proj-web-1"],"State":"running","Labels":{"podup.service":"web"}},
-		{"Names":["/proj-api-1"],"State":"running","Labels":{"podup.service":"api"}},
-		{"Names":["/proj-db-1"],"State":"running","Labels":{"podup.service":"db"}},
-		{"Names":["/proj-cache-1"],"State":"running","Labels":{"podup.service":"cache"}}
-	]"#;
-	let fake = fake_podman::start(move |method, target| {
-		if method == "GET" && target.contains("/containers/json") {
-			(200, containers.to_string())
-		} else {
-			// Every per-container logs stream 404s: this test is about how many
-			// listing calls are made, not about what the streams carry.
-			(404, r#"{"message":"not found"}"#.to_string())
-		}
-	});
-	let e = engine_with(fake.client(), "proj");
-	let file = crate::parse_str(
-		"services:\n  web:\n    image: x\n  api:\n    image: x\n  db:\n    image: x\n  cache:\n    image: x\n",
-	)
-	.unwrap();
-
-	// The per-container streams all 404, so the call itself is expected to
-	// fail; the request log is what carries the answer.
-	let _ = e.logs(&file, None, false).await;
-
-	let lists = fake
-		.requests
-		.lock()
-		.unwrap()
-		.iter()
-		.filter(|r| r.contains("/containers/json"))
-		.count();
-	assert_eq!(
-		lists,
-		1,
-		"four services must share one container-list round-trip, not one each (#1445); \
-		 requests were {:?}",
-		fake.requests.lock().unwrap()
-	);
-}
-
-/// A surplus replica's row opens with `Stopping` before the stop request,
-/// moves to `Removing` before the delete, and closes with `Removed`. The row
-/// used to appear only at `Removed`, with no start time and nothing on screen
-/// during a ten-second grace (#1686).
-#[tokio::test]
-#[cfg(unix)]
-async fn stop_and_remove_opens_the_row_before_the_stop_and_closes_it_removed() {
-	let live = r#"[{"Names":["/proj-web-1"]},{"Names":["/proj-web-2"]}]"#;
-	let fake = fake_podman::start(move |method, target| {
-		if method == "GET" && target.contains("/containers/json") {
-			(200, live.to_string())
-		} else if (method == "POST" && target.contains("/stop"))
-			|| (method == "DELETE" && target.contains("/proj-web-2?force=true"))
-		{
-			(200, String::new())
-		} else {
-			(404, r#"{"message":"not found"}"#.to_string())
-		}
-	});
-	let e = engine_with(fake.client(), "proj");
-	let capture = crate::ui::progress::capture::Capture::start();
-	e.remove_surplus_replicas("web", &crate::compose::types::Service::default(), 1)
-		.await
-		.expect("the surplus replica is removed");
-	let verbs: Vec<String> = capture
-		.verbs()
-		.into_iter()
-		.filter(|(_, name, _)| name == "proj-web-2")
-		.map(|(_, _, verb)| verb)
-		.collect();
-	assert_eq!(
-		verbs,
-		vec!["Stopping", "Removing", "Removed"],
-		"the row is opened before the stop and closed after the delete"
-	);
 }

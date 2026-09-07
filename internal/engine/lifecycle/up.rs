@@ -148,12 +148,14 @@ impl Engine {
 					.map_err(crate::error::ComposeError::Podman)?;
 				for entry in entries {
 					let config_hash = entry.labels.get("podup.config-hash").cloned();
+					let service = entry.labels.get("podup.service").cloned();
 					for raw in entry.names {
 						existing.insert(
 							raw.trim_start_matches('/').to_string(),
 							super::ExistingContainer {
 								config_hash: config_hash.clone(),
 								image_id: entry.image_id.clone(),
+								service: service.clone(),
 							},
 						);
 					}
@@ -286,7 +288,15 @@ impl Engine {
 						continue;
 					}
 				}
-				self.remove_surplus_replicas(svc, service, target).await?;
+				// Pass the bulk snapshot fetched at the top of `run_up`. The
+				// filtered list is rebuilt from `existing` here rather than
+				// issuing a per-service `/containers/json` against the
+				// already-fetched data set (#1747): the bulk list is the same
+				// shape, has the names we want, and avoiding one round trip per
+				// `--scale` override turns a 10-service reconciliation into one
+				// rather than 11 GETs.
+				self.remove_surplus_replicas(svc, service, target, &existing)
+					.await?;
 			}
 
 			Ok(())
