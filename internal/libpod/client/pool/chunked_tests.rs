@@ -14,12 +14,14 @@ use tokio::net::UnixListener;
 
 /// Fake libpod server that replies with `Transfer-Encoding: chunked` so the
 /// body length is not declared up front in the headers. The pool's existing
-/// harness (`CountingServer`) uses `Content-Length`, which is exactly the
-/// framing where releasing the guard between `send` and `read_body` is
-/// harmless: the body is delimited, the wire is never shared between two
-/// outstanding requests. With chunked encoding the wire IS shared - every
-/// chunk-size + chunk-body pair is a delimiter - so the bug surfaces here and
-/// only here. Headers go out immediately so the client can parse them and
+/// harness (`CountingServer`) uses `Content-Length` and returns the whole
+/// body at once, so its responses are never in flight when the guard is
+/// released. That is a property of the harness, not of the framing: a
+/// declared length large enough or delivered slowly enough leaves a body in
+/// flight just as a chunked one does. What this fixture adds is a body that
+/// is deliberately still arriving when `send` returns, which is the
+/// condition the defect needs. Headers go out immediately so the client can
+/// parse them and
 /// `send` can return; the body follows after a short delay so concurrent
 /// callers have time to race for the connection.
 struct ChunkedServer {
@@ -133,8 +135,8 @@ impl Drop for ChunkedServer {
 /// between `send` and `read_body`, the next acquirer can write a new request
 /// to the same socket while the first body is still arriving; the bytes
 /// interleave and the JSON parser sees garbage (#1740). The existing harness
-/// could not see this because every response was `Content-Length`-delimited,
-/// which made releasing early harmless.
+/// could not see this because it answered in one piece, so nothing was ever
+/// in flight at the moment the guard was released.
 ///
 /// Pool cap = 1 forces every concurrent caller through the same socket; the
 /// race is the point. 8 tasks x 20 requests = 160 round-trips that contend
@@ -152,10 +154,16 @@ async fn pool_reuse_does_not_corrupt_chunked_responses() {
 		let c = client.clone();
 		handles.push(tokio::spawn(async move {
 			for _ in 0..20 {
-				let resp: serde_json::Value = c
-					.get_json("/libpod/_ping")
-					.await
-					.expect("chunked body corrupted: parse failed");
+				let resp: serde_json::Value =
+					c.get_json("/libpod/_ping").await.unwrap_or_else(|e| {
+						// Not labelled "corrupted": this arm catches ANY
+						// error, and a hyper dispatch cancellation
+						// (`Canceled, "connection was not ready"`, #1758)
+						// arrives here too. Naming the cause in the message
+						// would make the test a source of false diagnosis,
+						// which is what the previous wording did.
+						panic!("request failed against the chunked fixture: {e}")
+					});
 				assert_eq!(
 					resp,
 					serde_json::json!({"ok": true}),
@@ -167,13 +175,19 @@ async fn pool_reuse_does_not_corrupt_chunked_responses() {
 	for h in handles {
 		h.await.unwrap();
 	}
-	// At least one connection was opened and reused; without that, the
-	// test did not actually exercise the pool's keep-alive path. The
-	// accepted count is otherwise non-deterministic: tasks that find the
-	// single tracked connection busy open transient ones, each of which
-	// the listener counts separately.
+	// Reuse, not merely "a connection happened". 160 round-trips through a
+	// cap-of-one pool must not open 160 sockets; a client that never reused
+	// anything would. The previous assertion here was `accepted() >= 1`,
+	// which a client opening a fresh connection per call also satisfies, so
+	// it did not hold down the property its comment claimed.
+	//
+	// The exact count is non-deterministic: a task that finds the single
+	// tracked connection busy opens a transient one, and the listener counts
+	// each separately. The bound is what is deterministic: strictly fewer
+	// sockets than requests means at least one was reused.
+	let accepted = server.accepted();
 	assert!(
-		server.accepted() >= 1,
-		"the pool should have opened at least one connection"
+		(1..160).contains(&accepted),
+		"the pool must reuse: {accepted} sockets accepted for 160 requests"
 	);
 }
