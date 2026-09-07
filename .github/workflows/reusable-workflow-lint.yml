@@ -16,6 +16,119 @@ name: Workflow lint (reusable)
 # pinned version (shell-ci.yml). Installing the same pinned shellcheck here
 # and pointing actionlint at it with -shellcheck keeps that pass reproducible
 # too.
+#
+# ===========================================================================
+# Release-path workflows and the ruleset (#1745)
+# ===========================================================================
+#
+# The caller-if and caller-with-defaults steps in this file both reference a
+# static map of "required" reusables (REQUIRED_REUSABLES) and a static map
+# of "required" direct emitters (DIRECT_EMITTER_NAMES). Those maps name the
+# checks the ruleset requires on `main` and `develop`. Five reusables and
+# one direct emitter are wired. The release path -- the workflows that build,
+# sign, attest and verify the artifacts that publish as a GitHub release --
+# is not on that list. That is the deliberate state at the time of this
+# writing, and the rationale is what follows.
+#
+# The rule that says "do not promote a check that has never failed for the
+# right reason" is in `~/.claude/CLAUDE.md`:
+#
+#   A gate that never has failed is not tested. Before marking a check as
+#   required, provoke the failure on purpose and confirm it goes red for
+#   the right reason.
+#
+# The release-path workflows are not required today because none of them
+# has been demonstrated to fail at the gate they would defend. Promoting
+# any of them would replace "no failure observed" with "no failure
+# possible": a required check whose name matches a workflow that runs
+# green regardless of what the pull request changes is a green check
+# that blocks the merge. The cost is real, the value is zero, and a
+# future operator looking at this file is the right place to be told so.
+#
+# The release-path workflows that touch a PR, what each would have to
+# demonstrate to become a required check, and where it would sit:
+#
+#   asset-contract.yml:check
+#     Calls reusable-installer-contract.yml. Today this fires once per
+#     PR that touches install.sh, install.ps1, release.yml, or any of
+#     the release-script paths. To be promoted: provoke a deliberate
+#     drift between install.sh's ARTIFACT template and release.yml's
+#     asset: matrix (rename one, do not rename the other, push a PR
+#     that touches only install.sh and confirm this job exits red with
+#     a message that names the missing asset). The job's name would
+#     pin to its current `check` (`release / install.sh <-> release
+#     asset names` or similar; the reusable's emit map below would
+#     carry the value).
+#
+#   asset-contract.yml:shell-signing-fixture
+#     Runs the per-asset .sig loop fixture in Linux bash. To be
+#     promoted: delete one of the seed signature files in the fixture
+#     tree, push a PR, confirm the fixture's loop falls through to the
+#     missing-file branch and exits red with the L7 class of error
+#     pinned in tests/fixtures/releases/test.sh. Pin the job's name
+#     once the failure is reproducible.
+#
+#   asset-contract.yml:powershell-signing-fixture
+#     Same fixture in PowerShell, on windows-latest. The acceptance
+#     is the same (a missing .sig reaches the L7 branch and the job
+#     exits red under pwsh). Both fixtures are tested on
+#     windows-latest; either promotion would require a windows-latest
+#     failure to be reproducible there.
+#
+#   asset-contract.yml:shell-version-self-test
+#     Drives verify_version_self_test in install.sh against a set of
+#     .cmd stubs (matching, older, -dev suffix, garbage, non-zero
+#     exit, missing file). To be promoted: edit the fixture to skip
+#     one of the cases and confirm the job reads red. Same shape for
+#     powershell-version-self-test, on windows-latest.
+#
+#   asset-contract.yml:rust-self-test-reference
+#     `cargo test --locked -p podup install::tests::self_test` at the
+#     configured MSRV, mirroring the shell installer path. To be
+#     promoted: disable a branch of `self_test`, run the job, confirm
+#     the rust test goes red. The job's name is the cargo test's
+#     harness path; if it moves, the ruleset has to be rewritten.
+#
+#   asset-contract.yml:shell-proto-redir
+#     Stands up a local https listener that 302s to an http listener,
+#     sources install.sh's helpers, runs the download, and asserts
+#     the install refused. The case the fixture exercises today is
+#     `--proto-redir` catching the downgrade. To be promoted: remove
+#     the `--proto-redir` flag from the install helper, run the
+#     fixture, confirm it goes red on the install side rather than
+#     somewhere later.
+#
+# `release.yml`'s jobs (verify, build, build-deb, sbom, release) are
+# not on this list at all: the workflow triggers on tag push, not on
+# pull_request, so its jobs cannot be required status checks for PRs.
+# They cannot be promoted because promotion means "matched by name
+# against a ruleset that gates merges", and a merge gate is a PR gate.
+# If at some future point the release path needs defence the day a tag
+# is cut, the rule that would carry it is a tag-protection rule rather
+# than a branch-protection rule, and the candidate fixtures above
+# (asset-contract.yml's six jobs) are what would do that defence on
+# the PR that produced the tag.
+#
+# All six candidates live in asset-contract.yml, which is already in
+# the ruleset's pull-request filter, so the path filter does not need
+# to move for any promotion. What each promotion needs is the
+# demonstrate-the-failure step above, run against a deliberately-broken
+# fixture, with the resulting red PR carrying the message so a future
+# operator can see what the check catches. After the demonstration
+# the static map REQUIRED_REUSABLES (or DIRECT_EMITTER_NAMES) grows
+# by one entry, the ruleset on `main` (and `develop`, where the ruleset
+# duplicates the `main` rule) gains the new check, and the failures
+# that would have escaped before that PR appear in the ruleset's red
+# list from then on.
+#
+# The lint itself is the wrong place to verify the demonstration. A
+# step that says "every release-path candidate has been demonstrated"
+# is a step that requires the demonstration to have run, and the
+# demonstration is by construction a thing that happened once in the
+# past. A static check would be lying. The actual verification is the
+# PR that first landed the failure-mode fixture, the comparison of the
+# red log against the expected reason, and the follow-up that turns
+# the candidate into a required check.
 
 on:
   workflow_call:
@@ -126,13 +239,36 @@ jobs:
           # present on the line, exempts that install: the only case where
           # the resolved tree is fixed is pip with --require-hashes, which
           # reads the lockfile verbatim and installs exactly what it lists.
+          #
+          # Property-based list (every entry is a known way to pull code
+          # from outside this org and have it run on the runner; the
+          # literal-string list this replaced caught the obvious shapes
+          # and missed synonyms like `cargo binstall`, `pip3 install`,
+          # `python -m pip install`, `python3 -m pip install`, `pipx
+          # install`, and `dotnet tool install`). The release signing
+          # job holds `GLYNDOR_RELEASE_ED25519_KEY` and runs `pip install
+          # --quiet --require-hashes -r .github/scripts/sign-requirements
+          # .txt`, which executes the cryptography package's native build
+          # script; hashed, so it is exempt, and the build script runs.
+          # The release target's own build-script count is 14 (cargo
+          # metadata --filter-platform x86_64-unknown-linux-gnu),
+          # confirmed against 15 directories in target/release/build (one
+          # of which is podup's own build script); the whole lockfile
+          # graph with dev-deps is 33, and an acceptance built on 33 would
+          # exempt crates the release never builds.
           INSTALL_PATTERNS = (
               ("cargo install",   None),
+              ("cargo binstall",  None),
               ("go install",      None),
               ("gem install",     None),
               ("npm install -g",  None),
               ("npm i -g",        None),
+              ("dotnet tool install", None),
               ("pip install",     "--require-hashes"),
+              ("pip3 install",    "--require-hashes"),
+              ("python -m pip install",  "--require-hashes"),
+              ("python3 -m pip install", "--require-hashes"),
+              ("pipx install",    None),
           )
 
 
@@ -730,3 +866,43 @@ jobs:
           if __name__ == "__main__":
               main()
           PY
+
+      # The caller-if step above refuses a job-level `if:` that can
+      # skip a required job. The same defect repeats through a
+      # different lever: a `with:` value a pull request can change that
+      # alters what a required job does. The ruleset matches on the
+      # CHECK NAME GitHub reports, not on the inputs the job received;
+      # `coverage-threshold: 76` -> 0 keeps `rust / Coverage` as the
+      # name while lowering the gate below any failing build, and the
+      # same shape holds for `msrv: 1.85` -> '', `extra-test-os:
+      # '["macos-latest", ...]'` -> '[]', `doc-warnings: true` ->
+      # false, `extensions: 'rs go ... yml yaml'` -> a subset,
+      # `working-directory: '.'` -> 'src'. Each is a different lever
+      # for the same outcome the ruleset cannot see.
+      #
+      # The fix is to compare each caller's `with:` value to the
+      # reusable's declared `inputs.X.default`. A value that matches
+      # the default is invisible to the runner (it would have been
+      # applied as the default anyway), so the ruleset sees the same
+      # job either way. A value that DIFFERS from the default is a
+      # pull request changing what a required job does; the step
+      # refuses it with a message that names the file, the job, the
+      # input key, the supplied value, and the declared default.
+      #
+      # The reusable is the place where the value the ruleset
+      # assumes is canonicalised. A pull request that changes a
+      # default is reviewed on the reusable's diff, where the
+      # ruleset's check name is fixed by definition (the reusable
+      # emits the same `name:` either way), so the change has to be
+      # deliberate and visible.
+      #
+      # Lives in .github/scripts/check-caller-with-defaults.py because
+      # the inline heredoc would push this file over the line-limit
+      # gate's 500-line hard limit, and the same shape as caller-if
+      # above (static map, direct-emitter list, `reusable-*` filter)
+      # already lives next to it in this file. An unknown `with:` key
+      # (the reusable does not declare it) is silently allowed: GitHub
+      # itself ignores it, and the ruleset does not gate on it.
+      - name: A caller of a required check must carry `with:` equal to the reusable's declared default
+        run: |
+          python3 .github/scripts/check-caller-with-defaults.py
