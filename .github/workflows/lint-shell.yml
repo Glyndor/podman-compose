@@ -57,7 +57,18 @@ jobs:
       # clang/otool (Linux, most non-macOS); the workflow only invokes it,
       # the script only runs the controls where the tools exist, and
       # ci-runs-every-test.test.sh still sees the file as wired.
-      test-command: bash ./tests/shell/locale-pinned.test.sh && bash ./tests/shell/ci-runs-every-test.test.sh && bash ./tests/shell/check-hardening.test.sh && bash ./tests/shell/check-hardening-macos.test.sh
+      #
+      # branch-health-conclusion.test.sh exercises the conclusion script
+      # the branch-health reusable calls.
+      test-command: bash ./tests/shell/locale-pinned.test.sh && bash ./tests/shell/ci-runs-every-test.test.sh && bash ./tests/shell/check-hardening.test.sh && bash ./tests/shell/check-hardening-macos.test.sh && bash ./tests/shell/branch-health-conclusion.test.sh
+      # branch-health-conclusion.test.sh pipes API JSON into the
+      # conclusion script and asserts exit codes. jq is the tool that
+      # turns the response into shell-readable lines, and it is not in
+      # the runner's base image. Install it through the reusable's
+      # apt-packages input rather than a one-off step so the dependency
+      # travels with the test, and shellcheck keeps a single place to
+      # see what the suite needs.
+      apt-packages: jq
 
   # The macOS gate on a Mac. The fixture skips where clang/otool/nm are
   # absent, so on the Linux job above it never runs; the first release that

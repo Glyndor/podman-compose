@@ -1,0 +1,116 @@
+name: Branch health (reusable)
+
+# Fails when the newest COMPLETED run of a workflow on a branch is not a
+# success.
+#
+# The companion guard `reusable-schedule-freshness.yml` watches workflows
+# that fire on `event=schedule`; this one watches a workflow on a branch.
+# The two together are the same idea in two places: a thing that is
+# supposed to be true about a workflow is converted from "silence when
+# broken" into a red check on ordinary work, because nobody watches a
+# quiet log.
+#
+# The defect that prompted this file: the freshness watchers cannot catch
+# it. They read the newest SUCCESSFUL scheduled run, so a failing run is
+# missing from their answer by construction. On 2026-09-06 three
+# distribution channels sat with `main` red for twenty minutes after a
+# pull request merged while its suite was still reporting, and the only
+# reason anybody knew is that somebody went looking. The fix the other
+# three shipped was `scripts/check-suite-on-main.sh`; this file mirrors
+# its shape, not its spelling, because those repos are shell-only and
+# this one runs on GitHub Actions.
+#
+# Three states that are NOT failures and must not be reported as one:
+#
+# 1. A run still in progress. `status=completed` in the API query
+#    excludes it, and the comment on the `gh api` line says so. Do NOT
+#    widen the filter to "newest run of any status"; an in-progress run
+#    reported as a failure would defeat the purpose of this check.
+# 2. An empty history. A protected branch whose suite has never
+#    completed is not a branch anybody should be releasing from, so the
+#    empty case fails with a message that says "no completed run on
+#    record". Make that non-fatal only with a reason; the script does
+#    not.
+# 3. A conclusion of `cancelled` or `skipped`, which are neither success
+#    nor failure. Both are decided as failures: a cancelled run is a
+#    suite that was interrupted, and a skipped one is the workflow's own
+#    gate deciding not to exercise the branch it claims to protect.
+#    Reporting either as success would let a published branch carry a
+#    "we never finished" verdict.
+#
+# Permissions: same as the freshness reusable. A called workflow cannot
+# elevate beyond the permissions of the workflow that calls it, and
+# reading this repository's run history needs `actions: read`. Without
+# that grant the run does not start.
+#
+# NOT A REQUIRED STATUS CHECK. A red `main` would then block the pull
+# request that repairs it, which is exactly the situation this check
+# exists to surface. The reason lives beside the `uses:` line below; do
+# not remove it.
+
+on:
+  workflow_call:
+    inputs:
+      workflow:
+        description: >-
+          File name of the workflow to check, e.g. "ci.yml".
+        type: string
+        required: true
+      branch:
+        description: >-
+          Branch to read the newest completed run for, e.g. "main".
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: branch-health-${{ github.workflow }}-${{ github.ref }}-${{ inputs.workflow }}-${{ inputs.branch }}
+  cancel-in-progress: true
+
+jobs:
+  health:
+    name: branch health
+    runs-on: ubuntu-latest
+    # Bound: the request itself is small; ten seconds covers the fetch and the
+    # jq pass. Ten times that, rounded up; the six-hour default is what a hang
+    # would otherwise cost.
+    timeout-minutes: 10
+    permissions:
+      actions: read # reading this repository's workflow-run history
+    steps:
+      # The step below runs a script from this repository, so the tree has to be
+      # here. Without this the job dies with `No such file or directory` and exit
+      # 127, which reads like a broken script rather than a missing checkout.
+      #
+      # `persist-credentials: false` because nothing here writes: the API read
+      # uses GITHUB_TOKEN from the env below, and leaving a credential in the
+      # git config of a job that never pushes is reach it has no use for.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # This step runs as GITHUB_TOKEN, a job-scoped token on its own rate
+      # limit, and reads nothing beyond this repository's own run history. No
+      # personal credential is ever used here, and the `actions: read` grant
+      # above is the whole of what it can reach.
+      - name: Check the newest completed run on the branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ inputs.workflow }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          # `status=completed` excludes runs that are queued or in progress;
+          # do NOT widen this to all statuses. A run that is still running
+          # would otherwise be reported as a failure, and the job that
+          # repairs the branch would block itself with a verdict nobody
+          # has finished reaching.
+          #
+          # `per_page=1` returns the newest match. The full set is not
+          # needed; the question is "is the most recent run a success".
+          gh api \
+            "repos/${REPO}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&status=completed&per_page=1" \
+            | bash .github/scripts/check-branch-conclusion.sh
