@@ -566,3 +566,49 @@ fn context_tar_falls_back_to_dockerignore_when_alone() {
 		"`.dockerignore` must still apply when it is the only one: {names:?}"
 	);
 }
+
+#[test]
+fn a_negated_file_survives_under_an_ignored_directory() {
+	// Pruning an ignored directory is only sound when nothing under it can
+	// be re-included. `.dockerignore` negation does exactly that, and the
+	// pruning that landed for the enumeration cost dropped `keep.txt` from
+	// the context, so a `COPY vendor/keep.txt` lost its source.
+	//
+	// The walk's own comment justified the shortcut by asserting the engine
+	// had no such patterns in the wild. That is an assertion about what
+	// users write, and the format supports negation so they can.
+	use flate2::read::GzDecoder;
+	use std::io::Read;
+
+	let dir = tempdir().unwrap();
+	fs::write(dir.path().join("Dockerfile"), b"FROM alpine\n").unwrap();
+	fs::write(
+		dir.path().join(".dockerignore"),
+		b"vendor/\n!vendor/keep.txt\n",
+	)
+	.unwrap();
+	fs::create_dir(dir.path().join("vendor")).unwrap();
+	fs::write(dir.path().join("vendor/keep.txt"), b"keep me").unwrap();
+	fs::write(dir.path().join("vendor/drop.txt"), b"drop me").unwrap();
+
+	let bytes = build_context_tar(dir.path(), "Dockerfile", &[]).unwrap();
+	let mut raw = Vec::new();
+	GzDecoder::new(bytes.as_slice())
+		.read_to_end(&mut raw)
+		.unwrap();
+	let mut archive = tar::Archive::new(raw.as_slice());
+	let names: Vec<String> = archive
+		.entries()
+		.unwrap()
+		.map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
+		.collect();
+
+	assert!(
+		names.iter().any(|n| n.ends_with("vendor/keep.txt")),
+		"the re-included file must survive the prune, got: {names:?}"
+	);
+	assert!(
+		!names.iter().any(|n| n.ends_with("vendor/drop.txt")),
+		"the rest of the ignored directory must still be dropped, got: {names:?}"
+	);
+}

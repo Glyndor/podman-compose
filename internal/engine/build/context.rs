@@ -53,7 +53,27 @@ fn append_context<W: std::io::Write>(
 		if skip_names.iter().any(|n| rel_str == *n) {
 			return true;
 		}
-		is_ignored(&rel_str, ignore_patterns)
+		// Pruning is only sound when nothing under this directory can be
+		// re-included. `.dockerignore` negation does exactly that:
+		//
+		//     vendor/
+		//     !vendor/keep.txt
+		//
+		// The directory is ignored and one file under it is not, so pruning
+		// `vendor` loses `keep.txt` from the context and a `COPY` naming it
+		// fails. The walk's own comment said the engine had no negation
+		// patterns "in the wild" that re-include a child; that was an
+		// assertion about what users write, and `.dockerignore` supports
+		// negation precisely so they can.
+		//
+		// The cheap, correct condition: descend whenever any negation
+		// pattern could name something beneath this directory. The
+		// optimisation still applies to the ordinary case, an ignored
+		// subtree with nothing re-included, which is what it was for.
+		if !is_ignored(&rel_str, ignore_patterns) {
+			return false;
+		}
+		!negation_could_reach(&rel_str, ignore_patterns)
 	};
 	for abs in walk::walk_dir_skipping(context, skip_dir).map_err(ComposeError::Io)? {
 		let rel = abs
@@ -320,6 +340,22 @@ fn ignore_file(context: &Path) -> (&'static str, Vec<String>) {
 /// `.dockerignore` semantics: a leading `!` re-includes a path that an earlier
 /// pattern excluded. So `*.log` then `!keep.log` ignores every log except
 /// `keep.log`.
+/// Could any negation pattern re-include something under `dir`?
+///
+/// Conservative on purpose: a `true` costs a descent that the leaf filter
+/// then throws away, while a wrong `false` silently drops a file the user
+/// asked to keep. A negation whose path starts at `dir`, or that begins
+/// with a wildcard and so could match at any depth, counts as reaching it.
+fn negation_could_reach(dir: &str, patterns: &[String]) -> bool {
+	patterns
+		.iter()
+		.filter_map(|p| p.strip_prefix('!'))
+		.any(|p| {
+			let p = p.trim_start_matches("./");
+			p.starts_with('*') || p.starts_with(dir) || dir.is_empty()
+		})
+}
+
 fn is_ignored(path: &str, patterns: &[String]) -> bool {
 	let mut ignored = false;
 	for pattern in patterns {
