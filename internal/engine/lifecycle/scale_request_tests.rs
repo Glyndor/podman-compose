@@ -5,8 +5,15 @@
 //! socket. The split follows that seam rather than a line count.
 
 use super::*;
+
+// Every case in this file stands up a fake libpod socket, and the fixture
+// binds a `UnixListener`, so the whole file is Unix-only. The imports and
+// the helper carry the same `cfg` as the cases rather than the module
+// carrying one, which is the shape `scale_tests.rs` already uses.
+#[cfg(unix)]
 use crate::engine::fake_podman;
 
+#[cfg(unix)]
 fn engine_with(client: crate::libpod::Client, project: &str) -> Engine {
 	Engine::with_base_dir(client, project.into(), std::env::temp_dir())
 }
