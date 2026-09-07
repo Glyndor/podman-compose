@@ -4,8 +4,6 @@
 use std::io::Write;
 use std::path::Path;
 
-use podup::compose::types::ComposeFile;
-
 /// Quadlet units are systemd unit files; they only run on Linux hosts (where
 /// systemd consumes them from `~/.config/containers/systemd/`). Generating them
 /// on macOS/Windows is legitimate (e.g. to deploy to a remote Linux host), so
@@ -17,43 +15,6 @@ fn quadlet_platform_advisory(os: &str) -> Option<String> {
 		"quadlet units require systemd (Linux); generated files will not run on this host"
 			.to_string()
 	})
-}
-
-/// Validate the compose file before emitting Quadlet units, applying the same
-/// rules `up`/`create`/`config` enforce so `generate quadlet` is not more
-/// permissive than the commands that actually run the stack. Rejecting here keeps
-/// the generator from emitting structurally invalid units (a `.container` with
-/// no `Image=`, an out-of-range `PublishPort=`, a `--memory` flag with a
-/// malformed size) or a systemd ordering cycle.
-fn validate_for_quadlet(file: &ComposeFile) -> podup::Result<()> {
-	// `depends_on` cycles would emit mutually `After=`/`Requires=` units that
-	// systemd rejects as an ordering cycle; reject them as `up`/`create` do.
-	// A missing dependency is *not* fatal here: an `After=` may legitimately
-	// reference a unit managed outside this project.
-	if let Err(e @ podup::ComposeError::CircularDependency(_)) = podup::compose::resolve_order(file)
-	{
-		return Err(e);
-	}
-	for (name, svc) in &file.services {
-		// Every service must declare an image or a build, the same rule
-		// `config`/`up` enforce; without it the unit would have no `Image=`.
-		if svc.image.is_none() && svc.build.is_none() {
-			return Err(podup::ComposeError::NoImageOrBuild(name.clone()));
-		}
-		// Reject malformed/out-of-range ports instead of re-emitting them as an
-		// invalid `PublishPort=`.
-		podup::ports::parse_ports(&svc.ports)?;
-		// Reject a malformed memory limit rather than passing it through to a
-		// `--memory` flag systemd/Podman would choke on.
-		if let Some(mem) = &svc.mem_limit {
-			if podup::size::parse_memory(mem).is_none() {
-				return Err(podup::ComposeError::Unsupported(format!(
-					"service '{name}': mem_limit '{mem}' is not a valid memory size"
-				)));
-			}
-		}
-	}
-	Ok(())
 }
 
 /// Write to stdout, treating a closed pipe (e.g. `podup generate quadlet | head`)
@@ -79,7 +40,7 @@ pub(crate) fn write_quadlet(
 	no_warn: bool,
 ) -> podup::Result<()> {
 	// Reject configs the running commands would reject, before emitting anything.
-	validate_for_quadlet(file)?;
+	podup::quadlet::validate_for_quadlet(file)?;
 
 	// The Quadlet path's host-binding / privilege-escalation warnings are
 	// gated on `--no-warn` (issue #1358). The flag lives on a thread-local

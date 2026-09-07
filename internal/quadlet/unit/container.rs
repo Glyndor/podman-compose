@@ -10,9 +10,9 @@ use crate::size::parse_duration_secs;
 use super::health::render_healthcheck;
 use super::security::{is_inline_secret, map_security_opt, render_secret};
 use super::{
-	abs_against, collect_warnings, owner_marker, render_command, render_publish_port,
-	render_restart, render_tmpfs_mount, render_volume, safe_unit_stem, sorted_label_pairs,
-	sorted_pairs, unit_stem, QuadletUnit, Section,
+	abs_against, collect_warnings, owner_marker, quote_podman_arg_value, render_command,
+	render_publish_port, render_restart, render_tmpfs_mount, render_volume, safe_unit_stem,
+	sorted_label_pairs, sorted_pairs, unit_stem, QuadletUnit, Section,
 };
 use crate::quadlet::is_no_warn_set;
 
@@ -282,11 +282,17 @@ pub(crate) fn container_unit(
 		// `Memory=` is not a recognised [Container] Quadlet key (Quadlet would drop
 		// the whole unit at daemon-reload), so route the limit through PodmanArgs=
 		// as `--memory`, like the CPU limits. The value is validated as a size
-		// before generation, so it is a well-formed limit here.
-		container.add("PodmanArgs", format!("--memory={mem}"));
+		// before generation, so it is a well-formed limit here. The value is
+		// still quoted (and `%`-doubled) so an interpolation site cannot smuggle
+		// additional podman args into the same argv (#1734).
+		container.add(
+			"PodmanArgs",
+			format!("--memory={}", quote_podman_arg_value(mem)),
+		);
 	}
 	// CPU limits have no native [Container] Quadlet key (unlike Memory=/
-	// PidsLimit=), so they go through PodmanArgs=.
+	// PidsLimit=), so they go through PodmanArgs=. Quoted per #1734, same
+	// reason as `mem_limit` above.
 	// `cpus` falls back to the modern `deploy.resources.limits.cpus`.
 	let deploy_cpus = service
 		.deploy
@@ -295,10 +301,16 @@ pub(crate) fn container_unit(
 		.and_then(|r| r.limits.as_ref())
 		.and_then(|l| l.cpus.as_deref());
 	if let Some(c) = service.cpus.as_deref().or(deploy_cpus) {
-		container.add("PodmanArgs", format!("--cpus={c}"));
+		container.add(
+			"PodmanArgs",
+			format!("--cpus={}", quote_podman_arg_value(c)),
+		);
 	}
 	if let Some(cs) = &service.cpuset {
-		container.add("PodmanArgs", format!("--cpuset-cpus={cs}"));
+		container.add(
+			"PodmanArgs",
+			format!("--cpuset-cpus={}", quote_podman_arg_value(cs)),
+		);
 	}
 	if let Some(sh) = service.cpu_shares {
 		container.add("PodmanArgs", format!("--cpu-shares={sh}"));
@@ -450,7 +462,10 @@ pub(crate) fn container_unit(
 			.and_then(|r| r.limits.as_ref())
 			.and_then(|l| l.memory.as_ref())
 		{
-			container.add("PodmanArgs", format!("--memory={mem}"));
+			container.add(
+				"PodmanArgs",
+				format!("--memory={}", quote_podman_arg_value(mem)),
+			);
 		}
 	}
 	for secret in &service.secrets {

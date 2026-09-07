@@ -88,10 +88,10 @@ fn maps_seccomp_and_apparmor() {
 	// `apparmor:` route through PodmanArgs= as a `--security-opt` flag.
 	assert!(map_one("apparmor=docker-default")
 		.0
-		.contains("PodmanArgs=--security-opt apparmor=docker-default"));
+		.contains("PodmanArgs=--security-opt apparmor=\"docker-default\""));
 	assert!(map_one("apparmor:unconfined")
 		.0
-		.contains("PodmanArgs=--security-opt apparmor=unconfined"));
+		.contains("PodmanArgs=--security-opt apparmor=\"unconfined\""));
 }
 
 #[test]

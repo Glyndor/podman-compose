@@ -233,9 +233,9 @@ data into a process or onto disk:
   a filesystem path from it.
 - **URL paths** go through `urlencoded` so container names, project names,
   and tags with arbitrary bytes reach libpod as a single encoded segment.
-- **Quadlet values** are filtered through `escape_unit_value` /
-  `safe_unit_stem`; the unit filename is checked again by `write_units` so
-  a poisoned value cannot break out of the output directory.
+- **Quadlet values** are filtered through `escape_unit_value` and the dedicated
+  `PodmanArgs=` interpolations use `quote_podman_arg_value`; the unit filename is
+  checked again by `write_units` so a poisoned value cannot break out of the output directory.
 - **Signal names** are resolved to numbers through `resolve_stop_signal`:
   the libpod endpoint is a number, a string returns HTTP 500.
 - **Pull policies** are normalised through `libpod_pull_policy`; an

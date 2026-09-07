@@ -134,6 +134,7 @@ pub fn install_quadlet<S: SystemCtl>(
 		)));
 	}
 
+	quadlet::validate_for_quadlet(file)?;
 	let result = quadlet::generate_at(file, project, base_dir);
 	if let Some(dup) = result.duplicate_filename() {
 		return Err(ComposeError::Autostart(format!(
