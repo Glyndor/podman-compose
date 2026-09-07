@@ -18,6 +18,16 @@ use parse::{collect_var_name, is_var_start, parse_braced_var, resolve_modifier};
 /// cap turns a pathological chain into a clean error instead of a stack overflow.
 const MAX_INTERP_DEPTH: usize = 64;
 
+/// Upper bound on the cumulative size of the output of a single [`substitute`]
+/// pass. The output grows by `count(refs_in_input) × len(value_of_VAR)`, with
+/// no natural ceiling: a few hundred kilobytes of input where one variable
+/// repeats many times reaches gigabytes before anything else has a chance to
+/// fire (#1738). The bound is checked as `out` grows (before each `push_str`)
+/// so the refusal happens before the offending allocation, and the message
+/// names the variable and the size so a legitimate large payload (a long
+/// secret, a multi-line config blob) can be told apart from a hostile one.
+const MAX_INTERP_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -63,7 +73,8 @@ pub(super) fn substitute_depth(
 			Some('{') => {
 				chars.next();
 				let (var, modifier) = parse_braced_var(&mut chars)?;
-				let value = resolve_modifier(var, modifier, vars, depth)?;
+				let value = resolve_modifier(var.clone(), modifier, vars, depth)?;
+				check_output_cap(&out, &value, &var)?;
 				out.push_str(&value);
 			}
 			Some(c) if is_var_start(*c) => {
@@ -78,6 +89,7 @@ pub(super) fn substitute_depth(
 						String::new()
 					}
 				};
+				check_output_cap(&out, &value, &var)?;
 				out.push_str(&value);
 			}
 			Some(_) => {
@@ -87,6 +99,22 @@ pub(super) fn substitute_depth(
 	}
 
 	Ok(out)
+}
+
+/// Refuse a variable expansion that would push the cumulative interpolation
+/// output past [`MAX_INTERP_OUTPUT_BYTES`]. Called before the `push_str` so the
+/// refusal fires before the offending allocation, with a message naming the
+/// variable and the size it had reached.
+fn check_output_cap(out: &str, value: &str, var: &str) -> Result<()> {
+	let new_len = out.len().saturating_add(value.len());
+	if new_len > MAX_INTERP_OUTPUT_BYTES {
+		return Err(ComposeError::InvalidSubstitution(format!(
+			"variable '{var}' would expand to {new_len} bytes of output; at most \
+			 {MAX_INTERP_OUTPUT_BYTES} bytes of interpolated output are allowed; the value \
+			 may repeat too many times in the document"
+		)));
+	}
+	Ok(())
 }
 
 /// Load a `.env` file from `dir`.
