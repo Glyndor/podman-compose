@@ -264,6 +264,9 @@ impl Engine {
 #[cfg(test)]
 #[path = "build_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "build_walk_tests.rs"]
+mod walk_tests;
 
 #[cfg(all(test, unix))]
 #[path = "build_board_tests.rs"]

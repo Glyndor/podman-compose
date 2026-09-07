@@ -273,8 +273,21 @@ impl Table {
 	/// Print the table to stdout: a bold header followed by the rows, with the
 	/// status column (if any) colourised when stdout is a colour sink.
 	pub fn print(&self) {
+		let stdout = std::io::stdout();
+		let mut out = stdout.lock();
+		if self.print_to(&mut out).is_err() {
+			// The terminal is gone; nothing to do. The CLI's own stdout writer
+			// also swallows broken-pipe exits, so the live behaviour matches.
+		}
+	}
+
+	/// [`Table::print`] writing to `w`, factored out so tests can capture the
+	/// rendered bytes without redirecting the process's stdout. The header is
+	/// written as plain (uncoloured) text: tests inspect the bytes verbatim,
+	/// and any colour escape is noise against that signal.
+	pub fn print_to<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
 		let widths = self.widths();
-		crate::ui::print_bold_header(&self.format_row(&self.headers, &widths, false));
+		crate::ui::write_bold_header(w, &self.format_row(&self.headers, &widths, false))?;
 		// Every column marker that can tint a cell has to appear here, or a table
 		// that uses only that marker renders plain. `caution_col` was added
 		// without being listed, and it went unnoticed because its first caller,
@@ -282,8 +295,9 @@ impl Table {
 		let colour = self.colours_any_column() && super::stdout_colored();
 		for (i, row) in self.rows.iter().enumerate() {
 			let key = self.keys.get(i).and_then(Option::as_deref);
-			println!("{}", self.format_row_keyed(row, &widths, colour, key));
+			writeln!(w, "{}", self.format_row_keyed(row, &widths, colour, key))?;
 		}
+		Ok(())
 	}
 
 	/// Whether the table has any data rows. Callers can use this to print an

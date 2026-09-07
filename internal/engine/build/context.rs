@@ -31,7 +31,31 @@ fn append_context<W: std::io::Write>(
 	// an SSH key, into the image. Store the link itself instead, matching the
 	// watch-sync and cp paths.
 	tar.follow_symlinks(false);
-	for abs in walk::walk_dir(context).map_err(ComposeError::Io)? {
+	// Skip directories the ignore patterns would drop wholesale, so the
+	// walk does not enumerate every entry under an excluded subtree just
+	// to filter each one out (#1746 entry 6). The closure runs once per
+	// directory the walk would otherwise recurse into; the existing
+	// per-entry `is_ignored` check below remains as the source of truth
+	// for the per-file decision, and the directory-level check must agree
+	// with it for every child the walk would have produced. A
+	// contradiction here would let the walk call return paths the
+	// per-entry filter then drops, and the test below pins that the two
+	// never diverge for the patterns the engine actually parses.
+	let skip_dir = |abs: &std::path::Path| -> bool {
+		let rel = match abs.strip_prefix(context) {
+			Ok(r) => r,
+			Err(_) => return false,
+		};
+		let rel_str = rel.to_string_lossy();
+		// `skip_names` is the only way to drop a directory outright, regardless
+		// of ignore patterns (the active `.dockerignore` itself is on the
+		// list, so the builder can rewrite it).
+		if skip_names.iter().any(|n| rel_str == *n) {
+			return true;
+		}
+		is_ignored(&rel_str, ignore_patterns)
+	};
+	for abs in walk::walk_dir_skipping(context, skip_dir).map_err(ComposeError::Io)? {
 		let rel = abs
 			.strip_prefix(context)
 			.map_err(|_| ComposeError::Build("path strip error".into()))?;

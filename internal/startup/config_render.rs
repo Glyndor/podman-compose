@@ -3,6 +3,7 @@
 //! file in YAML/JSON with unset keys pruned and inline secrets redacted. Split
 //! out of `startup` so each file stays within the source line limit.
 
+use std::io::{self, Write};
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
@@ -41,6 +42,26 @@ pub(crate) fn render_config(
 	project: &str,
 	base_dir: &Path,
 ) -> podup::Result<()> {
+	let mut stdout = io::stdout().lock();
+	render_config_to(&mut stdout, file, format, out, project, base_dir)
+}
+
+/// [`render_config`] writing to `w`. The list-projection branches
+/// (`--services`, `--volumes`, `--images`, `--profiles`) print user-controlled
+/// compose values directly; those lines route the value through `sanitize_cell`
+/// so a malicious compose file cannot inject raw terminal escapes into the
+/// operator's output, and the bytes do not survive a pipe. The `--hash` and
+/// resolved-YAML/JSON branches escape differently: the hash branch is a hard
+/// `SERVICE HEX` shape with the service name sanitized; the YAML/JSON branches
+/// go through serde which already escapes every control character.
+pub(crate) fn render_config_to<W: Write>(
+	w: &mut W,
+	file: &podup::compose::types::ComposeFile,
+	format: &ConfigFormat,
+	out: &ConfigOutput,
+	project: &str,
+	base_dir: &Path,
+) -> podup::Result<()> {
 	// Reaching here means the file parsed and merged cleanly. Run the full
 	// config-time validation (non-empty services, image-or-build, service-name
 	// charset, port ranges, undefined volume/network references, and an acyclic
@@ -59,13 +80,13 @@ pub(crate) fn render_config(
 	}
 	if out.services {
 		for name in file.services.keys() {
-			println!("{name}");
+			writeln!(w, "{}", podup::ui::sanitize_cell(name))?;
 		}
 		return Ok(());
 	}
 	if out.volumes {
 		for name in file.volumes.keys() {
-			println!("{name}");
+			writeln!(w, "{}", podup::ui::sanitize_cell(name))?;
 		}
 		return Ok(());
 	}
@@ -75,7 +96,7 @@ pub(crate) fn render_config(
 				.image
 				.clone()
 				.unwrap_or_else(|| format!("{name}:latest"));
-			println!("{image}");
+			writeln!(w, "{}", podup::ui::sanitize_cell(&image))?;
 		}
 		return Ok(());
 	}
@@ -87,12 +108,12 @@ pub(crate) fn render_config(
 			}
 		}
 		for p in profiles {
-			println!("{p}");
+			writeln!(w, "{}", podup::ui::sanitize_cell(p))?;
 		}
 		return Ok(());
 	}
 	if let Some(selector) = &out.hash {
-		return render_config_hash(file, selector);
+		return render_config_hash_to(w, file, selector);
 	}
 	let mut redacted = file.clone();
 	// Surface the resolved project name in the rendered output, like
@@ -136,7 +157,7 @@ pub(crate) fn render_config(
 			quote_yaml11_booleans(&yaml)
 		}
 	};
-	println!("{rendered}");
+	writeln!(w, "{rendered}")?;
 	Ok(())
 }
 
@@ -157,8 +178,11 @@ fn service_config_hash(svc: &podup::compose::types::Service) -> podup::Result<St
 }
 
 /// `config --hash`: print `SERVICE HASH` for all services ("*") or the given
-/// comma-separated subset (an unknown service name is an error).
-fn render_config_hash(
+/// comma-separated subset (an unknown service name is an error). Writing
+/// only the service name is sanitized; the hash is a 64-character hex
+/// string we control and needs no escaping.
+fn render_config_hash_to<W: Write>(
+	w: &mut W,
 	file: &podup::compose::types::ComposeFile,
 	selector: &str,
 ) -> podup::Result<()> {
@@ -176,7 +200,12 @@ fn render_config_hash(
 			.services
 			.get(&name)
 			.ok_or_else(|| podup::ComposeError::ServiceNotFound(name.clone()))?;
-		println!("{name} {}", service_config_hash(svc)?);
+		writeln!(
+			w,
+			"{} {}",
+			podup::ui::sanitize_cell(&name),
+			service_config_hash(svc)?
+		)?;
 	}
 	Ok(())
 }

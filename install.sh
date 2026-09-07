@@ -243,6 +243,12 @@ PYEOF
 # past the `3.7.0` check, which is the rollback case this gate exists
 # to reject. Matches the Rust behaviour token-for-token.
 #
+# The cleanup of the staged file goes through `run_root`: when the install
+# ran via sudo the staged binary is owned by root, and a bare `rm -f` from
+# the caller would fail silently, leaving a root-owned executable in
+# /usr/local/bin while this function printed that the file had been
+# removed. `run_root rm` elevates the same way the install itself did.
+#
 #   verify_version_self_test <staged-path> <resolved-tag>
 verify_version_self_test() {
 	local staged="$1" expected_tag="$2"
@@ -253,7 +259,7 @@ verify_version_self_test() {
 	# hidden name; reading --version requires execute permission but no
 	# read/ownership on the parent.
 	if ! reported="$("$staged" --version 2>/dev/null)"; then
-		rm -f "$staged" 2>/dev/null || true
+		run_root rm -f "$staged" 2>/dev/null || true
 		fail "Could not run ${staged} --version to self-test the staged binary"
 	fi
 
@@ -265,7 +271,7 @@ verify_version_self_test() {
 			return 0
 		fi
 	done
-	rm -f "$staged" 2>/dev/null || true
+	run_root rm -f "$staged" 2>/dev/null || true
 	log_error "Staged binary reports '${reported}', expected ${expected_tag}"
 	fail "Refusing to install: staged binary's --version does not match the resolved release tag (possible rollback) - the staged file has been removed"
 }

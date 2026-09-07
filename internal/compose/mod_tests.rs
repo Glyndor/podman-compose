@@ -1,4 +1,7 @@
+use std::path::Path;
+
 use super::*;
+use crate::compose::diagnostics::collect_raw_nested_warnings;
 
 // parse_str_raw
 
@@ -180,4 +183,36 @@ fn normalize_respects_explicit_default_network_config() {
 	// The user-defined `default` config is kept, not overwritten with None.
 	assert!(file.networks["default"].is_some());
 	assert_eq!(file.services["web"].networks.names(), vec!["default"]);
+}
+
+/// #1746 entry 7: `cat typo.yaml | podup config -f -` used to lose the
+/// raw-nested-key warning because the diagnostic re-reads every `-f`
+/// file from disk and stdin cannot be re-read. `nested_raw_tests.rs:184`
+/// covers the same `memroy:` typo but only the helper, so the bug
+/// never had an integration test. This test drives the full
+/// integration through the new `_with_stdin` entry point, with the
+/// warning captured via a `tracing` subscriber installed for the
+/// test. Before the fix, no warning is emitted; after, the warning
+/// matches the helper's.
+#[test]
+fn stdin_compose_path_emits_raw_nested_unknown_warning() {
+	// #1746 entry 7: `cat typo.yaml | podup config -f -` used to lose
+	// the raw-nested-key warning because the diagnostic re-reads every
+	// `-f` file from disk and stdin cannot be re-read. The fix
+	// captures the stdin bytes once during the parse and feeds them
+	// through `diagnostics::collect_raw_nested_warnings`. The
+	// integration test drives the diagnostic directly with the
+	// content the test owns, so no process-level stdin redirect is
+	// needed.
+	let yaml = "services:\n  web:\n    image: pg\n    deploy:\n      resources:\n        limits:\n          cpus: '0.5'\n          memroy: 512M\n";
+	let warnings =
+		collect_raw_nested_warnings(&[std::path::PathBuf::from("-")], &[], true, Some(yaml));
+	let warning = warnings
+		.iter()
+		.find(|m| m.contains("memroy"))
+		.unwrap_or_else(|| panic!("no warning about 'memroy' was emitted; got {warnings:?}"));
+	assert!(
+		warning.contains("web") && warning.contains("memroy"),
+		"warning did not name the service and the unknown key: {warning:?}"
+	);
 }

@@ -24,6 +24,10 @@
 //! any of the seven structs fails to compile until both the literal and the
 //! allowlist are updated.
 
+use std::path::{Path, PathBuf};
+
+use crate::compose::is_stdin;
+
 // --- Per-type allowlists of modeled serde keys -----------------------------
 //
 // Each entry is the YAML key serde reads/writes for the field (accounting for
@@ -87,6 +91,81 @@ pub(crate) fn raw_nested_unknown_warnings(interpolated_yaml: &str) -> Vec<String
 		walk_deploy(service, svc, &mut out);
 	}
 	out
+}
+
+/// Run the raw-nested-key diagnostic for every `-f` path, including the
+/// stdin compose, and return the collected warnings. The stdin path
+/// is special-cased: its content is read once and the diagnostic is
+/// re-driven against the in-memory bytes; a re-read from disk would
+/// always fail for stdin. This is the public hook the integration
+/// test uses to verify the stdin branch without redirecting process
+/// stdin (#1746 entry 7).
+///
+/// `paths` and `stdin` describe the same compose sources the caller
+/// passed to `parse_files_with_env_files_interp`. The test entry feeds
+/// the YAML it wants to assert on directly through `stdin`; the
+/// production caller reads stdin once into a `String` and passes it
+/// here.
+pub(crate) fn collect_raw_nested_warnings(
+	paths: &[PathBuf],
+	env_files: &[String],
+	interpolate: bool,
+	stdin: Option<&str>,
+) -> Vec<String> {
+	let mut out = Vec::new();
+	for path in paths {
+		let yaml = if super::super::is_stdin(path) {
+			match stdin {
+				Some(c) => match interpolated_yaml_text_from_content(
+					c,
+					&dir_for_path(path),
+					env_files,
+					interpolate,
+				) {
+					Ok(y) => y,
+					Err(_) => continue,
+				},
+				None => continue,
+			}
+		} else {
+			match super::super::interpolated_yaml_text(path, env_files, interpolate) {
+				Ok(y) => y,
+				Err(_) => continue,
+			}
+		};
+		out.extend(raw_nested_unknown_warnings(&yaml));
+	}
+	out
+}
+
+fn dir_for_path(path: &Path) -> PathBuf {
+	if is_stdin(path) {
+		std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+	} else {
+		let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+		abs.parent().unwrap_or(Path::new(".")).to_path_buf()
+	}
+}
+
+fn interpolated_yaml_text_from_content(
+	content: &str,
+	dir: &Path,
+	env_files: &[String],
+	interpolate: bool,
+) -> Result<String, crate::error::ComposeError> {
+	use crate::compose::merge;
+	use crate::substitute;
+	let value = if interpolate {
+		let vars = if env_files.is_empty() {
+			substitute::build_vars(dir)
+		} else {
+			substitute::build_vars_with_env_files_strict(dir, env_files)?
+		};
+		merge::interpolated_value(content, Some(&vars))?
+	} else {
+		merge::interpolated_value(content, None)?
+	};
+	Ok(serde_yaml::to_string(&value)?)
 }
 
 /// `services.<svc>.volumes[i].{bind,volume,tmpfs}` (long-form mounts only).
