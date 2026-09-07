@@ -226,6 +226,78 @@ services:
 }
 
 #[test]
+fn volume_driver_opt_cannot_smuggle_extra_flags() {
+	// The `.volume` unit routes unrecognised driver options through
+	// `PodmanArgs=` too, and that site was missed when the container ones
+	// were fixed for #1734: the sweep stopped at the `.container` unit.
+	// These are `podman volume create` flags rather than `podman run`
+	// flags, so the blast radius differs, but the mechanism is identical.
+	let yaml = r#"
+services:
+  web:
+    image: alpine:3.20
+    volumes:
+      - data:/data
+volumes:
+  data:
+    driver_opts:
+      arbitrary: "value --label injected=yes"
+"#;
+	let file = parse_str(yaml).unwrap();
+	let out = generate_at(&file, "p", std::path::Path::new("/srv/app"));
+	let v = &unit_named(&out, "p-data.volume").contents;
+	assert_argv_has_no_token(v, "--label");
+	assert_argv_has_no_token(v, "injected=yes");
+}
+
+#[test]
+fn volume_driver_opt_key_cannot_smuggle_extra_flags() {
+	// Quoting only the value leaves the same hole on the other side of the
+	// `=`. The key is attacker-controlled too: it is a YAML mapping key the
+	// compose file chooses.
+	let yaml = r#"
+services:
+  web:
+    image: alpine:3.20
+    volumes:
+      - data:/data
+volumes:
+  data:
+    driver_opts:
+      "k --label injected=yes": v
+"#;
+	let file = parse_str(yaml).unwrap();
+	let out = generate_at(&file, "p", std::path::Path::new("/srv/app"));
+	let v = &unit_named(&out, "p-data.volume").contents;
+	assert_argv_has_no_token(v, "--label");
+}
+
+#[test]
+fn volume_driver_opt_doubles_the_systemd_specifier() {
+	// `PodmanArgs=` skips `escape_unit_value`, which is what doubles `%`.
+	// An undoubled `%h` is expanded by systemd into the operator's home,
+	// so the quoting helper has to do it on this path too, on both halves.
+	let yaml = r#"
+services:
+  web:
+    image: alpine:3.20
+    volumes:
+      - data:/data
+volumes:
+  data:
+    driver_opts:
+      "pcent%h": "%h/evil"
+"#;
+	let file = parse_str(yaml).unwrap();
+	let out = generate_at(&file, "p", std::path::Path::new("/srv/app"));
+	let v = &unit_named(&out, "p-data.volume").contents;
+	assert!(
+		v.contains("%%h") && !v.contains("=\"%h"),
+		"the specifier must be doubled on both halves, in:\n{v}"
+	);
+}
+
+#[test]
 fn apparmor_profile_cannot_smuggle_extra_flags() {
 	// The apparmor arm routes through PodmanArgs too (`AppArmor=` would be
 	// dropped by Quadlet). A hostile profile like

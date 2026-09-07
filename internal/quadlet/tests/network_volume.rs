@@ -153,8 +153,17 @@ volumes:
 	assert!(vol.contains("Type=nfs"), "in:\n{vol}");
 	assert!(vol.contains("Device=:/exports"), "in:\n{vol}");
 	assert!(vol.contains("Options=addr=10.0.0.1,rw"), "in:\n{vol}");
-	// An option with no dedicated key falls back to PodmanArgs=--opt.
-	assert!(vol.contains("PodmanArgs=--opt custom=extra"), "in:\n{vol}");
+	// An option with no dedicated key falls back to PodmanArgs=--opt. The
+	// value is quoted (#1734): systemd consumes the quotes, so Podman's own
+	// generator still builds `--opt custom=extra`, and a value carrying
+	// whitespace stays one argv element instead of becoming extra flags.
+	// The assertion is on the argv rather than the unit text for that
+	// reason: the unit text is what looked correct while the bug was live.
+	assert_eq!(
+		crate::quadlet::tests::podman_argv::podman_argv_from_unit(vol),
+		vec!["--opt", "custom=extra"],
+		"in:\n{vol}"
+	);
 }
 
 #[test]
