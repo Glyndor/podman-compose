@@ -10,8 +10,8 @@
 
 mod merge;
 
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use super::parse_file_inner;
 use super::types::ComposeFile;
@@ -20,6 +20,93 @@ use crate::error::{ComposeError, Result};
 pub(in crate::compose) use merge::{merge_service, merge_service_tagged};
 
 const MAX_EXTENDS_DEPTH: usize = 16;
+
+/// How many distinct external `extends.file` paths the cache may keep
+/// before `resolve_all_extends` starts refusing. Bounded so a project
+/// that points every service at a different file cannot grow the cache
+/// without limit; the cap is high enough that the only realistic way
+/// to hit it is to be the shape the issue describes (`extends.file` per
+/// service, all pointing at the same file), at which point the cache
+/// either reuses the single entry or refuses with a clear message.
+const MAX_EXTENDS_CACHE_ENTRIES: usize = 256;
+
+// Thread-local counter used by the unit tests to assert that
+// `parse_file_inner` is not re-invoked per referencing service when
+// `extends.file` points at a shared file. Without caching, the
+// counter records one increment per referencing service; with
+// caching, exactly one regardless of the number of references.
+// Compiled out of release builds.
+#[cfg(test)]
+std::thread_local! {
+	static PARSE_FILE_INNER_CALLS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_parse_file_inner_counter() {
+	PARSE_FILE_INNER_CALLS.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+fn parse_file_inner_call_count() -> u32 {
+	PARSE_FILE_INNER_CALLS.with(|c| c.get())
+}
+
+#[cfg(test)]
+fn bump_parse_file_inner_counter() {
+	PARSE_FILE_INNER_CALLS.with(|c| c.set(c.get() + 1));
+}
+
+/// Cache of resolved external files, keyed by their canonicalized
+/// absolute path. The first referencing service populates the entry;
+/// every subsequent one reuses the same parsed `ComposeFile` instead
+/// of re-reading and re-parsing the same file from disk.
+///
+/// Without this cache, a project that has twenty services each saying
+/// `extends: { service: base, file: common.yml }` reads and parses
+/// `common.yml` twenty times, with each parse holding the YAML value
+/// tree in memory while the merge runs. At the 16 MiB per-file cap
+/// that already exists, twenty concurrent parses peak at 5.8 GB and
+/// the process aborts in seconds (#1746).
+///
+/// Caching turns that into one parse, plus a clone per referencing
+/// service so the per-service `swap_remove` does not corrupt the
+/// shared entry. The clone of a parsed `ComposeFile` is dominated by
+/// the file size; at 16 MiB twenty clones is well under what twenty
+/// concurrent parses needed.
+#[derive(Default)]
+struct ExtendsCache {
+	entries: HashMap<PathBuf, ComposeFile>,
+}
+
+impl ExtendsCache {
+	fn get_or_load(&mut self, abs: &Path, base_dir: &Path) -> Result<ComposeFile> {
+		if let Some(cached) = self.entries.get(abs) {
+			return Ok(cached.clone());
+		}
+		#[cfg(test)]
+		bump_parse_file_inner_counter();
+		let dir = abs
+			.parent()
+			.map(|p| p.to_path_buf())
+			.unwrap_or_else(|| base_dir.to_path_buf());
+		let mut other = parse_file_inner(abs, &dir)?;
+		// Resolve the external file's own `extends:` chains before
+		// caching, so a later `swap_remove` of the requested base
+		// service gives a fully-merged value. The cached entry is the
+		// resolved file; per-service callers still do their own merges
+		// of the base into the child.
+		resolve_all_extends_with_cache(&mut other, &dir, self)?;
+		if self.entries.len() >= MAX_EXTENDS_CACHE_ENTRIES && !self.entries.contains_key(abs) {
+			return Err(ComposeError::Extends(format!(
+				"extends.file cache exceeded {MAX_EXTENDS_CACHE_ENTRIES} distinct files; \
+				 refactor the project so fewer services point at distinct external files"
+			)));
+		}
+		let cloned = other.clone();
+		self.entries.insert(abs.to_path_buf(), other);
+		Ok(cloned)
+	}
+}
 
 /// Resolve `extends:` only within the same file (no `file:` references).
 ///
@@ -34,12 +121,23 @@ pub(super) fn resolve_extends_same_file(file: &mut ComposeFile) -> Result<()> {
 }
 
 /// Resolve `extends:` for every service in `file`, including chains across
-/// other compose files referenced by `extends.file`.
+/// other compose files referenced by `extends.file`. External files are
+/// parsed at most once each, even when many services reference the same
+/// path; see [`ExtendsCache`].
 pub(super) fn resolve_all_extends(file: &mut ComposeFile, base_dir: &Path) -> Result<()> {
+	let mut cache = ExtendsCache::default();
+	resolve_all_extends_with_cache(file, base_dir, &mut cache)
+}
+
+fn resolve_all_extends_with_cache(
+	file: &mut ComposeFile,
+	base_dir: &Path,
+	cache: &mut ExtendsCache,
+) -> Result<()> {
 	let names: Vec<String> = file.services.keys().cloned().collect();
 	for name in names {
 		let mut visited: HashSet<String> = HashSet::new();
-		resolve_one_extends(file, &name, base_dir, &mut visited, 0)?;
+		resolve_one_extends(file, &name, base_dir, &mut visited, 0, cache)?;
 	}
 	Ok(())
 }
@@ -105,6 +203,7 @@ fn resolve_one_extends(
 	base_dir: &Path,
 	visited: &mut HashSet<String>,
 	depth: usize,
+	cache: &mut ExtendsCache,
 ) -> Result<()> {
 	if depth >= MAX_EXTENDS_DEPTH {
 		return Err(ComposeError::Extends(format!(
@@ -128,13 +227,23 @@ fn resolve_one_extends(
 		// podman-compose. Do not confine it.
 		let abs = base_dir.join(file_path);
 		let abs = abs.canonicalize().unwrap_or(abs);
-		let dir = abs
-			.parent()
-			.map(|p| p.to_path_buf())
-			.unwrap_or_else(|| base_dir.to_path_buf());
-		let mut other = parse_file_inner(&abs, &dir)?;
+		// `get_or_load` reads and parses the external file at most once per
+		// path across the whole `resolve_all_extends` call: the first
+		// referencing service populates the cache, every subsequent
+		// service gets a clone. Without the cache, twenty services
+		// pointing at the same file would parse it twenty times and
+		// peak at 5.8 GB before the process aborts (#1746).
+		let mut other = cache.get_or_load(&abs, base_dir)?;
+		let ext_dir = abs.parent().unwrap_or(base_dir);
 		let mut nested_visited: HashSet<String> = HashSet::new();
-		resolve_one_extends(&mut other, &base_name, &dir, &mut nested_visited, depth + 1)?;
+		resolve_one_extends(
+			&mut other,
+			&base_name,
+			ext_dir,
+			&mut nested_visited,
+			depth + 1,
+			cache,
+		)?;
 		let mut base = other.services.swap_remove(&base_name).ok_or_else(|| {
 			ComposeError::Extends(format!(
 				"service '{base_name}' not found in {}",
@@ -143,7 +252,7 @@ fn resolve_one_extends(
 		})?;
 		// The base service's relative paths are relative to the external file's
 		// directory; anchor them before merging into the current file's service.
-		super::anchor::anchor_service(&mut base, &dir);
+		super::anchor::anchor_service(&mut base, ext_dir);
 		base
 	} else {
 		if base_name == name {
@@ -156,7 +265,7 @@ fn resolve_one_extends(
 				"service '{name}' extends unknown service '{base_name}'"
 			)));
 		}
-		resolve_one_extends(file, &base_name, base_dir, visited, depth + 1)?;
+		resolve_one_extends(file, &base_name, base_dir, visited, depth + 1, cache)?;
 		file.services
 			.get(&base_name)
 			.cloned()
@@ -176,6 +285,9 @@ fn resolve_one_extends(
 // Unit tests
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
+#[path = "parse_count_tests.rs"]
+mod parse_count_tests;
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

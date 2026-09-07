@@ -53,6 +53,31 @@ pub fn parse_file_with_env_files_interp(
 	env_files: &[String],
 	interpolate: bool,
 ) -> Result<ComposeFile> {
+	// `-f -` reads the compose document from stdin (like `docker compose`);
+	// there is no file to canonicalize, so relative paths and `.env` resolve
+	// against the working directory. The stdin bytes are read once here so
+	// the parse and the raw nested-key diagnostic can both see them; before
+	// this was done in two places, the second of which silently skipped
+	// stdin and let a `cat typo.yaml | podup config -f -` lose its warning.
+	let stdin = if is_stdin(path) {
+		Some(crate::filesystem::read_stdin_to_string_capped().map_err(ComposeError::Io)?)
+	} else {
+		None
+	};
+	parse_file_with_env_files_interp_with_stdin(path, env_files, interpolate, stdin.as_deref())
+}
+
+/// [`parse_file_with_env_files_interp`] with the stdin content pre-read.
+/// `stdin_content` is consumed only when `path` is the stdin sentinel `-`;
+/// for a real path the argument is ignored. The split exists so the
+/// integration test can drive the stdin path without redirecting
+/// process stdin.
+pub(crate) fn parse_file_with_env_files_interp_with_stdin(
+	path: &Path,
+	env_files: &[String],
+	interpolate: bool,
+	stdin_content: Option<&str>,
+) -> Result<ComposeFile> {
 	// `-f -` reads the compose document from stdin (like `docker compose`); there
 	// is no file to canonicalize, so relative paths and `.env` resolve against the
 	// working directory.
@@ -64,7 +89,7 @@ pub fn parse_file_with_env_files_interp(
 		let dir = abs.parent().unwrap_or(Path::new(".")).to_path_buf();
 		(abs, dir)
 	};
-	let mut file = parse_file_inner_with_env(&abs, &dir, env_files, interpolate)?;
+	let mut file = parse_file_inner_with_stdin(&abs, &dir, env_files, interpolate, stdin_content)?;
 
 	let includes = std::mem::take(&mut file.include);
 	for inc in includes {
@@ -147,9 +172,28 @@ pub fn parse_files_with_env_files_interp(
 	let first = iter
 		.next()
 		.ok_or_else(|| ComposeError::FileNotFound("no compose file given".to_string()))?;
-	let mut merged = parse_file_with_env_files_interp(first, env_files, interpolate)?;
+	// `-f -` reads process stdin; cache the bytes so the same content is
+	// visible to the parse and to the raw nested-key diagnostic, otherwise
+	// a piped file with a typo would lose its warning because the
+	// diagnostic path re-reads from disk and stdin cannot be re-read.
+	let stdin = if paths.iter().any(|p| is_stdin(p)) {
+		Some(crate::filesystem::read_stdin_to_string_capped().map_err(ComposeError::Io)?)
+	} else {
+		None
+	};
+	let mut merged = parse_file_with_env_files_interp_with_stdin(
+		first,
+		env_files,
+		interpolate,
+		stdin.as_deref(),
+	)?;
 	for path in iter {
-		let other = parse_file_with_env_files_interp(path, env_files, interpolate)?;
+		let other = parse_file_with_env_files_interp_with_stdin(
+			path,
+			env_files,
+			interpolate,
+			stdin.as_deref(),
+		)?;
 		// `!override`/`!reset` are attached to keys in the raw document and are
 		// gone by the time it is a typed `ComposeFile`, so they are collected
 		// from the file itself and passed alongside.
@@ -171,18 +215,13 @@ pub fn parse_files_with_env_files_interp(
 	// service networks, deploy.resources specs) are dropped by the typed model and
 	// so are invisible to `diagnostics::collect`. Re-read each input file's raw,
 	// interpolated YAML and diff those blocks directly. This runs per input file
-	// (pre-merge): an unknown key in ANY `-f` file should warn, and `-` (stdin) is
-	// skipped because the parse above already consumed it and it cannot be re-read.
-	for path in paths {
-		if is_stdin(path) {
-			continue;
-		}
-		let Ok(yaml) = interpolated_yaml_text(path, env_files, interpolate) else {
-			continue;
-		};
-		for warning in diagnostics::raw_nested_unknown_warnings(&yaml) {
-			tracing::warn!("{warning}");
-		}
+	// (pre-merge): an unknown key in ANY `-f` file should warn, including the
+	// stdin compose, whose bytes the parse above already consumed and are
+	// re-fed through the same diagnostic path here (#1746 entry 7).
+	for warning in
+		diagnostics::collect_raw_nested_warnings(paths, env_files, interpolate, stdin.as_deref())
+	{
+		tracing::warn!("{warning}");
 	}
 	Ok(merged)
 }
@@ -202,15 +241,29 @@ fn interpolated_yaml_text(path: &Path, env_files: &[String], interpolate: bool) 
 			ComposeError::Io(e)
 		}
 	})?;
+	interpolated_yaml_text_from_content(&content, &dir, env_files, interpolate)
+}
+
+/// [`interpolated_yaml_text`] with the content already in memory, which the
+/// stdin path needs because the diagnostic cannot re-read stdin
+/// (`stdin()` is one-shot). Splits out so the path and the stdin
+/// branches share the same interpolation step, with no risk of
+/// drifting (#1746 entry 7).
+fn interpolated_yaml_text_from_content(
+	content: &str,
+	dir: &Path,
+	env_files: &[String],
+	interpolate: bool,
+) -> Result<String> {
 	let value = if interpolate {
 		let vars = if env_files.is_empty() {
-			substitute::build_vars(&dir)
+			substitute::build_vars(dir)
 		} else {
-			substitute::build_vars_with_env_files_strict(&dir, env_files)?
+			substitute::build_vars_with_env_files_strict(dir, env_files)?
 		};
-		merge::interpolated_value(&content, Some(&vars))?
+		merge::interpolated_value(content, Some(&vars))?
 	} else {
-		merge::interpolated_value(&content, None)?
+		merge::interpolated_value(content, None)?
 	};
 	Ok(serde_yaml::to_string(&value)?)
 }
@@ -297,8 +350,29 @@ pub(crate) fn parse_file_inner_with_env(
 	extra_env_files: &[String],
 	interpolate: bool,
 ) -> Result<ComposeFile> {
+	parse_file_inner_with_stdin(path, dir, extra_env_files, interpolate, None)
+}
+
+/// [`parse_file_inner_with_env`] with the stdin content pre-read. When
+/// `path` is the stdin sentinel `-` and `stdin_content` is `None`, the
+/// function reads process stdin; when both are present, the supplied
+/// content is used and stdin is left alone. Used by the integration
+/// to keep the same byte sequence visible to the parse and to the raw
+/// nested-key diagnostic, so a `cat typo.yaml | podup config -f -`
+/// surfaces its typo instead of silently dropping the warning
+/// (#1746 entry 7).
+pub(crate) fn parse_file_inner_with_stdin(
+	path: &Path,
+	dir: &Path,
+	extra_env_files: &[String],
+	interpolate: bool,
+	stdin_content: Option<&str>,
+) -> Result<ComposeFile> {
 	let content = if is_stdin(path) {
-		crate::filesystem::read_stdin_to_string_capped().map_err(ComposeError::Io)?
+		match stdin_content {
+			Some(c) => c.to_string(),
+			None => crate::filesystem::read_stdin_to_string_capped().map_err(ComposeError::Io)?,
+		}
 	} else {
 		crate::filesystem::read_to_string_capped(path).map_err(|e| {
 			if e.kind() == std::io::ErrorKind::NotFound {

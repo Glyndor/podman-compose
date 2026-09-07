@@ -8,6 +8,8 @@
 //! [`render_table`]/[`render_json`] functions translate the result into the
 //! `--format table|json` output the CLI asked for.
 
+use std::io::{self, Write};
+
 use podup::compose::types::{ComposeFile, Service};
 
 mod checks;
@@ -95,7 +97,28 @@ pub fn ordered_services(file: &ComposeFile) -> Vec<(&str, &Service)> {
 /// finding with `  <service>: <check>: <reason>` indented two spaces. When
 /// nothing was found, only the line `no findings` is printed, the table is
 /// suppressed so a CI log without any findings is minimal.
+///
+/// Service names and reasons are user-controlled (compose YAML), so the
+/// detail lines route them through `sanitize_cell` before printing; the
+/// table itself already does that via `Table::print`. Without sanitization
+/// a malicious compose file injects raw ESC bytes into the operator's
+/// terminal, and the bytes survive a pipe because `println!` is just a
+/// byte stream.
 pub fn render_table(services: &[(&str, &Service)], report: &AuditReport) {
+	let stdout = io::stdout();
+	let mut out = stdout.lock();
+	let _ = render_table_to(&mut out, services, report);
+}
+
+/// [`render_table`] writing to `w`, factored out so tests can capture the
+/// rendered bytes without redirecting the process's stdout. The sanitization
+/// of user-controlled values happens here, not in the caller, so every sink
+/// of audit output goes through the same gate.
+pub fn render_table_to<W: Write>(
+	w: &mut W,
+	services: &[(&str, &Service)],
+	report: &AuditReport,
+) -> io::Result<()> {
 	let mut table = podup::ui::Table::new(&["SERVICE", "FINDINGS"]);
 	for (name, mine) in report.by_service(services) {
 		let findings = if mine.is_empty() {
@@ -106,18 +129,24 @@ pub fn render_table(services: &[(&str, &Service)], report: &AuditReport) {
 		table.push(vec![(*name).to_string(), findings]);
 	}
 	if report.findings.is_empty() {
-		println!("no findings");
-		return;
+		writeln!(w, "no findings")?;
+		return Ok(());
 	}
-	table.print();
+	table.print_to(w)?;
 	for finding in &report.findings {
-		println!(
-			"  {service}: {check}: {reason}",
-			service = finding.service,
-			check = finding.check,
-			reason = finding.reason,
-		);
+		// `check` is a hardcoded `'static str`, so only the user-controlled
+		// `service` and `reason` need sanitizing. Going through `sanitize_cell`
+		// keeps the table cell and detail line consistent: same function,
+		// same rules, no drift between the two surfaces an attacker can read.
+		writeln!(
+			w,
+			"  {}: {}: {}",
+			podup::ui::sanitize_cell(&finding.service),
+			finding.check,
+			podup::ui::sanitize_cell(&finding.reason),
+		)?;
 	}
+	Ok(())
 }
 
 /// Render `report` as a single JSON line to stdout. `serde_json` orders the
@@ -127,6 +156,18 @@ pub fn render_table(services: &[(&str, &Service)], report: &AuditReport) {
 /// Empty finding lists emit `{"findings":[]}`, never `null`, so an empty
 /// body is still valid JSON without the consumer having to special-case it.
 pub fn render_json(report: &AuditReport) {
+	let stdout = io::stdout();
+	let mut out = stdout.lock();
+	render_json_to(&mut out, report).expect("write to stdout");
+}
+
+/// [`render_json`] writing to `w`. JSON output is already safe from terminal
+/// injection: `serde_json` escapes every control character (`\x1b` becomes
+/// `\u001b`), so a malicious compose file's bytes round-trip as escape
+/// sequences inside a JSON string rather than as live escapes on the
+/// terminal. The sink is exposed so a test can compare the exact JSON it
+/// produces against the same input.
+pub fn render_json_to<W: Write>(w: &mut W, report: &AuditReport) -> io::Result<()> {
 	let findings: Vec<serde_json::Value> = report
 		.findings
 		.iter()
@@ -139,7 +180,7 @@ pub fn render_json(report: &AuditReport) {
 		})
 		.collect();
 	let out = serde_json::json!({ "findings": findings });
-	println!("{out}");
+	writeln!(w, "{out}")
 }
 
 #[cfg(test)]

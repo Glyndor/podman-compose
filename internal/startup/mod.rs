@@ -14,6 +14,8 @@ use crate::cli::{Cli, Commands};
 
 mod config_normalize;
 mod config_render;
+#[cfg(test)]
+pub(crate) use config_render::render_config_to;
 pub(crate) use config_render::{render_config, ConfigOutput};
 
 /// Whether a command creates, destroys, or changes the state of containers and
