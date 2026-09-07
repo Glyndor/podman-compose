@@ -11,9 +11,10 @@
 //! and a job defined directly in a workflow.
 
 use std::collections::BTreeMap;
-use std::fs;
 
-use crate::shape::{jobs_of, unresolved, workflows, workflows_dir, Job, REQUIRED_ON_MAIN};
+use crate::shape::{
+	jobs_of, read_workflow, unresolved, workflows, workflows_dir, Job, REQUIRED_ON_MAIN,
+};
 
 /// The required checks that already do not resolve in the real tree.
 ///
@@ -55,7 +56,7 @@ fn newly_unresolved(file: &str, planted: &str) -> Vec<String> {
 #[test]
 fn a_renamed_caller_job_id_is_reported_by_name() {
 	let dir = workflows_dir();
-	let ci = fs::read_to_string(dir.join("ci.yml")).expect("ci.yml is readable");
+	let ci = read_workflow(&dir.join("ci.yml"));
 	let needle = "  rust:\n    uses: ./.github/workflows/reusable-rust-ci.yml";
 	assert!(
 		ci.contains(needle),
@@ -108,8 +109,7 @@ fn a_renamed_caller_job_id_is_reported_by_name() {
 #[test]
 fn a_renamed_inner_job_name_is_reported_for_that_half_only() {
 	let dir = workflows_dir();
-	let reusable =
-		fs::read_to_string(dir.join("reusable-rust-ci.yml")).expect("reusable is readable");
+	let reusable = read_workflow(&dir.join("reusable-rust-ci.yml"));
 	let needle = "  coverage:\n    name: Coverage\n";
 	assert!(
 		reusable.contains(needle),
@@ -138,8 +138,7 @@ fn a_renamed_inner_job_name_is_reported_for_that_half_only() {
 #[test]
 fn a_renamed_direct_job_name_is_reported_by_name() {
 	let dir = workflows_dir();
-	let lane =
-		fs::read_to_string(dir.join("podman-lane.yml")).expect("podman-lane.yml is readable");
+	let lane = read_workflow(&dir.join("podman-lane.yml"));
 	let needle = "    name: Supported Podman majors\n";
 	assert!(
 		lane.contains(needle),

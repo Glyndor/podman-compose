@@ -242,6 +242,19 @@ pub fn unresolved(
 	out
 }
 
+/// Read a workflow with line endings normalised to `\n`.
+///
+/// The Windows runner checks the tree out with CRLF, so a multi-line needle
+/// written with `\n` does not appear in the file text and every plant would
+/// report "this file no longer carries what the case plants against" on
+/// Windows only. `str::lines` hides this from the parser, which is why the
+/// tests over the real tree pass there and the plants did not.
+pub fn read_workflow(path: &Path) -> String {
+	fs::read_to_string(path)
+		.unwrap_or_else(|e| panic!("{} is readable: {e}", path.display()))
+		.replace("\r\n", "\n")
+}
+
 pub fn workflows_dir() -> PathBuf {
 	Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows")
 }
