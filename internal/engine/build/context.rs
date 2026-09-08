@@ -462,4 +462,7 @@ fn glob_rec(pat: &[u8], s: &[u8]) -> bool {
 }
 
 #[cfg(test)]
+#[path = "context/pattern_tests.rs"]
+mod pattern_tests;
+#[cfg(test)]
 mod tests;
