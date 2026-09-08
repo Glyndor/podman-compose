@@ -115,3 +115,40 @@ fn extends_file_caches_per_path() {
 	assert_eq!(parsed.services["a"].image.as_deref(), Some("postgres:16"));
 	assert_eq!(parsed.services["b"].image.as_deref(), Some("redis:7"));
 }
+
+#[test]
+fn an_unrelated_broken_service_does_not_fail_the_reference() {
+	// The cache used to resolve every service in a referenced file before
+	// caching it, so a project referencing one valid service failed when an
+	// unrelated service in that file extended something missing. A file you
+	// do not control could break your build over a service you never asked
+	// for.
+	let dir = tempdir().expect("tempdir");
+	let base = dir.path().join("base.yml");
+	fs::write(
+		&base,
+		"services:\n  base:\n    image: alpine:3.20\n  broken:\n    extends:\n      service: does-not-exist\n",
+	)
+	.expect("write base.yml");
+
+	let good = dir.path().join("good.yml");
+	fs::write(
+		&good,
+		"services:\n  app:\n    extends:\n      service: base\n      file: base.yml\n",
+	)
+	.expect("write good.yml");
+	parse_file(&good).expect("referencing a valid service must not fail over an unrelated one");
+
+	// And the broken service is still an error when it is the one asked for,
+	// so this does not simply stop reporting the failure.
+	let bad = dir.path().join("bad.yml");
+	fs::write(
+		&bad,
+		"services:\n  app:\n    extends:\n      service: broken\n      file: base.yml\n",
+	)
+	.expect("write bad.yml");
+	assert!(
+		parse_file(&bad).is_err(),
+		"asking for the broken service must still fail"
+	);
+}

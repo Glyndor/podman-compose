@@ -105,17 +105,28 @@ impl ExtendsCache {
 			.parent()
 			.map(|p| p.to_path_buf())
 			.unwrap_or_else(|| base_dir.to_path_buf());
-		let mut other = parse_file_inner(abs, &dir)?;
+		let other = parse_file_inner(abs, &dir)?;
 		// Resolve the external file's own `extends:` chains before
 		// caching, so a later `swap_remove` of the requested base
 		// service gives a fully-merged value. The cached entry is the
 		// resolved file; per-service callers still do their own merges
 		// of the base into the child.
-		// The caller's depth travels with the recursion. Passing 0 here
-		// would restart the count in every external file, so a chain of
-		// more than MAX_EXTENDS_DEPTH files never reached the limit and
-		// overflowed the stack instead.
-		resolve_all_extends_with_cache(&mut other, &dir, self, depth)?;
+		// The cache holds the PARSED file, not a fully resolved one. It used
+		// to resolve every service here before caching, which made a
+		// reference to one valid service fail when an unrelated service in
+		// the same file extended something missing: a file you do not
+		// control could break your build over a service you never asked
+		// for. The caller resolves the chain it actually needs, immediately
+		// after this returns, so nothing is lost by not doing it here.
+		//
+		// The parse is what the cache exists to save (#1746): twenty
+		// services pointing at one file parsed it twenty times and peaked
+		// at 5.8 GB. That saving is unaffected.
+		//
+		// `in_progress` and the depth counter still work, because the
+		// caller's `resolve_one_extends` recurses back through this
+		// function for any nested `extends.file`.
+		let _ = depth;
 		if self.entries.len() >= MAX_EXTENDS_CACHE_ENTRIES && !self.entries.contains_key(abs) {
 			self.in_progress.remove(abs);
 			return Err(ComposeError::Extends(format!(
