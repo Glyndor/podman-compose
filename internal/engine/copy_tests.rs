@@ -1,5 +1,6 @@
 use super::{
-	copy_landed, join_archive_path, parse_endpoint, uploaded_entry_size, ExpectedEntry, PathStat,
+	copy_landed, cp_destination_kind, join_archive_path, parse_endpoint, uploaded_entry_size,
+	CpDestinationKind, ExpectedEntry, PathStat,
 };
 
 #[test]
@@ -195,4 +196,59 @@ fn the_cp_option_builders_set_their_field() {
 		base.clone().with_follow_link(true)
 	);
 	assert_eq!(CpOptions::new(None, false, true), base.with_archive(true));
+}
+
+/// #1736 follow-up: the routing that picks between the streaming
+/// extractor and the buffered `extract_archive` was using `dst.is_dir()`
+/// directly, which follows a symlink and reports a directory. The
+/// streaming branch would then extract into the link target rather than
+/// the destination the user named (#1736's fix closed the same hole
+/// inside `extract_archive`; this test pins the same fix at the
+/// routing site).
+#[test]
+fn cp_destination_kind_treats_a_real_directory_as_a_directory() {
+	let dir = tempfile::tempdir().expect("tempdir");
+	let target = dir.path().join("real");
+	std::fs::create_dir(&target).expect("mkdir");
+	assert!(matches!(
+		cp_destination_kind(&target),
+		CpDestinationKind::Directory
+	));
+}
+#[cfg(unix)]
+#[test]
+fn cp_destination_kind_treats_a_symlink_to_a_directory_as_a_symlink() {
+	// Without this, `dst.is_dir()` followed the link and reported `true`;
+	// the streaming branch then ran `extract_tar_guarded(link_target, ..)`
+	// through the symlink. The bytes would land wherever the link points,
+	// not on the path the user named. Mirrors the fix #1736 applied inside
+	// `extract_archive`.
+	let dir = tempfile::tempdir().expect("tempdir");
+	let real = dir.path().join("real");
+	std::fs::create_dir(&real).expect("mkdir");
+	let link = dir.path().join("link");
+	std::os::unix::fs::symlink(&real, &link).expect("symlink");
+	assert!(
+		matches!(cp_destination_kind(&link), CpDestinationKind::Symlink),
+		"the cp routing must refuse a symlink destination before the extractor is reached",
+	);
+}
+#[test]
+fn cp_destination_kind_treats_a_missing_path_as_not_a_directory() {
+	let dir = tempfile::tempdir().expect("tempdir");
+	let missing = dir.path().join("absent");
+	assert!(matches!(
+		cp_destination_kind(&missing),
+		CpDestinationKind::NotADirectory
+	));
+}
+#[test]
+fn cp_destination_kind_treats_a_regular_file_as_not_a_directory() {
+	let dir = tempfile::tempdir().expect("tempdir");
+	let file = dir.path().join("file");
+	std::fs::write(&file, b"x").expect("write");
+	assert!(matches!(
+		cp_destination_kind(&file),
+		CpDestinationKind::NotADirectory
+	));
 }

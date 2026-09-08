@@ -7,6 +7,11 @@
 //! that turns the eleven named checks into a flat `Vec<Finding>`.
 
 use podup::compose::types::{ComposeFile, Service};
+use podup::size;
+// The audit must read the runtime value a `security_opt` entry resolves to,
+// not the raw compose-side text (#1743). `podup::effective_no_new_privileges`
+// calls the engine's own `parse_security_opts` so the two cannot drift again.
+use podup::effective_no_new_privileges;
 
 use super::Finding;
 
@@ -119,7 +124,12 @@ fn check_privileged(name: &str, service: &Service, _file: &ComposeFile) -> Vec<F
 }
 
 /// Host-binding namespacing modes: `pid`, `ipc`, `uts`, `cgroup`, `userns_mode`
-/// set to `host`, or `network_mode: host`. One finding per active mode.
+/// set to `host` or `container:<id>`, or `network_mode` carrying the same. One
+/// finding per active mode. The `container:<id>` form is the share-another-
+/// container mode the runtime detector in
+/// `internal/engine/container/host_mode.rs` already warns on; the audit
+/// detector must agree, otherwise `podup audit --strict` would pass a file
+/// the engine later refuses to run silently (#1746).
 fn check_host_namespace(name: &str, service: &Service, _file: &ComposeFile) -> Vec<Finding> {
 	let mut out = Vec::new();
 	if let Some(mode) = service.network_mode.as_deref() {
@@ -128,6 +138,14 @@ fn check_host_namespace(name: &str, service: &Service, _file: &ComposeFile) -> V
 				name,
 				"host_namespace",
 				"network_mode: host shares the host's network namespace",
+			));
+		} else if let Some(target) = mode.strip_prefix("container:") {
+			out.push(finding(
+				name,
+				"host_namespace",
+				&format!(
+					"network_mode: container:{target} shares another container's network namespace"
+				),
 			));
 		}
 	}
@@ -147,27 +165,66 @@ fn check_host_namespace(name: &str, service: &Service, _file: &ComposeFile) -> V
 					"host_namespace",
 					&format!("{field}: host shares the host's {field} namespace"),
 				));
+			} else if let Some(target) = mode.strip_prefix("container:") {
+				out.push(finding(
+					name,
+					"host_namespace",
+					&format!(
+						"{field}: container:{target} shares another container's {field} namespace"
+					),
+				));
 			}
 		}
 	}
 	out
 }
 
-/// `cap_add: [SYS_ADMIN]` or `cap_add: [ALL]`, Linux capabilities that
-/// effectively grant root inside the container.
+/// `cap_add: [SYS_ADMIN]`, `cap_add: [SYS_MODULE]`, or any other capability
+/// in the curated dangerous list. The runtime honours exactly what was
+/// asked for, so reading the resolved value cannot narrow the audit; this
+/// check exists because the spec has no opinion about which capabilities
+/// are dangerous, and the operator who ships `--strict` in CI needs one
+/// (`#1743`).
 fn check_dangerous_capability(name: &str, service: &Service, _file: &ComposeFile) -> Vec<Finding> {
 	let mut out = Vec::new();
 	for cap in &service.cap_add {
-		let cap = normalized_capability(cap);
-		if cap == "SYS_ADMIN" || cap == "ALL" {
+		if let Some(reason) = dangerous_capability_reason(&normalized_capability(cap)) {
 			out.push(finding(
 				name,
 				"dangerous_capability",
-				&format!("cap_add: {cap} grants root-equivalent capability"),
+				&format!("cap_add: {cap}: {reason}"),
 			));
 		}
 	}
 	out
+}
+
+/// Returns the reason a normalised capability (`CAP_` stripped,
+/// upper-cased) is on the dangerous list, or `None` when it is not. The
+/// list is curated against the CIS Docker Benchmark and the Podman
+/// hardening notes: each entry either grants a path to host-level
+/// compromise (kernel / syscall / audit), breaks the container's file
+/// or device isolation, or subverts networking in a way that lets one
+/// container attack another. `SYS_ADMIN` and `ALL` are the obvious
+/// root-equivalents; the rest are the narrower capabilities an attacker
+/// chains into the same outcome.
+fn dangerous_capability_reason(cap: &str) -> Option<&'static str> {
+	Some(match cap {
+		"ALL" => "every capability, equivalent to root",
+		"SYS_ADMIN" => "broad kernel administration, effectively root",
+		"SYS_MODULE" => "load or unload kernel modules (root-equivalent)",
+		"DAC_READ_SEARCH" => "bypass file read and directory search permission checks",
+		"SYS_RAWIO" => "raw I/O port access, can crash or compromise the host kernel",
+		"SYS_PTRACE" => "ptrace any process, including those in other containers",
+		"NET_ADMIN" => "arbitrary network interface and routing changes",
+		"SYS_BOOT" => "reboot or halt the host from inside the container",
+		"MKNOD" => "create device nodes that mimic host block devices",
+		"SYSLOG" => "read the kernel ring buffer (information disclosure)",
+		"AUDIT_CONTROL" => "configure the kernel audit subsystem",
+		"AUDIT_WRITE" => "tamper with the audit log",
+		"SETFCAP" => "set arbitrary file capabilities on host binaries",
+		_ => return None,
+	})
 }
 
 /// `read_only` not set to `true`, the container's rootfs is writable.
@@ -207,18 +264,13 @@ fn check_no_cap_drop_all(name: &str, service: &Service, _file: &ComposeFile) -> 
 
 /// `security_opt` without `no-new-privileges:true`. Podman spells it
 /// `no-new-privileges` (no `:true`); both spellings are accepted. The check
-/// iterates each entry and looks for a prefix match on either spelling; a
-/// bare `no-new-privileges` (no value) also passes.
+/// asks the engine's own `parse_security_opts` for the resolved value
+/// (`#1743`): the engine splits on `:` or `=` and last-wins, so an audit
+/// that splits on `:` only disagrees with the runtime on every docker-form
+/// `=true` and on contradictory multi-entry lists like
+/// `[no-new-privileges:true, no-new-privileges:false]`.
 fn check_no_new_privileges_off(name: &str, service: &Service, _file: &ComposeFile) -> Vec<Finding> {
-	// Podman spells it `no-new-privileges` alone or `no-new-privileges:true`;
-	// `no-new-privileges:false` is the option being switched off, not on.
-	let has = service.security_opt.iter().any(|opt| {
-		let mut parts = opt.splitn(2, ':');
-		let head = parts.next().unwrap_or(opt);
-		let value = parts.next().unwrap_or("true");
-		head == "no-new-privileges" && value == "true"
-	});
-	if has {
+	if effective_no_new_privileges(service) == Some(true) {
 		Vec::new()
 	} else {
 		vec![finding(
@@ -245,18 +297,25 @@ fn check_no_pids_limit(name: &str, service: &Service, _file: &ComposeFile) -> Ve
 
 /// Neither `mem_limit` nor `deploy.resources.limits.memory` set, no upper
 /// bound on memory. A misbehaving service can OOM the host.
+///
+/// Reads both fields through the same `parse_memory` the engine uses to
+/// build `LinuxResources` (`#1743`): a value like `mem_limit: not-a-size`
+/// keeps the compose field non-empty, so an `.is_none()` audit reads it
+/// as a limit, but `parse_memory` returns `None` and the runtime applies
+/// no limit at all. The audit must agree with what the engine will build.
 fn check_no_memory_limit(name: &str, service: &Service, _file: &ComposeFile) -> Vec<Finding> {
+	let mem_top = service.mem_limit.as_deref().and_then(size::parse_memory);
 	let deploy_limit = service
 		.deploy
 		.as_ref()
 		.and_then(|d| d.resources.as_ref())
 		.and_then(|r| r.limits.as_ref())
-		.and_then(|l| l.memory.as_ref());
-	if service.mem_limit.is_none() && deploy_limit.is_none() {
+		.and_then(|l| l.memory.as_deref().and_then(size::parse_memory));
+	if mem_top.is_none() && deploy_limit.is_none() {
 		vec![finding(
 			name,
 			"no_memory_limit",
-			"neither mem_limit nor deploy.resources.limits.memory is set: a leak can OOM the host",
+			"neither mem_limit nor deploy.resources.limits.memory is parseable: a leak can OOM the host",
 		)]
 	} else {
 		Vec::new()

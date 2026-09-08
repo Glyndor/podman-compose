@@ -23,6 +23,17 @@ use super::{Client, PodmanError, Result, SocketStream};
 /// unbounded would be a trivial memory exhaustion.
 const MAX_HEAD_BYTES: usize = 16 * 1024;
 
+/// Connect budget for the raw hijack. Mirrors the hyper path's
+/// [`super::CONNECT_TIMEOUT`] so a stuck or absent peer surfaces the same
+/// 30-second ceiling here as on every other libpod call.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Read budget for the response head. Mirrors the hyper path's
+/// [`super::READ_TIMEOUT`]. The full 120s is excessive for a status line;
+/// a 30s ceiling matches what `connect` does on the same path and bounds a
+/// peer that opens the TCP/HTTP/1.1 handshake but never answers.
+const HEAD_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// A hijacked connection: the socket, after the response head has been read.
 ///
 /// Bytes written go to the command's stdin; bytes read are its output. With a
@@ -41,7 +52,30 @@ impl Client {
 	/// surfaces as an error instead of hanging with the terminal already in raw
 	/// mode, which would leave the user's shell unusable.
 	pub(crate) async fn post_hijack(&self, path: &str, body: &[u8]) -> Result<Hijacked> {
-		let mut stream = SocketStream::connect(&self.socket_path).await?;
+		// A stuck or absent peer would otherwise wedge `connect` until the
+		// OS gives up on it. The hyper callers already wrap their pool
+		// acquisition in `tokio::time::timeout(CONNECT_TIMEOUT, ...)`; the
+		// hijack path bypasses the pool, so the same ceiling has to land
+		// here. Windows already retries `ERROR_PIPE_BUSY` inside
+		// `SocketStream::connect`; `tokio::time::timeout` adds the wall-clock
+		// ceiling that retry loop does not.
+		let stream =
+			match tokio::time::timeout(CONNECT_TIMEOUT, SocketStream::connect(&self.socket_path))
+				.await
+			{
+				Ok(Ok(s)) => s,
+				Ok(Err(e)) => return Err(e),
+				Err(_) => {
+					return Err(PodmanError::Api {
+						status: 0,
+						message: format!(
+							"exec start connect timed out after {} seconds",
+							CONNECT_TIMEOUT.as_secs()
+						),
+					});
+				}
+			};
+		let mut stream = stream;
 
 		// `Connection: close` is deliberate: this socket is never returned to a
 		// pool, and saying so stops the server holding it open after the command
@@ -59,7 +93,25 @@ impl Client {
 		stream.write_all(body).await?;
 		stream.flush().await?;
 
-		let status = read_response_head(&mut stream).await?;
+		// Same ceiling on the read side as on the connect: the hyper callers
+		// pass `Some(READ_TIMEOUT)` to `send`/`read_body`; this path does
+		// not, so the wall-clock ceiling has to be put on the head read by
+		// hand. The unfixed code waited forever for a peer that opened the
+		// handshake and stopped answering.
+		let status =
+			match tokio::time::timeout(HEAD_READ_TIMEOUT, read_response_head(&mut stream)).await {
+				Ok(Ok(s)) => s,
+				Ok(Err(e)) => return Err(e),
+				Err(_) => {
+					return Err(PodmanError::Api {
+						status: 0,
+						message: format!(
+							"exec start response timed out after {} seconds",
+							HEAD_READ_TIMEOUT.as_secs()
+						),
+					});
+				}
+			};
 		if !(200..300).contains(&status) {
 			return Err(PodmanError::Api {
 				status,

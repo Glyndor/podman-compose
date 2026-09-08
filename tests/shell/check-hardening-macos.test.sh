@@ -18,6 +18,8 @@ script=.github/scripts/check-hardening-macos.sh
 
 if ! command -v clang >/dev/null 2>&1 || ! command -v otool >/dev/null 2>&1 || ! command -v nm >/dev/null 2>&1; then
 	echo "SKIP: clang/otool/nm are not all on PATH; this test runs on the macOS CI runner only."
+	pass=0; fail=0
+	printf 'DONE %s %d %d\n' "${BASH_SOURCE[0]##*/}" "$pass" "$fail"
 	exit 0
 fi
 
@@ -102,4 +104,5 @@ check "no arguments is a usage error, exit 2" "2" "$rc"
 
 echo
 echo "passed: $pass  failed: $fail"
+printf 'DONE %s %d %d\n' "${BASH_SOURCE[0]##*/}" "$pass" "$fail"
 [ "$fail" -eq 0 ]

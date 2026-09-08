@@ -20,12 +20,26 @@ on:
         default: 300
       extensions:
         description: Space-separated source file extensions to check
+        # Pinned: a caller that passes a subset of the configured
+        # extension list narrows what the line-limit gate covers
+        # while the ruleset still requires `line limit`. Workflow
+        # YAML is maintained under the same constraint as the rest
+        # of the source; the gate must continue to read it.
         type: string
-        default: "rs go ts tsx js jsx mjs cjs py sh astro vue svelte"
+        default: "rs go ts tsx js jsx mjs cjs py sh astro vue svelte yml yaml"
       exclude-pattern:
         description: Optional extended regex; matching paths are skipped
+        # Pinned: a caller that passes a different regex narrows what
+        # the line-limit gate covers while the ruleset still
+        # requires `line limit`. The bench scenarios are deliberately
+        # oversized by the benchmark that runs on them, and a
+        # maintainability warning there is noise. The condition: this
+        # holds while bench/scenarios contains only generated or
+        # deliberately-oversized fixtures. The day something
+        # maintained by hand lands there, the exclusion is wrong and
+        # this sentence is where it says so.
         type: string
-        default: ""
+        default: "^bench/scenarios/"
 
 permissions:
   contents: read

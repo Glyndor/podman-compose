@@ -16,6 +16,119 @@ name: Workflow lint (reusable)
 # pinned version (shell-ci.yml). Installing the same pinned shellcheck here
 # and pointing actionlint at it with -shellcheck keeps that pass reproducible
 # too.
+#
+# ===========================================================================
+# Release-path workflows and the ruleset (#1745)
+# ===========================================================================
+#
+# The caller-if and caller-with-defaults steps in this file both reference a
+# static map of "required" reusables (REQUIRED_REUSABLES) and a static map
+# of "required" direct emitters (DIRECT_EMITTER_NAMES). Those maps name the
+# checks the ruleset requires on `main` and `develop`. Five reusables and
+# one direct emitter are wired. The release path -- the workflows that build,
+# sign, attest and verify the artifacts that publish as a GitHub release --
+# is not on that list. That is the deliberate state at the time of this
+# writing, and the rationale is what follows.
+#
+# The rule that says "do not promote a check that has never failed for the
+# right reason" is in `~/.claude/CLAUDE.md`:
+#
+#   A gate that never has failed is not tested. Before marking a check as
+#   required, provoke the failure on purpose and confirm it goes red for
+#   the right reason.
+#
+# The release-path workflows are not required today because none of them
+# has been demonstrated to fail at the gate they would defend. Promoting
+# any of them would replace "no failure observed" with "no failure
+# possible": a required check whose name matches a workflow that runs
+# green regardless of what the pull request changes is a green check
+# that blocks the merge. The cost is real, the value is zero, and a
+# future operator looking at this file is the right place to be told so.
+#
+# The release-path workflows that touch a PR, what each would have to
+# demonstrate to become a required check, and where it would sit:
+#
+#   asset-contract.yml:check
+#     Calls reusable-installer-contract.yml. Today this fires once per
+#     PR that touches install.sh, install.ps1, release.yml, or any of
+#     the release-script paths. To be promoted: provoke a deliberate
+#     drift between install.sh's ARTIFACT template and release.yml's
+#     asset: matrix (rename one, do not rename the other, push a PR
+#     that touches only install.sh and confirm this job exits red with
+#     a message that names the missing asset). The job's name would
+#     pin to its current `check` (`release / install.sh <-> release
+#     asset names` or similar; the reusable's emit map below would
+#     carry the value).
+#
+#   asset-contract.yml:shell-signing-fixture
+#     Runs the per-asset .sig loop fixture in Linux bash. To be
+#     promoted: delete one of the seed signature files in the fixture
+#     tree, push a PR, confirm the fixture's loop falls through to the
+#     missing-file branch and exits red with the L7 class of error
+#     pinned in tests/fixtures/releases/test.sh. Pin the job's name
+#     once the failure is reproducible.
+#
+#   asset-contract.yml:powershell-signing-fixture
+#     Same fixture in PowerShell, on windows-latest. The acceptance
+#     is the same (a missing .sig reaches the L7 branch and the job
+#     exits red under pwsh). Both fixtures are tested on
+#     windows-latest; either promotion would require a windows-latest
+#     failure to be reproducible there.
+#
+#   asset-contract.yml:shell-version-self-test
+#     Drives verify_version_self_test in install.sh against a set of
+#     .cmd stubs (matching, older, -dev suffix, garbage, non-zero
+#     exit, missing file). To be promoted: edit the fixture to skip
+#     one of the cases and confirm the job reads red. Same shape for
+#     powershell-version-self-test, on windows-latest.
+#
+#   asset-contract.yml:rust-self-test-reference
+#     `cargo test --locked -p podup install::tests::self_test` at the
+#     configured MSRV, mirroring the shell installer path. To be
+#     promoted: disable a branch of `self_test`, run the job, confirm
+#     the rust test goes red. The job's name is the cargo test's
+#     harness path; if it moves, the ruleset has to be rewritten.
+#
+#   asset-contract.yml:shell-proto-redir
+#     Stands up a local https listener that 302s to an http listener,
+#     sources install.sh's helpers, runs the download, and asserts
+#     the install refused. The case the fixture exercises today is
+#     `--proto-redir` catching the downgrade. To be promoted: remove
+#     the `--proto-redir` flag from the install helper, run the
+#     fixture, confirm it goes red on the install side rather than
+#     somewhere later.
+#
+# `release.yml`'s jobs (verify, build, build-deb, sbom, release) are
+# not on this list at all: the workflow triggers on tag push, not on
+# pull_request, so its jobs cannot be required status checks for PRs.
+# They cannot be promoted because promotion means "matched by name
+# against a ruleset that gates merges", and a merge gate is a PR gate.
+# If at some future point the release path needs defence the day a tag
+# is cut, the rule that would carry it is a tag-protection rule rather
+# than a branch-protection rule, and the candidate fixtures above
+# (asset-contract.yml's six jobs) are what would do that defence on
+# the PR that produced the tag.
+#
+# All six candidates live in asset-contract.yml, which is already in
+# the ruleset's pull-request filter, so the path filter does not need
+# to move for any promotion. What each promotion needs is the
+# demonstrate-the-failure step above, run against a deliberately-broken
+# fixture, with the resulting red PR carrying the message so a future
+# operator can see what the check catches. After the demonstration
+# the static map REQUIRED_REUSABLES (or DIRECT_EMITTER_NAMES) grows
+# by one entry, the ruleset on `main` (and `develop`, where the ruleset
+# duplicates the `main` rule) gains the new check, and the failures
+# that would have escaped before that PR appear in the ruleset's red
+# list from then on.
+#
+# The lint itself is the wrong place to verify the demonstration. A
+# step that says "every release-path candidate has been demonstrated"
+# is a step that requires the demonstration to have run, and the
+# demonstration is by construction a thing that happened once in the
+# past. A static check would be lying. The actual verification is the
+# PR that first landed the failure-mode fixture, the comparison of the
+# red log against the expected reason, and the follow-up that turns
+# the candidate into a required check.
 
 on:
   workflow_call:
@@ -111,23 +224,51 @@ jobs:
 
           import yaml
 
-          # `secrets.<id>` is how every GitHub Actions expression reaches a
-          # secret. `secrets: inherit` and `secrets:` declarations on
-          # reusable calls don't match, because those are declaration blocks, not
-          # references, and `secrets:` does not contain a `.`.
-          SECRET_RE = re.compile(r"(?<!\w)secrets\.[A-Za-z_]\w*")
+          # Three forms reach a secret at runtime: `secrets.<id>`,
+          # `secrets['<id>']` and `secrets["<id>"]` (with optional
+          # whitespace inside the brackets). `secrets: inherit` and the
+          # `secrets:` block on a reusable call don't match, because
+          # those are declaration blocks, not references, and `secrets:`
+          # is not followed by `.` or `[`.
+          SECRET_RE = re.compile(
+              r"(?<!\w)secrets(?:\.[A-Za-z_]\w*|\[\s*['\"]"
+              r"[A-Za-z_]\w*['\"]\s*])"
+          )
 
           # (`pattern`, `opt-out marker on the same line`). The marker, when
           # present on the line, exempts that install: the only case where
           # the resolved tree is fixed is pip with --require-hashes, which
           # reads the lockfile verbatim and installs exactly what it lists.
+          #
+          # Property-based list (every entry is a known way to pull code
+          # from outside this org and have it run on the runner; the
+          # literal-string list this replaced caught the obvious shapes
+          # and missed synonyms like `cargo binstall`, `pip3 install`,
+          # `python -m pip install`, `python3 -m pip install`, `pipx
+          # install`, and `dotnet tool install`). The release signing
+          # job holds `GLYNDOR_RELEASE_ED25519_KEY` and runs `pip install
+          # --quiet --require-hashes -r .github/scripts/sign-requirements
+          # .txt`, which executes the cryptography package's native build
+          # script; hashed, so it is exempt, and the build script runs.
+          # The release target's own build-script count is 14 (cargo
+          # metadata --filter-platform x86_64-unknown-linux-gnu),
+          # confirmed against 15 directories in target/release/build (one
+          # of which is podup's own build script); the whole lockfile
+          # graph with dev-deps is 33, and an acceptance built on 33 would
+          # exempt crates the release never builds.
           INSTALL_PATTERNS = (
               ("cargo install",   None),
+              ("cargo binstall",  None),
               ("go install",      None),
               ("gem install",     None),
               ("npm install -g",  None),
               ("npm i -g",        None),
+              ("dotnet tool install", None),
               ("pip install",     "--require-hashes"),
+              ("pip3 install",    "--require-hashes"),
+              ("python -m pip install",  "--require-hashes"),
+              ("python3 -m pip install", "--require-hashes"),
+              ("pipx install",    None),
           )
 
 
@@ -159,6 +300,19 @@ jobs:
                   return violations
               if not isinstance(spec, dict):
                   return violations
+
+              # A workflow-level `env:` propagates to every job in the
+              # workflow, so a secret referenced there reaches every step.
+              # `defaults:` only sets `shell` and `working-directory`, not
+              # `env`, so a secret under it does NOT reach a step and is
+              # not in scope here.
+              workflow_env = spec.get("env")
+              workflow_env_text = (
+                  yaml.safe_dump(workflow_env)
+                  if isinstance(workflow_env, dict) else ""
+              )
+              workflow_holds_secret = bool(SECRET_RE.search(workflow_env_text))
+
               jobs = spec.get("jobs") or {}
               for job_id, job in jobs.items():
                   if not isinstance(job, dict):
@@ -168,7 +322,11 @@ jobs:
                   # Comments are stripped by safe_load, so they cannot
                   # produce a false positive.
                   job_text = yaml.safe_dump(job)
-                  if not SECRET_RE.search(job_text):
+                  # The job holds a secret if its own text references one,
+                  # or if the workflow-level env does (every job inherits
+                  # it).
+                  job_holds_secret = bool(SECRET_RE.search(job_text))
+                  if not job_holds_secret and not workflow_holds_secret:
                       continue
                   for step in (job.get("steps") or []):
                       if not isinstance(step, dict):
@@ -184,7 +342,12 @@ jobs:
                               if pattern in line and not (
                                   except_marker and except_marker in line
                               ):
-                                  violations.append((spec_path, job_id, line))
+                                  violations.append((
+                                      spec_path, job_id, line,
+                                      "the workflow-level `env:`"
+                                      if not job_holds_secret
+                                      else "this job",
+                                  ))
                                   break
               return violations
 
@@ -198,9 +361,14 @@ jobs:
               for path in files:
                   violations.extend(find_violations(path))
               if violations:
-                  for path, job_id, line in violations:
+                  for path, job_id, line, source in violations:
+                      # Naming where the secret comes from matters when it is
+                      # not in the job: an author reading "job X holds a
+                      # secret" and seeing no secret in job X concludes the
+                      # check is wrong rather than looking further up the file.
                       msg = (
-                          f"job `{job_id}` installs third-party tooling while holding a secret: "
+                          f"job `{job_id}` installs third-party tooling while holding a secret "
+                          f"from {source}: "
                           f"`{line.strip()}`. See Glyndor/apt#121. Fix by moving the install "
                           f"into a job that holds no secrets, or pin it by hash "
                           f"(e.g. `pip install --require-hashes`)."
@@ -328,3 +496,413 @@ jobs:
           if __name__ == "__main__":
               sys.exit(main())
           PY
+
+      # A caller-level `if:` on a job that emits a required check name is a
+      # switch, not a filter. GitHub reports a SKIPPED required check as
+      # SUCCESS, so one `if:` line can switch off coverage, the MSRV floor,
+      # or the validation on both supported Podman majors while the ruleset
+      # reports the gate as satisfied.
+      #
+      # Measured against this repository on 2026-09-06: eleven status checks
+      # are required on `main` and ten on `develop`. Every one of them is
+      # emitted either directly by a job in this tree or by a reusable a job
+      # here calls. Nothing in this repository asserts that property; #1718.
+      #
+      # The interesting case is `if: always()`. It can never evaluate false,
+      # so the job always runs and the check is always reported. Allowed.
+      # That is the load-bearing pattern from #1552: a gate job summarises a
+      # matrix that may fail, so it has to run on `failure` too and reads
+      # `needs.*.result` to make the verdict. The reusable-rust-ci and
+      # podman-lane gates are full of it.
+      #
+      # `if:` lines INSIDE a reusable are not in scope here. They are how
+      # the reusable is configured (`if: inputs.msrv != ''`), and refusing
+      # them would take down the repository by deleting controls. The step
+      # below skips files whose basename starts with `reusable-` so the
+      # rejection cannot reach them.
+      #
+      # Why a list of names and not "any job in any reusable": a ruleset
+      # requires a stable name (Glyndor/podup#1552), so the named set is the
+      # actual contract. A reuse-side `name: foo (bar)` whose value moves
+      # is its own problem; this step refuses a switch in front of it, not
+      # the move.
+      #
+      # Lives here for the same reason tooling-isolation does: a workflow-lint
+      # job inside the shell suite would share the fate of the `if:` it tries
+      # to gate, and any other required job is the one whose `if:` is the
+      # defect being caught.
+      - name: A caller of a required check must not carry a switchable `if:`
+        run: |
+          python3 - <<'PY'
+          import glob
+          import os
+          import sys
+
+          import yaml
+
+          # Reusables whose jobs' `name:` becomes part of a required check
+          # name when a job here calls them. Each entry is the basename of
+          # the reusable; the matching caller is any job with
+          # `uses: ./.github/workflows/<name>`.
+          #
+          # The names below are the ones the rulesets on `main` and `develop`
+          # require, deduplicated and corrected against
+          # `gh pr checks <merged-PR> --required` on 2026-09-06. They move
+          # only when a required check is added or removed, and that is
+          # pulled by reading the live ruleset, not by guessing.
+          REQUIRED_REUSABLES = {
+              "reusable-rust-ci.yml": [
+                  "Format & lint", "Test", "Coverage", "Doc warnings",
+                  "MSRV", "Extra platforms",
+              ],
+              "reusable-dco.yml": [
+                  "Signed-off-by present on every commit",
+              ],
+              "reusable-line-limit.yml": [
+                  "line limit",
+              ],
+              "reusable-main-guard.yml": [
+                  "develop-only",
+              ],
+              "reusable-workflow-lint.yml": [
+                  "workflow-lint",
+              ],
+          }
+
+          # Required check names emitted directly by a job in this
+          # repository, not via a reusable call. The set is the value of
+          # the job's `name:` field that GitHub reports. A future addition
+          # lands here with its check name; the file it sits in is
+          # incidental.
+          DIRECT_EMITTER_NAMES = {
+              "Supported Podman majors",
+          }
+
+          # `if: always()` is the only `if:` value allowed on a caller of
+          # a required check. It evaluates true on every outcome, so the
+          # job runs and the check is reported. Anything else can evaluate
+          # false (`false`, `github.event_name == ...`, `inputs.x`,
+          # `success()`), and a skipped required check reports Success.
+          ALWAYS = "always()"
+
+
+          def is_switchable(value):
+              """True if an `if:` value can skip the job. Anything other
+              than `always()` can, including `true` (redundant but not
+              skip-causing on its own; refuse on principle so the rule is
+              easy to read and the tree does not grow decorative
+              conditionals). The point is that the assertion is precise:
+              the only blessed form is `always()`, and the reason is that
+              it cannot evaluate false."""
+              if isinstance(value, bool):
+                  return True
+              if not isinstance(value, str):
+                  return True
+              # A bare `if:` is evaluated as an expression whether or not
+              # the author wraps it in the dollar-brace form, so the wrapped
+              # spelling of `always()` means the same thing. Comparing the
+              # raw text would refuse it, which is valid and common, and
+              # push somebody to rewrite working code. The wrapper is
+              # stripped once, and only when it wraps the whole value:
+              # `always() && needs.x.result` keeps its tail, stays unequal
+              # and is refused, which is right because it can be false.
+              # The opening delimiter is built rather than written out:
+              # actionlint parses any literal one it finds inside this
+              # `run:` block as an expression of this workflow and fails on
+              # it, which is a real trap for anybody editing this scanner.
+              open_expr = "$" + "{{"
+              text = value.strip()
+              if text.startswith(open_expr) and text.endswith("}}"):
+                  text = text[len(open_expr):-2].strip()
+              return text != ALWAYS
+
+
+          def main():
+              files = sorted(set(
+                  glob.glob(".github/workflows/*.yml")
+                  + glob.glob(".github/workflows/*.yaml")
+              ))
+
+              # First pass: walk the reusables themselves to learn which
+              # required check names each one emits. The map is asserted
+              # against the static list above: a move in a reusable's
+              # `name:` is a defect this step refuses to silently follow.
+              # Skipping reusable-* in the caller scan below is the reason
+              # the static map is needed: those files are scanned for
+              # their own internals, not for how callers use them.
+              reusable_emits = {}
+              for path in files:
+                  name = os.path.basename(path)
+                  if not name.startswith("reusable-"):
+                      continue
+                  if name not in REQUIRED_REUSABLES:
+                      # An unknown reusable is not in scope; a caller
+                      # wrapping it is not gated. Leave it alone.
+                      continue
+                  try:
+                      with open(path) as fh:
+                          spec = yaml.safe_load(fh)
+                  except yaml.YAMLError as e:
+                      print(f"::warning file={path}::skipped: YAML parse error: {e}")
+                      continue
+                  if not isinstance(spec, dict):
+                      continue
+                  expected = set(REQUIRED_REUSABLES[name])
+                  found = set()
+                  jobs = spec.get("jobs") or {}
+                  for job_id, job in jobs.items():
+                      if not isinstance(job, dict):
+                          continue
+                      jname = job.get("name")
+                      if isinstance(jname, str) and jname in expected:
+                          found.add(jname)
+                  missing = expected - found
+                  if missing:
+                      print(
+                          f"::warning file={path}::reusable `{name}` no longer "
+                          f"emits expected required check name(s) {sorted(missing)}; "
+                          "the static map may be stale. Verify against "
+                          "`gh pr checks <merged-PR> --required`."
+                      )
+                  reusable_emits[name] = expected
+
+              violations = []
+
+              for path in files:
+                  name = os.path.basename(path)
+                  # A reusable's own `if:` lines are INSIDE the reusable
+                  # and configure it (`if: inputs.msrv != ''`). They are
+                  # not a caller switch and must stay allowed. The same
+                  # file is also scanned above for the emit assertion.
+                  if name.startswith("reusable-"):
+                      continue
+                  try:
+                      with open(path) as fh:
+                          spec = yaml.safe_load(fh)
+                  except yaml.YAMLError as e:
+                      print(f"::warning file={path}::skipped: YAML parse error: {e}")
+                      continue
+                  if not isinstance(spec, dict):
+                      continue
+                  jobs = spec.get("jobs") or {}
+                  if not isinstance(jobs, dict):
+                      continue
+                  for job_id, job in jobs.items():
+                      if not isinstance(job, dict):
+                          continue
+                      # Direct emitter: the job's `name:` is a required
+                      # check name. The file the job sits in is
+                      # incidental; what the ruleset matches is the
+                      # name GitHub reports.
+                      job_name = job.get("name")
+                      if isinstance(job_name, str) and job_name in DIRECT_EMITTER_NAMES:
+                          required_name = job_name
+                      else:
+                          required_name = None
+                      # Reusable caller: `uses:` references a known
+                      # required-emitting reusable.
+                      caller_required_names = []
+                      uses = job.get("uses")
+                      if isinstance(uses, str) and uses.startswith("./"):
+                          ref = uses[2:]
+                          for entry in reusable_emits:
+                              if ref.endswith(entry):
+                                  caller_required_names = sorted(reusable_emits[entry])
+                                  break
+                      if required_name is None and not caller_required_names:
+                          continue
+                      if "if" not in job:
+                          continue
+                      value = job["if"]
+                      if not is_switchable(value):
+                          # `if: always()` is the blessed form. Allowed.
+                          continue
+                      listed = (
+                          f"required check `{required_name}`"
+                          if required_name is not None
+                          else f"required checks {caller_required_names}"
+                      )
+                      violations.append((
+                          path, job_id, value, listed,
+                      ))
+
+              if violations:
+                  for path, job_id, value, listed in violations:
+                      print(
+                          f"::error file={path}::job `{job_id}` in {path} "
+                          f"emits {listed} and carries a job-level `if:` "
+                          f"of `{value!r}`. A caller-level conditional on a "
+                          "required check is a switch, not a filter: a "
+                          "skipped required check reports Success and does "
+                          "not block a merge. Only `if: always()` is allowed "
+                          "(it always evaluates true). Move the condition "
+                          "into the job's steps, or change it to "
+                          "`if: always()` if that is what you mean."
+                      )
+                  sys.exit(1)
+              print(
+                  "caller-if: every caller of a required check carries no "
+                  "switchable `if:` (only `if: always()` is allowed)."
+              )
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+      # A `uses:` pin shorter or longer than 40 hex characters makes the
+      # referenced job unreachable: GitHub answers 422 for any other length,
+      # the workflow's run never starts, and the only thing that notices is
+      # a release that was supposed to be exercised. This is the check
+      # #1741 missed on the way in, and it sits at this layer rather than
+      # in the shell suite for the same reason tooling-isolation does:
+      # the defect is a pin GitHub rejects, and any other required job is
+      # the one whose pinned action never ran.
+      #
+      # Local reusable calls (`uses: ./.github/workflows/x.yml`) carry no
+      # `@` and are naturally excluded: the form has no pin to measure.
+      # The third-party form (`uses: owner/repo@<hex> # vX.Y.Z`) is the
+      # only one with a pin and the only one this check reaches.
+      #
+      # A tag or branch reference (`uses: owner/repo@v7`) fails the same
+      # assertion, and deliberately so: nothing else in this repository
+      # refuses one, and no workflow here uses the form, so measuring it
+      # closes the gap rather than deferring it to a check that does not
+      # exist. `tests/shell/reusable-workflow-lint-pin-length.test.sh`
+      # covers every branch of this step, including that one.
+      - name: Every `uses:` pin must be 40 hex characters
+        run: |
+          python3 - <<'PY'
+          import glob
+          import re
+          import sys
+
+          # A SHA-1 pin is exactly 40 lowercase hex characters. Anything
+          # shorter is the defect #1741 caught: a 39-character copy-paste
+          # typo GitHub answers 422 for, leaving the workflow's job never
+          # to run. Anything longer is rejected for the same reason.
+          SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+
+          # `uses:` at the start of a YAML scalar value, optionally
+          # preceded by a list dash. Captures the value to end-of-line;
+          # the trailing `# vX.Y.Z` comment rides along and is stripped
+          # by the part-split below.
+          USES_LINE_RE = re.compile(
+              r"^\s*-\s+uses:\s*(\S.*?)\s*$|^\s*uses:\s*(\S.*?)\s*$"
+          )
+
+
+          def find_violations(spec_path):
+              out = []
+              try:
+                  with open(spec_path) as fh:
+                      lines = fh.readlines()
+              except OSError as exc:
+                  # Silent skip would hide a workflow the linter cannot
+                  # read; reporting as a warning keeps the silence
+                  # visible the way tooling-isolation does.
+                  print(
+                      f"::warning file={spec_path}::skipped: {exc}",
+                      file=sys.stderr,
+                  )
+                  return out
+              for n, raw in enumerate(lines, start=1):
+                  line = raw.rstrip("\n")
+                  if line.lstrip().startswith("#"):
+                      continue
+                  m = USES_LINE_RE.match(line)
+                  if m is None:
+                      continue
+                  value = m.group(1) or m.group(2)
+                  if value is None:
+                      continue
+                  # Local reusable form: `uses: ./.github/workflows/x.yml`.
+                  # No pin, no `@`, not in scope.
+                  if value.startswith("./"):
+                      continue
+                  if "@" not in value:
+                      # No `@` at all is a malformed reference GitHub
+                      # rejects before it gets as far as a pin, and it
+                      # carries nothing to measure.
+                      continue
+                  _owner_repo, _at, after = value.partition("@")
+                  # The pin is the leading whitespace-separated token of
+                  # everything after `@`; the trailing `# vX.Y.Z` rides
+                  # along but does not enter the pin.
+                  pin = after.split()[0] if after.split() else ""
+                  if not SHA1_RE.match(pin):
+                      out.append((spec_path, n, value, pin))
+              return out
+
+
+          def main():
+              files = sorted(set(
+                  glob.glob(".github/workflows/*.yml")
+                  + glob.glob(".github/workflows/*.yaml")
+              ))
+              violations = []
+              for path in files:
+                  violations.extend(find_violations(path))
+              if violations:
+                  for path, line_no, value, pin in violations:
+                      print(
+                          f"::error file={path}::line {line_no}: "
+                          f"`uses:` value `{value}` pins to `{pin}`, "
+                          f"which is {len(pin)} characters; a SHA-1 "
+                          f"pin must be exactly 40 hexadecimal "
+                          f"characters. GitHub answers 422 for any "
+                          f"other length and the job never runs. A tag "
+                          f"or branch name is refused for a second "
+                          f"reason: it moves, so it is not a pin."
+                      )
+                  sys.exit(1)
+              print(
+                  "checkout-pin-length: every `uses:` pin in "
+                  ".github/workflows/ is exactly 40 hexadecimal "
+                  "characters."
+              )
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+      # The caller-if step above refuses a job-level `if:` that can
+      # skip a required job. The same defect repeats through a
+      # different lever: a `with:` value a pull request can change that
+      # alters what a required job does. The ruleset matches on the
+      # CHECK NAME GitHub reports, not on the inputs the job received;
+      # `coverage-threshold: 76` -> 0 keeps `rust / Coverage` as the
+      # name while lowering the gate below any failing build, and the
+      # same shape holds for `msrv: 1.85` -> '', `extra-test-os:
+      # '["macos-latest", ...]'` -> '[]', `doc-warnings: true` ->
+      # false, `extensions: 'rs go ... yml yaml'` -> a subset,
+      # `working-directory: '.'` -> 'src'. Each is a different lever
+      # for the same outcome the ruleset cannot see.
+      #
+      # The fix is to compare each caller's `with:` value to the
+      # reusable's declared `inputs.X.default`. A value that matches
+      # the default is invisible to the runner (it would have been
+      # applied as the default anyway), so the ruleset sees the same
+      # job either way. A value that DIFFERS from the default is a
+      # pull request changing what a required job does; the step
+      # refuses it with a message that names the file, the job, the
+      # input key, the supplied value, and the declared default.
+      #
+      # The reusable is the place where the value the ruleset
+      # assumes is canonicalised. A pull request that changes a
+      # default is reviewed on the reusable's diff, where the
+      # ruleset's check name is fixed by definition (the reusable
+      # emits the same `name:` either way), so the change has to be
+      # deliberate and visible.
+      #
+      # Lives in .github/scripts/check-caller-with-defaults.py because
+      # the inline heredoc would push this file over the line-limit
+      # gate's 500-line hard limit, and the same shape as caller-if
+      # above (static map, direct-emitter list, `reusable-*` filter)
+      # already lives next to it in this file. An unknown `with:` key
+      # (the reusable does not declare it) is silently allowed: GitHub
+      # itself ignores it, and the ruleset does not gate on it.
+      - name: A caller of a required check must carry `with:` equal to the reusable's declared default
+        run: |
+          python3 .github/scripts/check-caller-with-defaults.py

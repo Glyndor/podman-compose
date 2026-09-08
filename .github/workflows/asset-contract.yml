@@ -170,6 +170,32 @@ jobs:
           persist-credentials: false
       - name: Run the version-self-test shell fixture
         run: bash tests/fixtures/releases/version-self-test.sh
+  # --proto-redir pin in the shell installer (issue #1722). The flag
+  # restricts the protocol across redirects, so a CDN 302 to http://
+  # is refused at the download rather than fetched from. Nothing
+  # exercised it: the only mentions of proto-redir in the tree were
+  # the comment in install.sh and the curl flag itself. The fixture
+  # stands up a local https listener that 302s to an http listener
+  # serving a valid fixture artifact, sources install.sh's helpers,
+  # and runs the download function against the redirect. The case
+  # asserts the install refused, attributed to the download step
+  # rather than to some later check (so removing --proto-redir
+  # cannot make it pass for the wrong reason).
+  shell-proto-redir:
+    runs-on: ubuntu-latest
+    # Bound: the case starts a python http.server on 127.0.0.1 plus
+    # an openssl one-shot cert. Both are local; no I/O bound on the
+    # network. Worst case observed locally on this hardware was under
+    # 5 s including interpreter start. Ten times that, rounded up,
+    # never under ten minutes; the six-hour default is what a hang
+    # would otherwise cost.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the proto-redir shell fixture
+        run: bash tests/fixtures/releases/proto-redir-test.sh
   # Same fixture on Windows so install.ps1's Test-StagedVersion is
   # covered. The PowerShell script extracts the function via AST and
   # runs it against .cmd stubs, so a regression in the strict-equality

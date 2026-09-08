@@ -134,6 +134,7 @@ pub fn install_quadlet<S: SystemCtl>(
 		)));
 	}
 
+	quadlet::validate_for_quadlet(file)?;
 	let result = quadlet::generate_at(file, project, base_dir);
 	if let Some(dup) = result.duplicate_filename() {
 		return Err(ComposeError::Autostart(format!(
@@ -187,9 +188,18 @@ pub fn install_quadlet<S: SystemCtl>(
 			written.len()
 		);
 	} else {
-		for svc in &services {
-			checked(sc.systemctl(&["start", svc]), &format!("start {svc}"))?;
-		}
+		// One `systemctl --user start svc1 svc2 ...` call instead of one fork
+		// per service: systemd serializes the starts whether they were the
+		// operands of a single call or separate ones, so the only difference
+		// at the binary level was the per-service process fork (#1747).
+		let svc_args: Vec<&str> = services.iter().map(String::as_str).collect();
+		let mut args: Vec<&str> = Vec::with_capacity(svc_args.len() + 1);
+		args.push("start");
+		args.extend(svc_args);
+		checked(
+			sc.systemctl(&args),
+			&format!("start {}", services.join(" ")),
+		)?;
 		eprintln!(
 			"podup: started {} container service(s) for '{project}'",
 			services.len()

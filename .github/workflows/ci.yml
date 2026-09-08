@@ -94,6 +94,13 @@ jobs:
   #
   # max-age-days allows about two periods, so one miss is tolerated:
   # 15 for weekly, 3 for daily, 65 for the monthly benchmark.
+  #
+  # These jobs are ADVISORY and must never be promoted to required status
+  # checks. Each one fails because a cron somewhere else stopped firing, which
+  # has nothing to do with the change under review, so requiring one would
+  # block every pull request for the length of an unrelated outage. The rule
+  # lives in the organisation standard, and it is repeated here because this
+  # file is what somebody wiring a ruleset has open.
   freshness-audit:
     permissions:
       contents: read
@@ -137,6 +144,25 @@ jobs:
   # successful scheduled run on record" until the workflow has reached `main`
   # and its cron has fired once. `pin-watch.yml` (#1526) is waiting for exactly
   # that and gets its entry afterwards.
+  #
+  # `podman-lane-develop-nightly.yml` has a cron and is deliberately NOT
+  # watched here, so that its absence reads as a decision rather than an
+  # oversight. Two reasons, and the second is the blocking one.
+  #
+  # Its output is an observation, not a gate: it reports the coverage of
+  # `develop` under Podman 6 against a floor that no pull request can move,
+  # since the gate a pull request answers to is the 76 per cent threshold on
+  # `rust / Coverage`. A watcher would then report the staleness of a number
+  # nobody is required to keep fresh.
+  #
+  # And a watcher added today would be born red. The guard reads the newest
+  # scheduled run with `status=success`, and measured on 2026-09-06 the last
+  # successful nightly was 2026-09-01: five consecutive nights failed on the
+  # 88 per cent floor (85.51, then 85.38, then 85.40 on the three that print
+  # the figure). A cron that fires nightly and fails nightly is, to this
+  # guard, indistinguishable from a cron that stopped. The entry belongs here
+  # once that lane is green again, not before, and #1380 is where the floor
+  # itself is argued.
 
   # Monthly (`0 4 1 * *`), so seventeen days without a run is normal and a
   # weekly threshold here would fail on ordinary work for most of the month.
@@ -148,6 +174,43 @@ jobs:
     with:
       workflow: benchmark.yml
       max-age-days: 65
+
+  # Fails when the newest COMPLETED run of `ci.yml` on a protected branch is
+  # not a success. The freshness watchers above cannot catch this: they read
+  # the newest SUCCESSFUL scheduled run, so a failing scheduled run is
+  # missing from their answer by construction. A protected branch whose
+  # gates are red is the published state failing rather than a broken
+  # integration branch, and that is the gap this closes.
+  #
+  # Two jobs, one per branch. They MUST stay separate. Each name carries
+  # the branch it watches, and a single job that watched both would emit
+  # one check name covering two branches - and a check name that does not
+  # move is the property required checks depend on (Glyndor/podup#1552).
+  #
+  # MUST NOT BECOME A REQUIRED STATUS CHECK. A red `main` would then block
+  # the pull request that repairs it, which is the exact failure mode this
+  # check exists to surface. The reason is repeated inside the reusable,
+  # where somebody wiring required checks would look first. Do not remove
+  # either copy.
+  health-main:
+    name: branch health (main)
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/reusable-branch-health.yml
+    with:
+      workflow: ci.yml
+      branch: main
+
+  health-develop:
+    name: branch health (develop)
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/reusable-branch-health.yml
+    with:
+      workflow: ci.yml
+      branch: develop
 
   # Dependabot silently stops proposing updates when its config is not
   # re-registered, and like a dead cron it reports nothing at all. This fails

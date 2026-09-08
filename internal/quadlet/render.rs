@@ -231,6 +231,31 @@ pub(super) fn sanitize_value(value: &str) -> String {
 	value.chars().filter(|c| !c.is_control()).collect()
 }
 
+/// Quote a compose value that is interpolated into a `PodmanArgs=` template
+/// (one of the seven [`crate::quadlet::render`] sites), so the resulting
+/// `PodmanArgs=` line cannot smuggle additional `podman run` flags into the
+/// argv the quadlet generator hands to `podman`.
+///
+/// Three things happen, in order:
+///
+/// 1. Control characters are stripped, the same rule as [`sanitize_value`], so
+///    an embedded newline cannot split the directive or inject a sibling
+///    line.
+/// 2. `%` is doubled, because systemd specifiers like `%h` or `%U` would otherwise
+///    be expanded at unit activation, and a value like `%h/mem` would become
+///    `<hostname>/mem` inside the podman flag. `Environment=` already does
+///    this; the seven `PodmanArgs=` interpolation sites were not, which is
+///    why the brief calls it out.
+/// 3. The result is wrapped in double quotes (with `"` and `\` escaped),
+///    which is the systemd word-splitting syntax for "these characters are
+///    one token". A hostile value carrying whitespace stays inside the
+///    quoted group; podman sees one argv element and rejects it.
+pub(super) fn quote_podman_arg_value(value: &str) -> String {
+	let stripped = sanitize_value(value);
+	let escaped = stripped.replace('%', "%%");
+	format!("\"{}\"", escaped.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 /// Keys whose value Quadlet/systemd splits on whitespace (a `KEY=VALUE` option
 /// list): an unquoted space would split a single value into a truncated value
 /// plus bogus extra entries, so such values are quoted when they contain

@@ -11,25 +11,10 @@ use crate::libpod::{urlencoded, API_PREFIX};
 use super::parallel::first_error;
 use super::targets::{stop_deadline, stop_timeout_param};
 
-/// A live project container: the name to act on plus its machine-readable
-/// state, as reported by the libpod container-list endpoint. Returned by
-/// [`Engine::live_service_containers`] so callers can act on (and report) only
-/// containers in the right state.
-pub(crate) struct LiveContainer {
-	/// Container name with the leading slash stripped.
-	pub name: String,
-	/// Machine-readable state (`running`, `created`, `exited`, `paused`, …).
-	pub state: String,
-}
-
 /// Whether a container in this state is currently active, i.e. `stop` would
 /// actually transition it. A `running` or `paused` container is stopped; a
 /// `created`/`exited`/`dead`/… one is already not running, so stopping it is a
 /// no-op that must not be reported as "stopped" (#876). Pure for unit testing.
-///
-/// Unused in production since the per-service lifecycle commands stopped
-/// filtering by state themselves (#1363), kept here for the unit test that
-/// pins its truth table.
 #[allow(dead_code)]
 pub(crate) fn state_is_active(state: &str) -> bool {
 	matches!(state, "running" | "paused")
@@ -175,11 +160,20 @@ impl Engine {
 	/// failure is remembered and returned once every replica has been
 	/// attempted, so `scale`/`up --scale` does not exit 0 with a surplus
 	/// replica silently left running (#598).
+	///
+	/// `existing` is the bulk project's container snapshot the caller fetched
+	/// earlier in the same `up` walk; filtering it in memory saves one
+	/// `/containers/json` round trip per `--scale` override, since the
+	/// per-service label is already carried on each `ExistingContainer`
+	/// (entry #1747). `scale` (the standalone command) does not have that
+	/// snapshot, so it builds one inline by issuing the same endpoint
+	/// itself; the duplicate-fetch concern is the `up` path, not this one.
 	pub(super) async fn remove_surplus_replicas(
 		&self,
 		service_name: &str,
 		service: &Service,
 		target: u32,
+		existing: &std::collections::HashMap<String, super::ExistingContainer>,
 	) -> Result<()> {
 		// The desired set is the index-suffixed name at every count (`svc-1`
 		// even for a single replica), so a scale N→1 keeps the running `svc-1`
@@ -190,10 +184,16 @@ impl Engine {
 			.into_iter()
 			.collect();
 		let grace = self.grace_period_secs(service);
-		let surplus: Vec<String> = self
-			.list_project_container_names(Some(service_name))
-			.await?
-			.into_iter()
+		// Filter the in-memory bulk snapshot by the per-service label rather
+		// than issuing a fresh `/containers/json`. On the `up` path the
+		// caller fetched that whole snapshot at the top of `run_up`; a second
+		// per-service fetch re-reads a data set that is already on hand.
+		let surplus: Vec<String> = existing
+			.iter()
+			.filter_map(|(name, entry)| match entry.service.as_deref() {
+				Some(svc) if svc == service_name => Some(name.clone()),
+				_ => None,
+			})
 			.filter(|name| !desired.contains(name))
 			.collect();
 		// Scaling down removes surplus replicas but keeps their data volumes
@@ -353,64 +353,57 @@ impl Engine {
 		Ok(by_service)
 	}
 
-	/// The live containers of a service (matched by the `podup.service` label),
-	/// each paired with its machine-readable state (`running`, `created`,
-	/// `exited`, `paused`, …). This does NOT fall back to statically-predicted
-	/// names: a service with no live container
-	/// yields an empty vec, so a lifecycle op (stop/wait/…) on a defined-but-
-	/// never-created service is a quiet no-op instead of POSTing to a phantom
-	/// name and surfacing a raw 404 (#758). The state lets `stop` report
-	/// "stopped" only for containers that were actually running (#876).
-	pub(crate) async fn live_service_containers(
+	/// Sibling of [`Self::live_project_replicas_sorted`] that filters each
+	/// bucket to running containers only. Built for `podup top`, where the
+	/// libpod `/top` endpoint answers a non-running container with an HTTP 500
+	/// and the caller would otherwise have to skip it after the fact (#1250).
+	/// One bulk GET powers the whole-project `top` the way
+	/// `live_project_replicas_sorted` already powers `logs`/`port`/`exec`/`cp`
+	/// (#1445): a 40-service `top` used to issue 40 `/containers/json` GETs,
+	/// one per service, and now issues 1 (#1742).
+	///
+	/// Same per-service sort as the sorted sibling, so the printed order is
+	/// the same ascending `-1, -2, -3` order `top` used to produce from the
+	/// per-service helper. The static-name fallback is the caller's
+	/// responsibility: a service absent from the map yields no names here.
+	pub(crate) async fn live_project_running_replicas_sorted(
 		&self,
-		service_name: &str,
-	) -> Result<Vec<LiveContainer>> {
-		let filters = serde_json::json!({
-			"label": [
-				self.project_label_raw(),
-				format!("podup.service={service_name}"),
-			],
-		});
+	) -> Result<std::collections::HashMap<String, Vec<String>>> {
+		// Reuse the per-engine URL-encoded filter (#1364); see
+		// [`Engine::project_label_filter_encoded`].
 		let path = format!(
 			"{API_PREFIX}/containers/json?all=true&filters={}",
-			urlencoded(&filters.to_string()),
+			self.project_label_filter_encoded(),
 		);
 		let entries = self
 			.client
 			.get_json::<Vec<crate::libpod::types::container::ContainerListEntry>>(&path)
 			.await
 			.map_err(ComposeError::Podman)?;
-		Ok(entries
-			.into_iter()
-			.filter_map(|e| {
-				let state = e.state;
-				e.names.into_iter().next().map(|raw| LiveContainer {
-					name: raw.trim_start_matches('/').to_string(),
-					state,
-				})
-			})
-			.collect())
-	}
-
-	/// The names of a service's containers that are actually **running**, in the
-	/// same ascending `-1, -2, -3, ...` order as [`Self::live_project_replicas_sorted`].
-	///
-	/// For the query commands that only mean anything against a live process
-	/// (`top`), where a stopped replica has to be skipped rather than asked: the
-	/// libpod endpoints answer a non-running container with an HTTP 500, which
-	/// callers must not have to tell apart from a real failure by parsing its
-	/// message. There is no fallback to statically-derived names: a service
-	/// that was never created has nothing running, so it yields an empty vec
-	/// instead of a phantom name.
-	pub(crate) async fn running_replica_names(&self, service_name: &str) -> Result<Vec<String>> {
-		let mut running: Vec<String> = self
-			.live_service_containers(service_name)
-			.await?
-			.into_iter()
-			.filter(|c| c.state.eq_ignore_ascii_case("running"))
-			.map(|c| c.name)
-			.collect();
-		sort_replica_names(&mut running);
-		Ok(running)
+		let mut by_service: std::collections::HashMap<String, Vec<String>> =
+			std::collections::HashMap::new();
+		for entry in entries {
+			// The `/top` endpoint answers a non-running container with an
+			// HTTP 500; dropping the stopped replicas here is what kept the
+			// per-service `running_replica_names` helper silent on a mixed
+			// listing (#1250).
+			if !entry.state.eq_ignore_ascii_case("running") {
+				continue;
+			}
+			let Some(service) = entry.labels.get("podup.service") else {
+				continue;
+			};
+			let Some(raw) = entry.names.first() else {
+				continue;
+			};
+			by_service
+				.entry(service.clone())
+				.or_default()
+				.push(raw.trim_start_matches('/').to_string());
+		}
+		for names in by_service.values_mut() {
+			sort_replica_names(names);
+		}
+		Ok(by_service)
 	}
 }

@@ -48,6 +48,16 @@ impl Engine {
 			dedup_preserving_order(target_services)
 		};
 
+		// Resolve every selected service's running replicas in a single
+		// `/containers/json` round-trip, the same bulk path `logs`/`port`/
+		// `exec`/`cp` already share (#1445). The per-service
+		// `running_replica_names` helper used to sit here, costing one
+		// listing GET per service: 40 services meant 40 GETs for a single
+		// `podup top` (#1742). A service absent from the bulk map yields no
+		// names; matching the per-service helper's "no fallback to static
+		// names" contract (#1250).
+		let live_by_service = self.live_project_running_replicas_sorted().await?;
+
 		let mut json_rows: Vec<serde_json::Value> = Vec::new();
 		for name in &names {
 			// Only running containers are asked for their process list, so a
@@ -57,11 +67,9 @@ impl Engine {
 			// stays. Measured against `docker compose top` v5.1.3 on the same
 			// Podman socket: it omits a stopped service, prints the rest and exits
 			// 0 (#1250).
-			for container_name in self.running_replica_names(name).await? {
-				let path = format!(
-					"{API_PREFIX}/containers/{}/top",
-					urlencoded(&container_name),
-				);
+			let containers: &[String] = live_by_service.get(name).map(Vec::as_slice).unwrap_or(&[]);
+			for container_name in containers {
+				let path = format!("{API_PREFIX}/containers/{}/top", urlencoded(container_name),);
 				match self
 					.client
 					.get_json::<crate::libpod::types::container::TopResponse>(&path)
@@ -76,7 +84,7 @@ impl Engine {
 						// The container name is the only navigation aid when several
 						// are listed, so it carries the same identity colour it has in
 						// `ps` and `logs` rather than being merely bold.
-						crate::ui::print_identity_header(&container_name);
+						crate::ui::print_identity_header(container_name);
 						let titles = result.titles.clone().unwrap_or_default();
 						let processes = result.processes.clone().unwrap_or_default();
 						Self::print_process_table(&titles, &processes);

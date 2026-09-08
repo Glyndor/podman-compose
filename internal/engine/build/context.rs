@@ -31,11 +31,55 @@ fn append_context<W: std::io::Write>(
 	// an SSH key, into the image. Store the link itself instead, matching the
 	// watch-sync and cp paths.
 	tar.follow_symlinks(false);
-	for abs in walk::walk_dir(context).map_err(ComposeError::Io)? {
+	// Skip directories the ignore patterns would drop wholesale, so the
+	// walk does not enumerate every entry under an excluded subtree just
+	// to filter each one out (#1746 entry 6). The closure runs once per
+	// directory the walk would otherwise recurse into; the existing
+	// per-entry `is_ignored` check below remains as the source of truth
+	// for the per-file decision, and the directory-level check must agree
+	// with it for every child the walk would have produced. A
+	// contradiction here would let the walk call return paths the
+	// per-entry filter then drops, and the test below pins that the two
+	// never diverge for the patterns the engine actually parses.
+	let skip_dir = |abs: &std::path::Path| -> bool {
+		let rel = match abs.strip_prefix(context) {
+			Ok(r) => r,
+			Err(_) => return false,
+		};
+		let rel_str = to_ignore_path(rel);
+		// `skip_names` is the only way to drop a directory outright, regardless
+		// of ignore patterns (the active `.dockerignore` itself is on the
+		// list, so the builder can rewrite it).
+		if skip_names.iter().any(|n| rel_str == *n) {
+			return true;
+		}
+		// Pruning is only sound when nothing under this directory can be
+		// re-included. `.dockerignore` negation does exactly that:
+		//
+		//     vendor/
+		//     !vendor/keep.txt
+		//
+		// The directory is ignored and one file under it is not, so pruning
+		// `vendor` loses `keep.txt` from the context and a `COPY` naming it
+		// fails. The walk's own comment said the engine had no negation
+		// patterns "in the wild" that re-include a child; that was an
+		// assertion about what users write, and `.dockerignore` supports
+		// negation precisely so they can.
+		//
+		// The cheap, correct condition: descend whenever any negation
+		// pattern could name something beneath this directory. The
+		// optimisation still applies to the ordinary case, an ignored
+		// subtree with nothing re-included, which is what it was for.
+		if !is_ignored(&rel_str, ignore_patterns) {
+			return false;
+		}
+		!negation_could_reach(&rel_str, ignore_patterns)
+	};
+	for abs in walk::walk_dir_skipping(context, skip_dir).map_err(ComposeError::Io)? {
 		let rel = abs
 			.strip_prefix(context)
 			.map_err(|_| ComposeError::Build("path strip error".into()))?;
-		let rel_str = rel.to_string_lossy();
+		let rel_str = to_ignore_path(rel);
 		if skip_names.iter().any(|n| rel_str == *n) {
 			continue;
 		}
@@ -296,6 +340,38 @@ fn ignore_file(context: &Path) -> (&'static str, Vec<String>) {
 /// `.dockerignore` semantics: a leading `!` re-includes a path that an earlier
 /// pattern excluded. So `*.log` then `!keep.log` ignores every log except
 /// `keep.log`.
+/// A relative path in the form `.dockerignore` patterns are written in.
+///
+/// Patterns always use `/`, and `Path` on Windows yields `\`, so matching the
+/// raw string meant no pattern below the top level ever matched there:
+/// `vendor/` silently ignored nothing. The tar writer already normalises, so
+/// the entry names and the ignore check disagreed about the same file. Found
+/// by a negation test failing on the Windows runner only.
+fn to_ignore_path(rel: &std::path::Path) -> String {
+	let s = rel.to_string_lossy();
+	if std::path::MAIN_SEPARATOR == '/' {
+		s.into_owned()
+	} else {
+		s.replace(std::path::MAIN_SEPARATOR, "/")
+	}
+}
+
+/// Could any negation pattern re-include something under `dir`?
+///
+/// Conservative on purpose: a `true` costs a descent that the leaf filter
+/// then throws away, while a wrong `false` silently drops a file the user
+/// asked to keep. A negation whose path starts at `dir`, or that begins
+/// with a wildcard and so could match at any depth, counts as reaching it.
+fn negation_could_reach(dir: &str, patterns: &[String]) -> bool {
+	patterns
+		.iter()
+		.filter_map(|p| p.strip_prefix('!'))
+		.any(|p| {
+			let p = p.trim_start_matches("./");
+			p.starts_with('*') || p.starts_with(dir) || dir.is_empty()
+		})
+}
+
 fn is_ignored(path: &str, patterns: &[String]) -> bool {
 	let mut ignored = false;
 	for pattern in patterns {
@@ -385,5 +461,8 @@ fn glob_rec(pat: &[u8], s: &[u8]) -> bool {
 	}
 }
 
+#[cfg(test)]
+#[path = "context/pattern_tests.rs"]
+mod pattern_tests;
 #[cfg(test)]
 mod tests;

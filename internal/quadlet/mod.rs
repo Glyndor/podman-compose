@@ -18,7 +18,30 @@ mod warnings;
 use std::cell::Cell;
 
 use crate::compose::types::ComposeFile;
+use crate::error::{ComposeError, Result};
+use crate::ports::parse_ports;
 use unit::{build_unit, container_unit, network_unit, volume_unit, UnitContext};
+
+/// Validate compose data before writing Quadlet units.
+pub fn validate_for_quadlet(file: &ComposeFile) -> Result<()> {
+	if let Err(e @ ComposeError::CircularDependency(_)) = crate::compose::resolve_order(file) {
+		return Err(e);
+	}
+	for (name, svc) in &file.services {
+		if svc.image.is_none() && svc.build.is_none() {
+			return Err(ComposeError::NoImageOrBuild(name.clone()));
+		}
+		parse_ports(&svc.ports)?;
+		if let Some(mem) = &svc.mem_limit {
+			if crate::size::parse_memory(mem).is_none() {
+				return Err(ComposeError::Unsupported(format!(
+					"service '{name}': mem_limit '{mem}' is not a valid memory size"
+				)));
+			}
+		}
+	}
+	Ok(())
+}
 
 thread_local! {
 	/// CLI `--no-warn` flag honoured by the Quadlet path's host-binding /

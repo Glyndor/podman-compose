@@ -64,6 +64,14 @@ pub use engine::{
 	PullOptions, PushOptions, RunOptions, RunOverrides, StatsOptions, VolumesDisplayOptions,
 	VolumesOptions, DEFAULT_LOG_TAIL,
 };
+/// Return the runtime value of `security_opt`'s `no-new-privileges` key:
+/// `Some(true)` when the engine will apply it, `Some(false)` when an entry
+/// explicitly disables it, `None` when no entry matched. Surfaced for the
+/// audit module, which must read the resolved value rather than the
+/// compose-side text (`#1743`).
+pub fn effective_no_new_privileges(service: &crate::compose::types::Service) -> Option<bool> {
+	crate::engine::container::parse_security_opts(service).no_new_privileges
+}
 /// The crate's error type and `Result` alias, surfaced so callers handle one
 /// error enum across parsing and engine calls.
 pub use error::{ComposeError, Result};

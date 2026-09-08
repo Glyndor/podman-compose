@@ -246,7 +246,12 @@ async fn zero_pool_size_means_no_pool() {
 
 /// Forcibly drop a pooled connection by poisoning it, then verify the next
 /// acquire gets a fresh socket. This is the "health check, drop on broken"
-/// path: the previous connection's `JoinHandle` is aborted on release.
+/// path: the previous connection's `JoinHandle` is detached when the
+/// poisoned `PooledConn` drops (dropping a `JoinHandle` does not abort the
+/// task, it just lets it run to completion in the background; the task
+/// itself finishes once the hyper connection's IO closes, which the
+/// dropped `SendRequest` triggers). The pool hands the next acquire a
+/// fresh socket rather than a half-closed one.
 #[tokio::test]
 async fn a_poisoned_connection_is_replaced_on_next_acquire() {
 	let server = CountingServer::start().await;
@@ -272,3 +277,20 @@ async fn a_poisoned_connection_is_replaced_on_next_acquire() {
 		"a poisoned connection must be replaced; got {after_second}"
 	);
 }
+
+// Chunked-framing regression for #1740. The chunked server + test live in a
+// sibling module so the harness file stays under the soft 300-line warn. The
+// `path` attribute anchors the lookup next to this file rather than the
+// conventional `tests/chunked_tests.rs`, because this file itself is the
+// module Rust resolves from a `mod tests;` reference in the parent.
+#[path = "chunked_tests.rs"]
+mod chunked_tests;
+
+// Readiness regression for #1758. The fixture and tests live in a sibling
+// module so this harness file stays under the soft 300-line warn. The two
+// tests are multi-threaded and reproduce the "connection was not ready"
+// race the live Podman lane hit with `--connection-pool-size 8`: the
+// current_thread harness used by the rest of this pool could not see the
+// defect, which is how it survived.
+#[path = "readiness_tests.rs"]
+mod readiness_tests;

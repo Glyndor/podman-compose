@@ -18,7 +18,7 @@ impl Client {
 				return Err(e);
 			}
 		};
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = resp.read_body(Some(READ_TIMEOUT)).await?;
 		Self::check_status(status, &body)
 	}
 }

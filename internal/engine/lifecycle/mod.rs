@@ -52,6 +52,12 @@ pub(crate) struct ExistingContainer {
 	config_hash: Option<String>,
 	/// The 64-hex ID of the image the container was created from.
 	image_id: String,
+	/// The `podup.service` label, when present. Carried alongside the bulk
+	/// project's container list so the scale-reconciliation step in `run_up`
+	/// can filter the same in-memory snapshot instead of issuing one
+	/// per-service `/containers/json` against an already-fetched data set
+	/// (#1747).
+	service: Option<String>,
 }
 
 impl Engine {
@@ -135,6 +141,9 @@ pub(super) fn container_rm_path(name: &str, remove_volumes: bool) -> String {
 
 #[cfg(test)]
 mod drop_recheck_tests;
+#[cfg(test)]
+#[path = "scale_request_tests.rs"]
+mod scale_request_tests;
 #[cfg(test)]
 mod scale_tests;
 #[cfg(test)]

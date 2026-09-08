@@ -154,6 +154,7 @@ pub(super) fn resolve_modifier(
 	modifier: Modifier,
 	vars: &HashMap<String, String>,
 	depth: usize,
+	spent: &mut usize,
 ) -> Result<String> {
 	let value = vars.get(&var);
 
@@ -174,21 +175,21 @@ pub(super) fn resolve_modifier(
 		// than overflowing the stack.
 		Modifier::DefaultIfUnsetOrEmpty(default) => match value {
 			Some(v) if !v.is_empty() => Ok(v.clone()),
-			_ => super::substitute_depth(&default, vars, depth + 1),
+			_ => super::substitute_depth(&default, vars, depth + 1, spent),
 		},
 
 		Modifier::DefaultIfUnset(default) => match value {
 			Some(v) => Ok(v.clone()),
-			None => super::substitute_depth(&default, vars, depth + 1),
+			None => super::substitute_depth(&default, vars, depth + 1, spent),
 		},
 
 		Modifier::AltIfSetAndNonEmpty(alt) => match value {
-			Some(v) if !v.is_empty() => super::substitute_depth(&alt, vars, depth + 1),
+			Some(v) if !v.is_empty() => super::substitute_depth(&alt, vars, depth + 1, spent),
 			_ => Ok(String::new()),
 		},
 
 		Modifier::AltIfSet(alt) => match value {
-			Some(_) => super::substitute_depth(&alt, vars, depth + 1),
+			Some(_) => super::substitute_depth(&alt, vars, depth + 1, spent),
 			None => Ok(String::new()),
 		},
 

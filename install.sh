@@ -39,7 +39,40 @@ fail() {
 }
 
 usage() {
-	sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//'
+	# The previous version read the help from this script's own header
+	# via `sed -n '3,21p' "$0"`. That works for `./install.sh --help`
+	# and `bash install.sh --help`, but fails the documented pipe
+	# `curl ... | bash -s -- --help` because $0 there is the program
+	# name "bash", not the script path: the helper tries to read a file
+	# literally named "bash" and exits with `sed: can't read bash`.
+	# The header is also unreachable from /dev/stdin in that mode;
+	# bash has already consumed the piped script bytes for parsing by
+	# the time the function runs, so /dev/stdin is empty.
+	#
+	# The heredoc duplicates the header deliberately. The script header
+	# is the source of truth by convention, so any drift between the two
+	# is detected by `install_help_matches_header` in the shell suite.
+	cat <<'USAGE'
+podup installer.
+
+Default: download a release binary, verify it and install it to a directory.
+Updates come from `podup update`.
+
+  curl -fsSL https://glyndor.net/podup/install/unix | bash
+
+--apt (Debian/Ubuntu, amd64/arm64): set up the Glyndor apt repository and install
+with apt. Updates - including signing-key renewals - come from `apt upgrade`.
+
+  curl -fsSL https://glyndor.net/podup/install/unix | bash -s -- --apt
+
+--skip-podman-check: bypass the local-Podman-version precheck. Use this when
+the engine podup will use is on a different host than the local podman
+binary (e.g. a `podman machine` VM, or a remote socket).
+
+Environment:
+  PODUP_VERSION      Release tag to install (e.g. v0.3.0). Default: latest.
+  PODUP_INSTALL_DIR  Installation directory (binary mode). Default: /usr/local/bin.
+USAGE
 	exit 0
 }
 
@@ -97,10 +130,13 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 download() {
 	# download <url> <dest>
 	#
-	# --proto '=https' only restricts the initial URL: GitHub release assets
-	# redirect to its CDN, and that redirect is governed by --proto-redir, not
-	# --proto, so it needs its own pin - this is the fix that actually closes
-	# the downgrade (an unpinned redirect could otherwise fall back to http).
+	# --proto '=https' denies http, and that denial carries over to redirects:
+	# curl's own manual says protocols denied by --proto are not overridden by
+	# --proto-redir. Measured on curl 8.18.0 and 7.81.0 against a local https
+	# origin answering 302 to an http URL: the redirect is refused with or
+	# without --proto-redir. The pin stays as a second lock, because the bare
+	# form --proto https adds rather than restricts, and under that spelling
+	# --proto-redir is the only thing holding the redirect to https.
 	# --max-filesize caps the response at 200 MB, but only on curl that honours
 	# it: it aborts mid-stream on curl >= 8.4.0, or on any curl version when the
 	# server sends Content-Length. It does NOT bound the size on an older curl
@@ -240,6 +276,12 @@ PYEOF
 # past the `3.7.0` check, which is the rollback case this gate exists
 # to reject. Matches the Rust behaviour token-for-token.
 #
+# The cleanup of the staged file goes through `run_root`: when the install
+# ran via sudo the staged binary is owned by root, and a bare `rm -f` from
+# the caller would fail silently, leaving a root-owned executable in
+# /usr/local/bin while this function printed that the file had been
+# removed. `run_root rm` elevates the same way the install itself did.
+#
 #   verify_version_self_test <staged-path> <resolved-tag>
 verify_version_self_test() {
 	local staged="$1" expected_tag="$2"
@@ -250,7 +292,7 @@ verify_version_self_test() {
 	# hidden name; reading --version requires execute permission but no
 	# read/ownership on the parent.
 	if ! reported="$("$staged" --version 2>/dev/null)"; then
-		rm -f "$staged" 2>/dev/null || true
+		run_root rm -f "$staged" 2>/dev/null || true
 		fail "Could not run ${staged} --version to self-test the staged binary"
 	fi
 
@@ -262,7 +304,7 @@ verify_version_self_test() {
 			return 0
 		fi
 	done
-	rm -f "$staged" 2>/dev/null || true
+	run_root rm -f "$staged" 2>/dev/null || true
 	log_error "Staged binary reports '${reported}', expected ${expected_tag}"
 	fail "Refusing to install: staged binary's --version does not match the resolved release tag (possible rollback) - the staged file has been removed"
 }

@@ -27,7 +27,7 @@ mod put;
 mod stream;
 pub(crate) use encode::{is_valid_object_name, urlencoded};
 pub(crate) use hijack::Hijacked;
-use pool::ConnPool;
+use pool::{ConnPool, PoolGuard};
 use stream::SocketStream;
 
 /// The request body every call shares. A boxed body so a fully-buffered
@@ -189,7 +189,7 @@ impl Client {
 		})
 	}
 
-	/// Send a request and return the raw response.
+	/// Send a request and return the buffered response.
 	///
 	/// `response_timeout` bounds how long we wait for the server to return the
 	/// response head. Pass `Some` (the default [`READ_TIMEOUT`]) for ordinary and
@@ -198,11 +198,22 @@ impl Client {
 	/// Pass `None` only for endpoints that legitimately block server-side before
 	/// the head (e.g. `wait?condition=stopped`), whose callers impose an outer
 	/// budget.
+	///
+	/// Returns a [`BufferedResponse`] rather than a bare `Response<Incoming>`
+	/// so the pool guard that holds the HTTP/1.1 connection checked out is
+	/// kept alive across the body read. Releasing the guard before the body
+	/// is drained lets the next acquirer write a new request to the same
+	/// socket while the previous body is still arriving; with chunked
+	/// transfer encoding (or any framing where the body length is not known
+	/// up front in the headers) that interleaves the two requests on the
+	/// wire and the parser sees garbage (#1740). The guard is private to
+	/// [`BufferedResponse`], so callers cannot release it without first
+	/// reading the body.
 	async fn send(
 		&self,
 		req: Request<BoxBody>,
 		response_timeout: Option<std::time::Duration>,
-	) -> Result<Response<Incoming>> {
+	) -> Result<BufferedResponse> {
 		tracing::debug!("libpod {} {}", req.method(), req.uri().path());
 		let mut guard = tokio::time::timeout(CONNECT_TIMEOUT, self.pool.acquire())
 			.await
@@ -225,7 +236,10 @@ impl Client {
 				if has_connection_close(&resp) {
 					guard.poison();
 				}
-				Ok(resp)
+				Ok(BufferedResponse {
+					_guard: guard,
+					resp,
+				})
 			}
 			Ok(Err(e)) => {
 				guard.poison();
@@ -279,9 +293,12 @@ impl Client {
 		}
 	}
 
-	/// Read the full response body into a `Vec<u8>`, capped at
-	/// [`MAX_RESPONSE_BYTES`] so a rogue or runaway daemon cannot exhaust memory.
-	async fn read_body(
+	/// Read the full response body off a streaming connection. Streaming
+	/// responses are tracked on the [`Client`] until it is dropped, so there
+	/// is no pool guard to coordinate with; [`BufferedResponse::read_body`]
+	/// delegates into this so both paths share the size cap and the timeout
+	/// handling.
+	async fn read_response_body(
 		resp: Response<Incoming>,
 		read_timeout: Option<std::time::Duration>,
 	) -> Result<(StatusCode, Vec<u8>)> {
@@ -390,7 +407,7 @@ impl Client {
 		if resp.status().is_success() {
 			return Ok(resp);
 		}
-		let (status, body) = Self::read_body(resp, Some(READ_TIMEOUT)).await?;
+		let (status, body) = Self::read_response_body(resp, Some(READ_TIMEOUT)).await?;
 		Self::check_status(status, &body)?;
 		unreachable!("check_status returns Err for a non-success status")
 	}
@@ -410,6 +427,50 @@ fn meets_minimum(version: &str) -> bool {
 		.next()
 		.and_then(|major| major.parse::<u64>().ok())
 		.is_some_and(|major| major >= MIN_LIBPOD_API_MAJOR)
+}
+
+/// A buffered HTTP response paired with the pool guard that keeps the
+/// underlying HTTP/1.1 connection checked out until the body is fully
+/// drained. The guard is private, so the only way to release it is to call
+/// [`Client::read_body`], which consumes the response and the guard
+/// together. Returning the response bare (without the guard) was the
+/// original bug: between `send` and `read_body` the guard dropped, the
+/// connection landed back in the idle queue, and the next acquirer could
+/// write a new request to the same socket while the previous body was
+/// still arriving. With `Transfer-Encoding: chunked` (or any framing where
+/// the body length is not declared up front in the headers) that
+/// interleaves the two requests on the wire and the parser sees garbage
+/// (#1740).
+pub(crate) struct BufferedResponse {
+	// Held by name only; never read. Its drop runs at the end of
+	// `read_body`'s scope, AFTER the body has been drained. Drop order in
+	// Rust is reverse declaration order, so the body is dropped first and
+	// the guard last.
+	_guard: PoolGuard,
+	resp: Response<Incoming>,
+}
+
+impl BufferedResponse {
+	/// The response headers, borrowed without releasing the guard. Callers
+	/// that branch on status or read a response-specific header must still
+	/// call [`BufferedResponse::read_body`] on the returned value to release
+	/// the connection cleanly.
+	fn headers(&self) -> &hyper::HeaderMap {
+		self.resp.headers()
+	}
+
+	/// Read the full response body off the buffered connection. Consumes
+	/// `self` so the underlying pool guard (and thus the HTTP/1.1
+	/// connection) is released only after the body is drained. A caller
+	/// that drops the [`BufferedResponse`] without calling `read_body` is
+	/// a bug: the body may still be arriving, the connection is not safe
+	/// to reuse, and the next caller will see interleaved bytes (#1740).
+	async fn read_body(
+		self,
+		read_timeout: Option<std::time::Duration>,
+	) -> Result<(StatusCode, Vec<u8>)> {
+		Client::read_response_body(self.resp, read_timeout).await
+	}
 }
 
 #[cfg(test)]

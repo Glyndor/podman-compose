@@ -411,3 +411,32 @@ fn cleanup_stale_backup_is_a_no_op_without_a_leftover() {
 	cleanup_stale_backup();
 	assert!(!backup.exists());
 }
+/// The Windows branch must not let a planted reparse point redirect the
+/// verified bytes, which is the invariant `FILE_FLAG_OPEN_REPARSE_POINT`
+/// buys. It is NOT that a pre-existing `tmp` is refused: both branches
+/// unlink `tmp` first on purpose, so a leftover from an interrupted
+/// update does not wedge every later one. An earlier version of this
+/// test asserted the refusal and failed on the Windows runner for that
+/// reason, which is the useful kind of failure: the assertion and the
+/// code disagreed and the code was right.
+///
+/// Windows-only: the call sits behind `#[cfg(windows)]` and cannot be
+/// exercised from a Linux host. `write_temp_never_propagates_a_special_bit_from_the_target`
+/// pins the sibling shape for the Unix branch.
+#[cfg(windows)]
+#[test]
+fn write_temp_lands_the_bytes_at_tmp_over_a_leftover_on_windows() {
+	let dir = tempfile::tempdir().expect("tempdir");
+	let target = dir.path().join("podup");
+	std::fs::write(&target, b"old").expect("write target");
+	// A leftover from an interrupted update. The contract is that it is
+	// replaced, not that it wedges the update.
+	let tmp = dir.path().join("podup.update-1234");
+	std::fs::write(&tmp, b"planted leftover").expect("write tmp");
+	write_temp(&tmp, b"verified bytes", &target).expect("write_temp must replace a leftover tmp");
+	assert_eq!(
+		std::fs::read(&tmp).expect("read tmp"),
+		b"verified bytes",
+		"the verified bytes must land at tmp, not the leftover"
+	);
+}

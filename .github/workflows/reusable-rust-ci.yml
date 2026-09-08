@@ -25,7 +25,13 @@ on:
       coverage-threshold:
         description: Minimum line coverage percentage (0 disables the gate)
         type: number
-        default: 0
+        # Pinned: a caller that passes 0 drops the coverage gate while
+        # the ruleset still requires `rust / Coverage`. The reusable
+        # carries the configured threshold here so callers can use it
+        # by omission; a PR that wants to lower it must move this
+        # default on the reusable's own diff, where the ruleset's
+        # check name stays stable by definition.
+        default: 76
       coverage-ignore-regex:
         description: Regex of file paths to exclude from coverage (e.g. code covered only by a separate DB integration job)
         type: string
@@ -37,7 +43,11 @@ on:
       extra-test-os:
         description: JSON array of extra runner images to also run tests on (e.g. '["macos-latest"]')
         type: string
-        default: "[]"
+        # Pinned: an empty default disables the Extra platforms gate
+        # while the ruleset still requires it. The configured array
+        # lives here so callers omit `with:`; a PR that wants to
+        # drop platforms moves this default on the reusable's diff.
+        default: "[\"macos-latest\", \"windows-latest\"]"
       podman:
         description: Start rootless Podman socket before running the coverage job (ubuntu-latest only)
         type: boolean
@@ -45,7 +55,13 @@ on:
       msrv:
         description: Minimum supported Rust version to verify a --locked build against (empty disables the check)
         type: string
-        default: ""
+        # Pinned: an empty default disables the MSRV job while the
+        # ruleset still requires `rust / MSRV` and the gated name
+        # `rust / MSRV (<version>)`. The configured value lives here
+        # so callers omit `with:`; a PR that wants a different MSRV
+        # moves this default on the reusable's diff, where the gate
+        # name stays stable by definition.
+        default: "1.85"
       package-check:
         description: Run cargo publish --dry-run on PRs to catch packaging breakage before tagging
         type: boolean
@@ -61,7 +77,11 @@ on:
       doc-warnings:
         description: Build the docs with -D warnings so broken doc links fail the build
         type: boolean
-        default: false
+        # Pinned: a caller that passes `false` disables the Doc
+        # warnings gate while the ruleset still requires
+        # `rust / Doc warnings`. The configured value lives here so
+        # callers omit `with:`.
+        default: true
 
 permissions:
   contents: read

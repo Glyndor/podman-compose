@@ -229,7 +229,7 @@ services:
 		"AddHost=db:10.0.0.2",
 		"Annotation=run.oci.keep=1",
 		"Network=host",
-		"PodmanArgs=--memory=512m",
+		"PodmanArgs=--memory=\"512m\"",
 		"HealthCmd=curl -f http://localhost",
 		"HealthInterval=5s",
 		"HealthRetries=3",
@@ -334,7 +334,7 @@ networks:
 		"LogDriver=journald",
 		"LogOpt=tag=mytag",
 		"NetworkAlias=web-alias",
-		"PodmanArgs=--memory=256m",
+		"PodmanArgs=--memory=\"256m\"",
 	] {
 		assert!(c.contains(needle), "missing `{needle}` in:\n{c}");
 	}

@@ -57,8 +57,22 @@ pub(super) fn pack_path(
 /// - `dst` does not exist and the source is a directory: `dst` is created and the
 ///   source's *contents* are copied into it (matching `docker cp`).
 pub(super) fn extract_archive(tar_bytes: &[u8], dst: &Path) -> Result<()> {
-	if dst.is_dir() {
-		return extract_tar_guarded(tar_bytes, dst);
+	// `symlink_metadata` rather than `is_dir` so a destination that is a
+	// symlink is recognised as a symlink, not the directory it points at.
+	// Following the symlink here would extract the archive into the wrong
+	// place (the target directory) and, once `flatten_single_wrapper_dir`
+	// runs over the extracted contents, move the target's files out of it
+	// (#1736). Refuse before anything touches the filesystem.
+	if let Ok(meta) = std::fs::symlink_metadata(dst) {
+		if meta.file_type().is_symlink() {
+			return Err(ComposeError::Copy(format!(
+				"cp: refusing symlink destination: {}",
+				dst.display()
+			)));
+		}
+		if meta.is_dir() {
+			return extract_tar_guarded(tar_bytes, dst);
+		}
 	}
 	// `dst` is not an existing directory.
 	if !archive_contains_dir(tar_bytes)? {
@@ -141,12 +155,25 @@ fn archive_contains_dir(tar_bytes: &[u8]) -> Result<bool> {
 /// basename (`srcdir/...`). When that lands in a freshly-created `dst`, docker
 /// puts the source's *contents* directly in `dst`, so collapse the lone wrapper
 /// level. A no-op unless `dst` holds exactly one entry and it is a directory.
+///
+/// The directory check goes through `symlink_metadata` so a wrapper that is
+/// a symlink is recognised as a symlink, not the directory it points at. A
+/// compromised container can plant such an entry: following the symlink would
+/// read the target's contents and rename them into `dst`, emptying an
+/// out-of-archive directory (#1736). The wrapper is left in place.
 fn flatten_single_wrapper_dir(dst: &Path) -> Result<()> {
 	let mut children: Vec<std::path::PathBuf> = std::fs::read_dir(dst)
 		.map_err(ComposeError::Io)?
 		.filter_map(|e| e.ok().map(|e| e.path()))
 		.collect();
-	if children.len() != 1 || !children[0].is_dir() {
+	if children.len() != 1 {
+		return Ok(());
+	}
+	let wrapper = &children[0];
+	if !std::fs::symlink_metadata(wrapper)
+		.map(|m| m.is_dir())
+		.unwrap_or(false)
+	{
 		return Ok(());
 	}
 	let wrapper = children.remove(0);
@@ -302,3 +329,7 @@ fn sanitize_extracted_mode(_path: &Path, _mode: u32) {}
 #[cfg(test)]
 #[path = "archive_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "archive_symlink_tests.rs"]
+mod symlink_tests;

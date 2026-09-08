@@ -35,10 +35,25 @@ use super::{BoxBody, PodmanError, Result};
 /// Default cap on the number of live (idle + in-use) buffered connections held
 /// to a single libpod socket. **The pool is opt-in**: a cap of `0` (the
 /// default) means "no pool", and every acquire opens a fresh connection.
-/// This is the previous behaviour and is what the live-Podman lane
-/// regression test relied on. To opt in to connection reuse, set the
-/// `--connection-pool-size` CLI flag or `PODUP_LIBCOD_POOL` env to a
-/// positive value. Tunable via
+///
+/// It stays opt-in on purpose. The pool is a behaviour change that needs to
+/// be turned on deliberately, not something every fresh install silently
+/// picks up. The previous attempts to flip the default on failed because
+/// hyper advertises readiness from its WRITE side after the READ side has
+/// published body completion (`proto/h1/dispatch.rs:173-175`); on a
+/// multi-threaded runtime a caller that just finished reading the body can
+/// release the guard, reacquire it, and `send_request` before the driver
+/// has polled the WRITE side and announced readiness, which surfaces as
+/// `Canceled, "connection was not ready"` (#1758). `acquire` now awaits
+/// `SendRequest::ready()` before handing the connection out, so the call
+/// sees the same view the driver does; the four lifecycle cases that
+/// refused the pool on a real Podman socket
+/// (`up_scale_creates_replicas_and_down_removes_them`,
+/// `restart_scaled_service_all_replicas`,
+/// `depends_on_scaled_service_completed`,
+/// `top_skips_a_stopped_service_and_reports_the_rest`) close in the test
+/// harness. The default still does not move: opt in explicitly with
+/// `--connection-pool-size` or `PODUP_LIBPOD_POOL`. Tunable via
 /// [`Client::with_pool_size`](super::Client::with_pool_size).
 pub(super) const DEFAULT_POOL_SIZE: usize = 0;
 
@@ -66,6 +81,26 @@ struct PoolInner {
 	idle: VecDeque<PooledConn>,
 	live_count: usize,
 	closed: bool,
+}
+
+/// What to do next, after [`ConnPool::acquire`] examined the pool under
+/// the lock. Three branches; each one runs outside the lock so the
+/// pool is not blocked on the I/O it has to do.
+enum AcquireStep {
+	/// Pop an idle connection and await `SendRequest::ready()` on it
+	/// before handing it out. The pool's contract used to be "guard
+	/// returned is hyper ready and reusable"; it is now "guard
+	/// returned is hyper ready and reusable, after `ready()` returns
+	/// without error" (#1758).
+	AwaitReady(PooledConn),
+	/// Open a fresh tracked connection. A slot in `live_count` was
+	/// already reserved under the lock, so the open runs outside the
+	/// lock and any failure gives the slot back.
+	Open(String),
+	/// The pool is at its cap. Open a transient connection that is
+	/// not tracked in `live_count` and not returned to the idle
+	/// queue; the cap is a hint for reuse, not a cap on concurrency.
+	OpenTransient,
 }
 
 /// Per-socket HTTP/1.1 connection pool. Cheap to clone; the state is behind
@@ -108,7 +143,10 @@ impl ConnPool {
 	///   return a transient guard that drops on release. This is the
 	///   pre-pool behaviour: every request opens a connection, every
 	///   release drops it.
-	/// - `cap > 0` and an idle connection is available: hand it out.
+	/// - `cap > 0` and an idle connection is available: hand it out,
+	///   but only after awaiting `SendRequest::ready()` so the caller
+	///   is never asked to write to a connection hyper's WRITE side
+	///   has not yet announced as ready (#1758).
 	/// - `cap > 0` and no idle connection: open a fresh one and track it
 	///   in the pool. If the pool is at its cap, open a transient
 	///   connection (not tracked) instead: the cap is a hint for idle
@@ -139,8 +177,12 @@ impl ConnPool {
 			tokio::pin!(waiter);
 
 			// Phase 1: try to satisfy the acquire from the pool's current
-			// state, without holding the lock across an `await`.
-			let open_slot = {
+			// state, without holding the lock across an `await`. The three
+			// outcomes are encoded as `AcquireStep`: pop an idle connection
+			// and await readiness on it (the fix for #1758), open a tracked
+			// fresh connection (within cap), or open a transient one
+			// (beyond cap).
+			let step = {
 				let mut inner = self.inner.lock().unwrap();
 				if inner.closed {
 					return Err(PodmanError::Api {
@@ -157,23 +199,56 @@ impl ConnPool {
 					inner.live_count -= 1;
 				}
 				if let Some(conn) = inner.idle.pop_front() {
+					AcquireStep::AwaitReady(conn)
+				} else if inner.live_count < self.cap {
+					inner.live_count += 1;
+					AcquireStep::Open(self.socket_path.clone())
+				} else {
+					AcquireStep::OpenTransient
+				}
+			};
+
+			match step {
+				AcquireStep::AwaitReady(mut conn) => {
+					// The idle connection was popped under the lock, but
+					// its readiness has to be awaited outside the lock or
+					// the pool would block every other acquirer while we
+					// wait. hyper announces readiness by polling the WRITE
+					// side after publishing body completion on the READ
+					// side (`proto/h1/dispatch.rs:173-175`); on a multi-
+					// threaded runtime the user task that just dropped the
+					// previous guard can call `send_request` before that
+					// announcement, and `can_send` returns false on the
+					// `Idle` state. Awaiting `ready()` parks us on the
+					// `Give` state until the driver calls `taker.want()`
+					// (#1758).
+					//
+					// `is_closed` is a fast path: a connection the server
+					// closed or that the driver tore down never becomes
+					// ready. Handing it out would fail the very next send;
+					// better to drop it here and let the next acquire open
+					// fresh.
+					if conn.sender.is_closed() {
+						let mut inner = self.inner.lock().unwrap();
+						inner.live_count -= 1;
+						drop(inner);
+						self.notify.notify_one();
+						continue;
+					}
+					if conn.sender.ready().await.is_err() {
+						let mut inner = self.inner.lock().unwrap();
+						inner.live_count -= 1;
+						drop(inner);
+						self.notify.notify_one();
+						continue;
+					}
 					return Ok(PoolGuard {
 						conn: Some(conn),
 						pool: self.clone(),
 						transient: false,
 					});
 				}
-				if inner.live_count < self.cap {
-					inner.live_count += 1;
-					Some(self.socket_path.clone())
-				} else {
-					None
-				}
-			};
-
-			// Phase 2: with the lock dropped, open the new connection.
-			if let Some(path) = open_slot {
-				match open_one(&path).await {
+				AcquireStep::Open(path) => match open_one(&path).await {
 					Ok((sender, driver)) => {
 						return Ok(PoolGuard {
 							conn: Some(PooledConn {
@@ -194,34 +269,26 @@ impl ConnPool {
 						self.notify.notify_one();
 						return Err(e);
 					}
-				}
-			}
-
-			// At cap. The cap is a hint for reuse, not a cap on concurrency:
-			// open a transient connection that is NOT tracked in the pool
-			// (no `live_count` increment, no slot to release into). A parallel
-			// caller that exceeds the cap is not throttled; it just does not
-			// reuse a socket. This is the same shape as Go's `http.Transport`,
-			// where `MaxIdleConnsPerHost` caps the idle pool while active
-			// requests can exceed it.
-			match open_one(&self.socket_path).await {
-				Ok((sender, driver)) => {
-					return Ok(PoolGuard {
-						conn: Some(PooledConn {
-							sender,
-							driver,
-							poisoned: false,
-						}),
-						pool: self.clone(),
-						transient: true,
-					});
-				}
-				Err(e) => {
-					// Transient open failed too. Fall through to the wait
-					// path below; a release on the pool side may free a slot
-					// before we re-check.
-					let _ = e;
-				}
+				},
+				AcquireStep::OpenTransient => match open_one(&self.socket_path).await {
+					Ok((sender, driver)) => {
+						return Ok(PoolGuard {
+							conn: Some(PooledConn {
+								sender,
+								driver,
+								poisoned: false,
+							}),
+							pool: self.clone(),
+							transient: true,
+						});
+					}
+					Err(e) => {
+						// Transient open failed too. Fall through to the
+						// wait path below; a release on the pool side may
+						// free a slot before we re-check.
+						let _ = e;
+					}
+				},
 			}
 
 			// Both pool and transient paths exhausted: wait for the next
@@ -312,8 +379,10 @@ impl Drop for PoolGuard {
 		if let Some(conn) = self.conn.take() {
 			// A transient connection was opened because the pool was at cap;
 			// it was never tracked in `live_count` and there is no slot to
-			// release into. Drop it directly. The background `driver` task
-			// aborts when the socket closes; the `SendRequest` is dropped.
+			// release into. Drop it directly. Dropping the `JoinHandle`
+			// detaches the driver task rather than aborting it; the task
+			// runs to completion once the dropped `SendRequest` signals
+			// the hyper connection to close its IO half.
 			if self.transient {
 				return;
 			}
