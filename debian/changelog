@@ -1,14 +1,46 @@
 podup (5.9.2) unstable; urgency=medium
 
+  * SECURITY: a compose file could smuggle arbitrary `podman run` and
+    `podman volume create` flags through the generated Quadlet units. A
+    `security_opt` entry such as "apparmor=unconfined --privileged --net=host
+    -v /:/hostfs" reached podman as separate flags, so a hostile file could
+    run privileged on the host network with the host root bind-mounted, and
+    neither the `privileged` warning nor the `audit` finding said anything.
+    Every value podup interpolates into a unit is quoted now, on both halves
+    of a key=value, and `%` is doubled so systemd does not expand it.
+  * SECURITY: `autostart install --mode quadlet`, the command that writes and
+    starts the units, skipped the validator that `generate quadlet` runs. The
+    same file could be refused by one command and installed by the other.
+  * SECURITY: `cp` from a container followed a symlink planted in the archive
+    and moved the contents of the directory it pointed at, so a compromised
+    container could empty a directory outside the copy.
+  * SECURITY: two ways to switch off the YAML alias guards, an apostrophe in a
+    plain scalar and a quote inside the other quote, let a small file expand
+    to gigabytes. Interpolation is also bounded across the whole document now,
+    not one scalar at a time.
+  * SECURITY: on Windows, `.dockerignore` patterns never matched anything
+    below the top level, because the path was compared with the platform
+    separator against a pattern written with `/`. An ignored subdirectory was
+    sent to the builder anyway.
+  * `logs` no longer stops at about 1 MiB and exits 0. The cap counted every
+    byte ever received rather than what was still held, so a long stream of
+    small frames tripped it.
+  * `audit` reads the value the engine will use rather than the field as
+    written: `mem_limit: not-a-size` is no longer reported as a memory limit,
+    and a dangerous `cap_add` is named with the reason it is dangerous.
+  * `top` fetches the project's containers once instead of once per service,
+    and `images` inspects each image once instead of once per service.
+  * The build board no longer redraws itself down the terminal when a builder
+    writes several lines in one chunk.
+  * The libpod connection pool no longer hands out a connection before hyper
+    is ready for it. The pool stays off by default.
+  * `podup cp` and the build context walk keep `.dockerignore` re-inclusion
+    working: a `!vendor/keep.txt` under an ignored `vendor/` survives again.
   * `audit` stops reporting `unpinned_image` against a tag the service builds
-    itself: a `build:` section makes the tag a local output, not an unpinned
-    pull, so the finding was noise on every compose file that builds.
-  * `audit` matches `secret_in_environment` on name segments rather than
-    substrings, so a variable whose name merely contains a flagged word, for
-    example `PASSWORD_FILE_PATH` alongside `NOT_A_PASSWORD_HINT`, is no longer
-    reported on the substring alone.
+    itself, and matches `secret_in_environment` on name segments rather than
+    substrings.
 
- -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Mon, 07 Sep 2026 00:05:00 -0500
+ -- Jaro-c <75870284+Jaro-c@users.noreply.github.com>  Mon, 08 Sep 2026 20:25:00 -0500
 
 podup (5.9.1) unstable; urgency=medium
 
