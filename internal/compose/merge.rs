@@ -77,7 +77,11 @@ pub(super) fn interpolated_value(
 	guard_alias_expansion(content)?;
 	let mut value: serde_yaml::Value = serde_yaml::from_str(content)?;
 	if let Some(vars) = vars {
-		interpolate_value(&mut value, vars)?;
+		// One budget for the whole document. The per-scalar cap cannot see
+		// repetition spread across scalars, which is the shape that reached
+		// 5.27 GB with no single substitution over 1 MiB.
+		let mut spent = 0usize;
+		interpolate_value(&mut value, vars, &mut spent)?;
 	}
 	apply_merge_keys(&mut value);
 	Ok(value)
@@ -88,10 +92,14 @@ pub(super) fn interpolated_value(
 /// Mapping values and sequence items are coerced through [`interpolate_scalar`]
 /// (so an interpolated numeric/boolean keeps its YAML type, matching
 /// docker-compose's typed fields); mapping keys are interpolated as plain text.
-fn interpolate_value(value: &mut serde_yaml::Value, vars: &HashMap<String, String>) -> Result<()> {
+fn interpolate_value(
+	value: &mut serde_yaml::Value,
+	vars: &HashMap<String, String>,
+	spent: &mut usize,
+) -> Result<()> {
 	match value {
 		serde_yaml::Value::String(s) if s.contains('$') => {
-			*value = interpolate_scalar(s, vars)?;
+			*value = interpolate_scalar(s, vars, spent)?;
 		}
 		serde_yaml::Value::Sequence(seq) => {
 			// Skip the recursion when no element carries a `$`: a 100-service file
@@ -102,7 +110,7 @@ fn interpolate_value(value: &mut serde_yaml::Value, vars: &HashMap<String, Strin
 				return Ok(());
 			}
 			for item in seq.iter_mut() {
-				interpolate_value(item, vars)?;
+				interpolate_value(item, vars, spent)?;
 			}
 		}
 		serde_yaml::Value::Mapping(map) => {
@@ -119,7 +127,7 @@ fn interpolate_value(value: &mut serde_yaml::Value, vars: &HashMap<String, Strin
 			let mut rebuilt = serde_yaml::Mapping::with_capacity(taken.len());
 			for (key, mut val) in taken {
 				let key = interpolate_key(key, vars)?;
-				interpolate_value(&mut val, vars)?;
+				interpolate_value(&mut val, vars, spent)?;
 				rebuilt.insert(key, val);
 			}
 			*map = rebuilt;
@@ -173,8 +181,12 @@ fn value_needs_interp(value: &serde_yaml::Value) -> bool {
 /// would otherwise have `serde_yaml::from_str` build the full Value tree
 /// (allocating memory proportional to refs × anchor size) before we discard
 /// the result and keep the raw string.
-fn interpolate_scalar(s: &str, vars: &HashMap<String, String>) -> Result<serde_yaml::Value> {
-	let resolved = crate::substitute::substitute(s, vars)?;
+fn interpolate_scalar(
+	s: &str,
+	vars: &HashMap<String, String>,
+	spent: &mut usize,
+) -> Result<serde_yaml::Value> {
+	let resolved = crate::substitute::substitute_budgeted(s, vars, spent)?;
 	if resolved.is_empty() {
 		return Ok(serde_yaml::Value::String(String::new()));
 	}
