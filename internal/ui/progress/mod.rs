@@ -227,6 +227,31 @@ pub fn start_anchored(
 	emit(sink, kind, name, verb);
 }
 
+/// The lines one stream chunk contributes to a row's tail.
+///
+/// A builder writes several lines in one chunk, and the repaint arithmetic
+/// counts entries: a note holding `\n` is drawn as several terminal rows and
+/// counted as one, so `cursor_up(painted)` lands short and every later
+/// repaint erases too few lines (#1733). Splitting here keeps the invariant
+/// `Region` documents, that one entry is one row.
+///
+/// `split('\n')` rather than `lines()` on purpose: `lines()` also swallows a
+/// trailing `\r`, and the `trim()` here handles `\r\n` anyway, so the two
+/// responsibilities stay apart. Empty parts are dropped, matching what a
+/// single blank line already did.
+fn note_lines(line: &str) -> impl Iterator<Item = &str> {
+	line.split('\n')
+		.map(str::trim)
+		.filter(|part| !part.is_empty())
+}
+
+/// Test hook for [`note_lines`], which is otherwise only reachable through a
+/// live region the cargo-test runner cannot give us.
+#[cfg(test)]
+pub(crate) fn note_lines_for_tests(line: &str) -> Vec<&str> {
+	note_lines(line).collect()
+}
+
 /// Hand one line of a row's stream output to the renderer.
 ///
 /// On a live terminal the line is appended to the per-row tail kept under the
@@ -250,34 +275,49 @@ pub fn note_for(kind: &str, name: &str, line: &str) {
 	let Some(kind) = Kind::from_noun(kind) else {
 		return;
 	};
-	let trimmed = line.trim();
-	if trimmed.is_empty() {
-		return;
-	}
-	let sink = {
-		let Ok(mut slot) = SESSION.lock() else {
-			return;
-		};
-		match slot.as_mut() {
-			Some(session) => {
-				if session.region.is_some() {
-					push_note_live(&mut session.notes, kind, name, trimmed);
-					Sink::Live
-				} else {
-					Sink::Plain
-				}
-			}
-			None => Sink::None,
-		}
-	};
-	match sink {
-		Sink::Live => repaint(),
-		Sink::Plain | Sink::None => {
-			if !super::progress_enabled() {
+	// One entry per line. A builder stream chunk can carry several lines in a
+	// single write, and the repaint arithmetic counts entries: a note holding
+	// `\n` is drawn as several terminal rows but counted as one, so from that
+	// frame on `cursor_up(painted)` lands short and every repaint erases too
+	// few lines. That is the eighty-times-scrolled board in #1733, and
+	// `Region`'s own doc comment predicts it: it says a line that wraps makes
+	// the terminal count two rows where this counted one. An embedded newline
+	// breaks the same invariant by a different route, and the width fit does
+	// not cover it because `chars().take(width)` counts `\n` as an ordinary
+	// character.
+	//
+	// It also restores `MAX_NOTES_PER_ROW`, which a single arbitrarily tall
+	// entry defeats.
+	//
+	// `split('\n')` rather than `lines()` on purpose: `lines()` also swallows
+	// a trailing `\r`, and the `trim()` below handles `\r\n` anyway, so this
+	// keeps the two responsibilities apart.
+	for trimmed in note_lines(line) {
+		let sink = {
+			let Ok(mut slot) = SESSION.lock() else {
 				return;
+			};
+			match slot.as_mut() {
+				Some(session) => {
+					if session.region.is_some() {
+						push_note_live(&mut session.notes, kind, name, trimmed);
+						Sink::Live
+					} else {
+						Sink::Plain
+					}
+				}
+				None => Sink::None,
 			}
-			use std::io::Write;
-			let _ = writeln!(anstream::stderr(), "{name} | {trimmed}");
+		};
+		match sink {
+			Sink::Live => repaint(),
+			Sink::Plain | Sink::None => {
+				if !super::progress_enabled() {
+					return;
+				}
+				use std::io::Write;
+				let _ = writeln!(anstream::stderr(), "{name} | {trimmed}");
+			}
 		}
 	}
 }

@@ -212,6 +212,12 @@ pub fn summary(done: usize, total: usize, width: usize) -> String {
 /// Truncated by character, not by escape sequence, the same way [`render`]
 /// does it.
 pub fn render_note(line: &str, width: usize) -> String {
+	// The invariant this function relies on, asserted where it is relied on
+	// rather than only where it is produced. A note carrying `\n` is drawn as
+	// several rows and counted as one, and the repaint arithmetic then erases
+	// the wrong lines (#1733). `note_for` splits at ingestion; this catches a
+	// future path that does not.
+	debug_assert!(!line.contains('\n'), "a note must be one line: {line:?}");
 	let indented = format!(" {line}");
 	let trimmed = if width > 0 && indented.chars().count() > width {
 		indented.chars().take(width).collect::<String>()
