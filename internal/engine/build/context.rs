@@ -46,7 +46,7 @@ fn append_context<W: std::io::Write>(
 			Ok(r) => r,
 			Err(_) => return false,
 		};
-		let rel_str = rel.to_string_lossy();
+		let rel_str = to_ignore_path(rel);
 		// `skip_names` is the only way to drop a directory outright, regardless
 		// of ignore patterns (the active `.dockerignore` itself is on the
 		// list, so the builder can rewrite it).
@@ -79,7 +79,7 @@ fn append_context<W: std::io::Write>(
 		let rel = abs
 			.strip_prefix(context)
 			.map_err(|_| ComposeError::Build("path strip error".into()))?;
-		let rel_str = rel.to_string_lossy();
+		let rel_str = to_ignore_path(rel);
 		if skip_names.iter().any(|n| rel_str == *n) {
 			continue;
 		}
@@ -340,6 +340,22 @@ fn ignore_file(context: &Path) -> (&'static str, Vec<String>) {
 /// `.dockerignore` semantics: a leading `!` re-includes a path that an earlier
 /// pattern excluded. So `*.log` then `!keep.log` ignores every log except
 /// `keep.log`.
+/// A relative path in the form `.dockerignore` patterns are written in.
+///
+/// Patterns always use `/`, and `Path` on Windows yields `\`, so matching the
+/// raw string meant no pattern below the top level ever matched there:
+/// `vendor/` silently ignored nothing. The tar writer already normalises, so
+/// the entry names and the ignore check disagreed about the same file. Found
+/// by a negation test failing on the Windows runner only.
+fn to_ignore_path(rel: &std::path::Path) -> String {
+	let s = rel.to_string_lossy();
+	if std::path::MAIN_SEPARATOR == '/' {
+		s.into_owned()
+	} else {
+		s.replace(std::path::MAIN_SEPARATOR, "/")
+	}
+}
+
 /// Could any negation pattern re-include something under `dir`?
 ///
 /// Conservative on purpose: a `true` costs a descent that the leaf filter

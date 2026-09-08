@@ -612,3 +612,23 @@ fn a_negated_file_survives_under_an_ignored_directory() {
 		"the rest of the ignored directory must still be dropped, got: {names:?}"
 	);
 }
+
+#[test]
+fn ignore_matching_uses_forward_slashes_on_every_platform() {
+	// `.dockerignore` patterns always use `/`. `Path` yields `\` on Windows,
+	// so matching the raw string meant nothing below the top level was ever
+	// ignored there and `vendor/` silently did nothing. The tar writer
+	// already normalises, so the entry names and the ignore check disagreed
+	// about the same file. Caught by the negation case failing on the
+	// Windows runner and passing everywhere else.
+	let rel = std::path::Path::new("vendor").join("drop.txt");
+	assert_eq!(
+		super::to_ignore_path(&rel),
+		"vendor/drop.txt",
+		"the ignore path must be slash-separated whatever the platform uses"
+	);
+	assert!(super::is_ignored(
+		&super::to_ignore_path(&rel),
+		&["vendor/".to_string()]
+	));
+}
